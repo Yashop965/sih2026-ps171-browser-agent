@@ -1,0 +1,75 @@
+/**
+ * Extension Overlay Styles
+ * Used by SoMOverlay and other overlay components
+ */
+
+.extension-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2147483646;
+}
+
+.som-box {
+  position: absolute;
+  border: 2px solid #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.2s ease;
+}
+
+.som-box:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: #818cf8;
+}
+
+.som-label {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  background: #6366f1;
+  color: white;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+
+.privacy-ledger {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.ledger-entry {
+  padding: 8px;
+  margin-bottom: 4px;
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 4px;
+  border-left: 3px solid #6366f1;
+}
+
+.ledger-entry.detected {
+  border-left-color: #f59e0b;
+}
+
+.ledger-entry.redacted {
+  border-left-color: #10b981;
+}
+
+.latency-hud {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  font-family: 'Monaco', 'Consolas', monospace;
+}

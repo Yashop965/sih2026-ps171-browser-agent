@@ -1,0 +1,113 @@
+export interface InteractiveElement {
+  id: number;
+  tag: string;
+  role: string;
+  label: string;
+  name: string;
+  rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  isPassword: boolean;
+}
+
+export interface ARIAElement {
+  role: string;
+  name: string;
+  expanded?: boolean;
+  checked?: string;
+  required?: boolean;
+  disabled?: boolean;
+  depth: number;
+}
+
+export type PIIType = 
+  | 'AADHAAR'
+  | 'PAN'
+  | 'CREDIT_CARD'
+  | 'IFSC'
+  | 'PHONE'
+  | 'EMAIL'
+  | 'PASSWORD_FIELD'
+  | 'API_KEY'
+  | 'FACE_DETECTED'
+  | 'TEXT_PASSWORD';
+
+export interface DetectedPII {
+  type: PIIType;
+  value?: string;
+  selector: string;
+  confidence: number;
+  isVerified?: boolean;
+  redacted: boolean;
+}
+
+export interface SanitizedDOMSnapshot {
+  url: string;
+  title: string;
+  timestamp: number;
+  rawHtml: string;
+  accessibilityTree: ARIAElement[];
+  interactiveElements: InteractiveElement[];
+  detectedPII: DetectedPII[];
+}
+
+export interface SanitizedPayload {
+  url: string;
+  title: string;
+  timestamp: number;
+  interactiveElements: InteractiveElement[];
+  accessibilityTree: ARIAElement[];
+  detectedPII: Omit<DetectedPII, 'value'>[];
+  hasScreenshots: boolean;
+}
+
+export interface AgentAction {
+  type: 'CLICK' | 'TYPE' | 'SCROLL' | 'NAVIGATE' | 'WAIT' | 'COMPLETE';
+  targetId?: number;
+  text?: string;
+  url?: string;
+  direction?: 'up' | 'down';
+  amount?: number;
+  condition?: string;
+}
+
+export interface ServerResponse {
+  success: boolean;
+  action: AgentAction | null;
+  message?: string;
+  error?: string;
+  reasoning?: string;
+}
+
+export interface VisionResult {
+  type: 'OCR' | 'GROUNDING' | 'DESCRIPTION';
+  data: any;
+  boundingBoxes?: BoundingBox[];
+  text?: string;
+}
+
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  score: number;
+}
+
+export interface PrivacyLogEntry {
+  timestamp: number;
+  tabId: number;
+  url: string;
+  type: string;
+  selector: string;
+  confidence: number;
+  verified: boolean;
+  action: 'REDACTED' | 'SENT_TO_SERVER' | 'SERVER_RESPONSE' | 'EXECUTION' | 'SUCCESS' | 'FAILURE';
+  payloadSize?: number;
+  actionType?: string;
+  error?: string;
+}

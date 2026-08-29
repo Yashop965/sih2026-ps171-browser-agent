@@ -1,0 +1,33 @@
+{
+  "name": "sih2026-ps171-browser-agent",
+  "version": "1.0.0",
+  "description": "SIH 2026 PS171 — On-device Visual Perception for Light-weight Browser Agents (ISRO)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "wxt",
+    "dev:server": "python server/main.py",
+    "build": "wxt build",
+    "prepare": "wxt prepare",
+    "server:install": "pip install -r server/requirements.txt",
+    "ollama:pull": "ollama pull qwen2.5:1.5b && ollama pull Florence-2-base-ft"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
+    "onnxruntime-web": "^1.21.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^9.1.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.7.0",
+    "wxt": "^0.19.0"
+  }
+}
