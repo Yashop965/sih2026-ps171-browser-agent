@@ -24,5 +24,5 @@
 - Integration with content script via messaging
 
 ### References
-- PRD Section 4.1: https://github.com/Yashop965/sih2026-ps171-browser-agent/blob/master/docs/PRD.md#41-himanshi-frontend
+- PRD Section 4.1: https://github.com/Yashop965/sih2026-ps171-browser-agent/blob/main/docs/PRD.md#41-himanshi-frontend
 - WXT docs: https://wxt.dev/guide/essentials/popups.html
