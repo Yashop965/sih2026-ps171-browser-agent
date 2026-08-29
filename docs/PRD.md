@@ -460,42 +460,51 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
 
 ---
 
-### 4.6 Vedant (Testing, E2E Demo, Firefox Compatibility, Deployment)
+### 4.6 Vedant (Support — Co-Partner)
 
-**GitHub:** @VedantSinghal
+**GitHub:** @Vedant-Singhal
+
+**Role:** Support partner — lighter workload, assists across tasks as needed.
 
 **Primary Responsibilities:**
-- [ ] **Test Suite** (`tests/`)
+- [ ] **Testing support** — run existing test suites, report bugs
+- [ ] **Demo prep** — help set up mock portal, generate test data
+- [ ] **Firefox compatibility** — basic testing on Firefox, report issues
+- [ ] **Ad-hoc support** — assist other team members when blocked
+
+---
+
+### 4.7 Yash (Optimization + Testing Lead)
+
+**GitHub:** @Yashop965
+
+**Primary Responsibilities:**
+- [ ] **Model Quantization** (`src/lib/model.ts`)
+  - INT8 quantization pipeline
+  - ONNX optimization passes
+  - Accuracy vs size tradeoff analysis
+- [ ] **WebGPU Pipeline** (`src/workers/vision.worker.ts`)
+  - GPU tensor allocation
+  - Compute shader optimization
+  - Memory pool management
+- [ ] **Latency Profiling** (`src/lib/profiler.ts`)
+  - Performance mark/measure API
+  - Inference timing breakdown
+  - Bottleneck identification
+- [ ] **Memory Management**
+  - Worker lifecycle control
+  - Buffer pooling
+  - GC hints, leak detection
+- [ ] **Testing & E2E** (took over from Vedant)
   - Unit tests for PII detectors
   - Integration tests for vision pipeline
-  - E2E tests for full workflow
   - Performance benchmarks
-  
-- [ ] **E2E Demo Flow**
-  - Mock government portal setup
-  - Test data generation
-  - Demo script preparation
-  - Backup demo video recording
-  
-- [ ] **Firefox Compatibility**
-  - WebExtension testing
-  - WASM fallback validation
-  - Cross-browser feature matrix
-  - Bug triage and fixes
-  
+  - Demo script and backup video
 - [ ] **Deployment**
-  - Extension packaging (`.zip` for sideloading)
-  - Server Docker configuration
-  - Demo environment setup
+  - Extension packaging (`.zip`)
   - Installation guide
-  
-- [ ] **Documentation**
-  - Setup instructions
-  - API documentation
-  - Demo script
-  - Judge Q&A preparation
 
-**Deliverables:** Test suite, demo portal, deployment scripts, documentation
+**Deliverables:** Optimized models, WebGPU worker, profiler, test suite, demo assets
 
 ---
 
@@ -510,12 +519,12 @@ main (protected)
 ├── feature/yuvraj-planner-api
 ├── feature/laavannya-middleware
 ├── feature/yash-model-optimization
-└── feature/vedant-testing
+└── feature/vedant-support
 ```
 
 ### 5.2 Branch Naming Convention
 
-| Member | Branch Pattern | Protected? |
+|| Member | Branch Pattern | Protected? |
 |--------|---------------|------------|
 | Yash (Lead) | `main` | ✅ Yes |
 | Himanshi | `feature/himanshi-{component}` | No |
@@ -523,7 +532,7 @@ main (protected)
 | Yuvraj | `feature/yuvraj-{component}` | No |
 | Laavannya | `feature/laavannya-{component}` | No |
 | Yash | `feature/yash-{optimization}` | No |
-| Vedant | `feature/vedant-{testing}` | No |
+| Vedant | `feature/vedant-support` | No |
 
 ### 5.3 Workflow Rules
 
@@ -827,8 +836,8 @@ interface PlanResponse {
 | Anirudh | Frontend | @anirudh657 | Content Script, DOM Extraction, Action Executor |
 | Yuvraj | Backend | @YuvrajGora | FastAPI Server, Ollama Integration, Planner API |
 | Laavannya | Backend | TBD | Middleware, Validation, Logging, Error Handling |
-| Yash | Optimization | @Yashop965 | Model Quantization, WebGPU, Profiling, Memory |
-| Vedant | Testing | @VedantSinghal | Test Suite, E2E Demo, Firefox, Deployment |
+| Yash | Optimization + Testing | @Yashop965 | Model Quantization, WebGPU, Profiling, Tests, Demo |
+| Vedant | Support | @Vedant-Singhal | Bug reporting, Firefox testing, ad-hoc support |
 
 ---
 
