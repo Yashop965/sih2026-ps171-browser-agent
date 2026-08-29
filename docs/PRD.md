@@ -4,7 +4,7 @@
 **Institution:** ISRO  
 **Problem Statement:** SIH26171 — On-device Visual Perception for Light-weight Browser Agents  
 **Team:** B.Tech CSE — 6 members  
-**Deadline:** September 2, 2026 (7 days)  
+**Deadline:** September 2, 2026 (4 days)  
 **Repository:** https://github.com/Yashop965/sih2026-ps171-browser-agent  
 
 ---
@@ -538,10 +538,9 @@ main (protected)
 
 | Day | Focus | Merge Target |
 |-----|-------|-------------|
-| Day 1-2 | Foundation | Feature branches → staging |
-| Day 3-4 | Core features | Feature branches → main |
-| Day 5-6 | Integration | All feature branches → main |
-| Day 7 | Polish | Final merge + release tag |
+| Day 1-2 | Foundation + Core | Feature branches → staging |
+| Day 3 | Integration | All feature branches → main |
+| Day 4 | Polish | Final merge + release tag |
 
 ---
 
@@ -724,72 +723,49 @@ interface PlanResponse {
 
 ## 8. Milestone Checklist for September 2 Hackathon
 
-### Phase 1: Foundation (Days 1-2)
+### Phase 1: Foundation (Day 1 — Aug 29)
 
-**Day 1 — Monday**
+**Day 1 — Saturday**
 - [x] Initialize WXT project structure
 - [ ] Set up content script skeleton
 - [ ] Implement DOM extraction (Anirudh)
 - [ ] Create basic popup UI (Himanshi)
 - [ ] Scaffold FastAPI server (Yuvraj)
-- [ ] Set up testing infrastructure (Vedant)
+- [ ] Set up request validation middleware (Laavannya)
 
-**Day 2 — Tuesday**
+### Phase 2: Core Features (Day 2 — Aug 30)
+
+**Day 2 — Sunday**
 - [ ] Load Florence-2 ONNX in-browser (Yash)
 - [ ] Implement WebGPU inference pipeline (Yash)
 - [ ] Create SoM overlay component (Himanshi)
 - [ ] Set up background service worker (Anirudh)
-- [ ] Implement `/plan` endpoint (Yuvraj)
-- [ ] Add request validation (Laavannya)
+- [ ] Implement `/plan` endpoint with Ollama (Yuvraj)
+- [ ] Add PII detectors: Aadhaar, PAN, Luhn (Laavannya)
+- [ ] Build privacy ledger UI (Himanshi)
 
-### Phase 2: Core Features (Days 3-4)
+### Phase 3: Integration (Day 3 — Aug 31)
 
-**Day 3 — Wednesday**
-- [ ] Build PII detector module (Laavannya)
-- [ ] Implement Aadhaar Verhoeff validation (Laavannya)
-- [ ] Add PAN/card format checks (Laavannya)
-- [ ] Create privacy ledger component (Himanshi)
-- [ ] Implement password field blacklisting (Laavannya)
-- [ ] Add face detection fallback (Yash)
-
-**Day 4 — Thursday**
+**Day 3 — Monday**
 - [ ] Build action executor (Anirudh)
-- [ ] Implement click/type/scroll actions (Anirudh)
+- [ ] Connect full pipeline: DOM → vision → sanitize → plan → execute
 - [ ] Create latency HUD (Himanshi)
 - [ ] Add resource monitor (Yash)
-- [ ] Integrate Ollama client (Yuvraj)
-- [ ] Add cloud API fallback (Yuvraj)
-- [ ] Implement error handling (Laavannya)
-
-### Phase 3: Integration (Days 5-6)
-
-**Day 5 — Friday**
-- [ ] Connect full pipeline: DOM → vision → sanitize → plan → execute
-- [ ] Build demo mock government portal
+- [ ] Integrate Ollama client with fallback (Yuvraj)
+- [ ] Add error handling (Laavannya)
+- [ ] Build mock government portal form
 - [ ] Test end-to-end form filling
-- [ ] Verify privacy ledger correctness
-- [ ] Add Firefox compatibility checks (Vedant)
-- [ ] Run performance benchmarks (Yash)
 
-**Day 6 — Saturday**
-- [ ] Optimize model loading and caching
-- [ ] Polish UI components
-- [ ] Create demo script and rehearsal
-- [ ] Record backup demo video
-- [ ] Final testing on both browsers
-- [ ] Prepare judge Q&A responses
+### Phase 4: Polish & Demo (Day 4 — Sep 1)
+
+**Day 4 — Tuesday**
+- [ ] Polish UI and fix bugs
 - [ ] Create split-screen trust view
-
-### Phase 4: Presentation (Day 7)
-
-**Day 7 — Sunday**
-- [ ] Final code freeze
-- [ ] Prepare slide deck
-- [ ] Rehearse demo presentation
+- [ ] Record backup demo video (60-90s)
+- [ ] Prepare slide deck in official SIH template
+- [ ] Rehearse judge Q&A responses
 - [ ] Verify all evaluation criteria demonstrable
-- [ ] Create installation package
-- [ ] Backup all artifacts
-- [ ] Rest and prepare for judging
+- [ ] Final code freeze
 
 ### Critical Path Items
 

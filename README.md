@@ -332,69 +332,52 @@ ps171-browser-agent/
 
 ---
 
-## 📅 7-Day Timeline
+## 📅 4-Day Timeline (Aug 29 — Sep 2)
 
-| Day | Focus | Deliverables |
-|-----|-------|--------------|
-| **Day 1** | Extension Scaffold | WXT project setup, content script skeleton, DOM extraction working |
-| **Day 2** | Vision Pipeline | Florence-2 ONNX loaded in-browser via Transformers.js, bounding boxes rendered |
-| **Day 3** | SoM Overlay | Set-of-Marks numbered overlay, click-target selection UI |
-| **Day 4** | Privacy Engine | PII detectors (Aadhaar, PAN, card), password blacklisting, face blur, privacy ledger UI |
-| **Day 5** | Planner Server | FastAPI backend, Ollama integration, action JSON protocol |
-| **Day 6** | End-to-End Demo | Full autonomous form-filling flow, latency HUD, Firefox compatibility check |
-| **Day 7** | Polish & Presentation | Slide deck, demo rehearsal, performance optimization, backup plans |
+| Day | Date | Focus | Deliverables |
+|-----|------|-------|--------------|
+| **Day 1** | Aug 29 | Foundation | WXT setup, content script, DOM extraction, FastAPI skeleton |
+| **Day 2** | Aug 30 | Core Features | Florence-2 vision + SoM overlay + PII engine + privacy ledger |
+| **Day 3** | Aug 31 | Integration | Planner server, action executor, end-to-end pipeline |
+| **Day 4** | Sep 1 | Polish & Demo | Full demo flow, latency HUD, slide deck, backup video |
 
 ### Day-by-Day Breakdown
 
-**Day 1 — Foundation**
+**Day 1 — Aug 29 (Sat) Foundation**
 - [ ] Initialize WXT project: `npx wxt init`
-- [ ] Set up content script that extracts DOM + accessibility tree
-- [ ] Implement `chrome.tabs.captureVisibleTab` for screenshots
-- [ ] Basic React popup with task input
+- [ ] Set up content script that extracts DOM + accessibility tree (Anirudh)
+- [ ] Create basic popup UI with task input (Himanshi)
+- [ ] Scaffold FastAPI server with `/plan` endpoint (Yuvraj)
+- [ ] Set up request validation middleware (Laavannya)
+- [ ] Install dependencies and verify build: `npm install && npm run dev`
 
-**Day 2 — Vision**
-- [ ] Integrate Transformers.js v3 with WebGPU backend
-- [ ] Load Florence-2-base-ft ONNX from HuggingFace
-- [ ] Run model on screenshot, extract bounding boxes
-- [ ] Render overlay using canvas
+**Day 2 — Aug 30 (Sun) Core Features**
+- [ ] Load Florence-2 ONNX in-browser via Transformers.js (Yash)
+- [ ] Implement WebGPU inference pipeline (Yash)
+- [ ] Create SoM overlay component with numbered boxes (Himanshi)
+- [ ] Set up background service worker (Anirudh)
+- [ ] Implement `/plan` endpoint with Ollama integration (Yuvraj)
+- [ ] Add PII detectors: Aadhaar (Verhoeff), PAN, Luhn card (Laavannya)
+- [ ] Build privacy ledger UI (Himanshi)
 
-**Day 3 — Interaction**
-- [ ] Draw numbered Set-of-Marks on detected elements
-- [ ] Allow user to click an overlay number to select target
-- [ ] Display coordinates and element metadata
+**Day 3 — Aug 31 (Mon) Integration**
+- [ ] Build action executor (click/type/scroll/select) (Anirudh)
+- [ ] Connect full pipeline: DOM → vision → sanitize → plan → execute
+- [ ] Create latency HUD with per-step timing (Himanshi)
+- [ ] Add resource monitor (RAM, CPU, WebGPU) (Yash)
+- [ ] Integrate Ollama client with fallback logic (Yuvraj)
+- [ ] Add error handling and logging (Laavannya)
+- [ ] Build mock government portal form for demo
+- [ ] Test end-to-end form filling flow
 
-**Day 4 — Privacy (Critical — 40% of marks)**
-- [ ] Implement PII regex detectors with real validators:
-  - Aadhaar: 12-digit Verhoeff checksum
-  - PAN: AAAPM#####R format validation
-  - Credit cards: Luhn algorithm
-  - UPI/IFSC/email/phone format checks
-- [ ] Password field detection + auto-blacklist
-- [ ] Face detection (Shape Detection API + ML fallback)
-- [ ] Canvas-based blur/redaction
-- [ ] Privacy Ledger UI — live scrollable log
-- [ ] Outbound payload scanner
-
-**Day 5 — Planner**
-- [ ] FastAPI server with `/plan` and `/execute` endpoints
-- [ ] Ollama client integration with `qwen2.5:1.5b`
-- [ ] JSON action schema validation
-- [ ] Action executor in content script (click, type, scroll, select)
-
-**Day 6 — Integration & Demo**
-- [ ] Connect full pipeline: screenshot → vision → sanitize → plan → execute
-- [ ] Build demo form (mock government portal)
-- [ ] Implement latency HUD (ms per step, total time)
-- [ ] Resource monitor (RAM, CPU, WebGPU utilization)
-- [ ] Test on Firefox (WASM fallback)
-- [ ] Record demo video as backup
-
-**Day 7 — Presentation**
-- [ ] Final polish of demo flow
-- [ ] Prepare slide deck (problem, architecture, demo, results)
-- [ ] Rehearse judge Q&A (top 10 questions prepared)
-- [ ] Create split-screen trust view for live demo
+**Day 4 — Sep 1 (Tue) Polish & Demo**
+- [ ] Polish UI components and fix bugs
+- [ ] Create split-screen trust view (left=form, right=sanitized payload)
+- [ ] Record backup demo video (60-90s)
+- [ ] Prepare slide deck in official SIH template
+- [ ] Rehearse judge Q&A (top 10 questions)
 - [ ] Verify all evaluation criteria are demonstrable
+- [ ] Final code freeze
 
 ---
 
