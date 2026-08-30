@@ -31,6 +31,7 @@ interface WorkerResponse {
 }
 
 interface ModelCacheEntry {
+  id: string;
   modelId: string;
   backend: 'webgpu' | 'wasm';
   dtype: QuantizationMode;
@@ -39,7 +40,7 @@ interface ModelCacheEntry {
 }
 
 // Module-level state
-let model: Awaited<ReturnType<typeof import('@huggingface/transformers').pipeline>> | null = null;
+let model: any = null;
 let isModelReady = false;
 let currentBackend: 'webgpu' | 'wasm' = 'wasm';
 let currentDtype: QuantizationMode = 'fp32';
@@ -153,7 +154,7 @@ async function loadModel(modelId: string): Promise<void> {
       model = await pipeline('image-to-text', modelId, {
         backend: currentBackend,
         dtype: currentDtype,
-      });
+      } as any);
 
       isModelReady = true;
 
@@ -181,7 +182,7 @@ async function loadModel(modelId: string): Promise<void> {
           model = await pipeline('image-to-text', modelId, {
             backend: 'wasm',
             dtype: 'fp32',
-          });
+          } as any);
           currentBackend = 'wasm';
           currentDtype = 'fp32';
           isModelReady = true;
@@ -226,12 +227,12 @@ async function detect(image: HTMLImageElement | HTMLCanvasElement): Promise<void
       payload: { stage: 'inference', progress: 0 },
     } as WorkerResponse);
 
+    // Determine image dimensions
+    const height = 'naturalHeight' in image ? image.naturalHeight : image.height;
+    const width = 'naturalWidth' in image ? image.naturalWidth : image.width;
+
     // Allocate tensor memory for input
-    const tensorId = tensorMemoryPool.allocate([
-      image.naturalHeight ?? image.height,
-      image.naturalWidth ?? image.width,
-      3, // RGB channels
-    ], 'input_tensor');
+    const tensorId = tensorMemoryPool.allocate([height, width, 3], 'input_tensor');
 
     // Run inference
     const result = await model(image);
@@ -274,7 +275,6 @@ function extractBoxes(result: unknown): BoundingBox[] {
         if (obj.box && obj.label) {
           const box = obj.box as Record<string, number>;
           boxes.push({
-            id: idx + 1,
             label: String(obj.label),
             x: box.xmin ?? 0,
             y: box.ymin ?? 0,
@@ -299,7 +299,6 @@ function extractBoxes(result: unknown): BoundingBox[] {
           const coords = bbox as number[];
           if (coords.length >= 4) {
             boxes.push({
-              id: i + 1,
               label: Array.isArray(obj.labels) ? String(obj.labels[i]) : `Item ${i + 1}`,
               x: coords[0],
               y: coords[1],
@@ -311,7 +310,6 @@ function extractBoxes(result: unknown): BoundingBox[] {
         } else if (bbox && typeof bbox === 'object') {
           const b = bbox as { x0: number; y0: number; x1: number; y1: number };
           boxes.push({
-            id: i + 1,
             label: Array.isArray(obj.labels) ? String(obj.labels[i]) : `Item ${i + 1}`,
             x: b.x0,
             y: b.y0,
@@ -330,7 +328,6 @@ function extractBoxes(result: unknown): BoundingBox[] {
           const c = coords as number[];
           if (c.length >= 4) {
             boxes.push({
-              id: i + 1,
               label: Array.isArray(obj.labels) ? String(obj.labels[i]) : `Item ${i + 1}`,
               x: c[0],
               y: c[1],
@@ -376,6 +373,7 @@ async function cacheModelEntry(
     const store = tx.objectStore(STORE_NAME);
 
     const entry: ModelCacheEntry = {
+      id: `${modelId}_${backend}_${dtype}`,
       modelId,
       backend,
       dtype,
@@ -383,8 +381,7 @@ async function cacheModelEntry(
       accessCount: 1,
     };
 
-    const key = `${modelId}_${backend}_${dtype}`;
-    await store.put(entry, key);
+    await store.put(entry);
   } catch (error) {
     console.warn('[VisionWorker] Failed to cache model metadata:', error);
   }
@@ -406,7 +403,11 @@ async function getCachedModel(modelId: string): Promise<ModelCacheEntry | null> 
     for (const backend of backends) {
       for (const dtype of dtypes) {
         const key = `${modelId}_${backend}_${dtype}`;
-        const result = await store.get(key) as ModelCacheEntry | undefined;
+        const result = await new Promise<ModelCacheEntry | undefined>((resolve) => {
+          const req = store.get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(undefined);
+        });
         if (result) {
           return result;
         }
@@ -430,12 +431,15 @@ async function cacheModel(): Promise<void> {
     const store = tx.objectStore(STORE_NAME);
 
     // Increment access count for all entries
-    const cursor = await store.openCursor();
-    while (cursor) {
-      cursor.value.accessCount++;
-      await cursor.update();
-      cursor.advance();
-    }
+    const cursorReq = store.openCursor();
+    cursorReq.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        cursor.value.accessCount++;
+        cursor.update();
+        cursor.advance();
+      }
+    };
 
     self.postMessage({
       type: 'CACHE_INFO',

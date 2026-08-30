@@ -22,14 +22,6 @@ env.useBrowserCache = true;
 
 const MODEL_ID = 'microsoft/Florence-2-base-ft';
 
-/**
- * Florence-2 output format for grounding/detection tasks.
- * Returns normalized coordinates as {x0, y0, x1, y1}.
- */
-export interface Florence2GroundingOutput {
-  [key: string]: unknown;
-}
-
 export interface VisionOptions {
   task: 'object-detection' | 'ocr' | 'caption' | 'question-answering';
   query?: string;
@@ -46,18 +38,15 @@ export interface VisionResult {
   processingTime: number;
 }
 
-export interface PipelineConfig {
-  backend: 'webgpu' | 'wasm';
-  dtype: 'fp32' | 'fp16' | 'q4';
-  useWebGPU: boolean;
-}
+export type BackendType = 'webgpu' | 'wasm';
+export type QuantizationType = 'fp32' | 'fp16' | 'q4';
 
 class Florence2Pipeline {
-  private pipeline: ReturnType<typeof pipeline> | null = null;
+  private pipeline: any = null;
   private initialized = false;
   private usingWebGPU = false;
-  private currentBackend: 'webgpu' | 'wasm' = 'wasm';
-  private currentDtype: 'fp32' | 'fp16' | 'q4' = 'fp32';
+  private currentBackend: BackendType = 'wasm';
+  private currentDtype: QuantizationType = 'fp32';
   private loadPromise: Promise<void> | null = null;
   private options?: VisionOptions;
 
@@ -75,7 +64,7 @@ class Florence2Pipeline {
         this.currentBackend = this.usingWebGPU ? 'webgpu' : 'wasm';
 
         // Select dtype based on hardware
-        this.currentDtype = hardware.quantizationSupported ? 'fp16' : 'fp32';
+        this.currentDtype = hardware.hasFP16Support ? 'fp16' : 'fp32';
 
         const modelConfig = {
           backend: this.currentBackend,
@@ -91,7 +80,7 @@ class Florence2Pipeline {
         this.pipeline = await pipeline(
           'image-to-text',
           MODEL_ID,
-          modelConfig,
+          modelConfig as any,
         );
 
         this.initialized = true;
@@ -153,31 +142,39 @@ class Florence2Pipeline {
   }
 
   private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
-    return this.pipeline!({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const result = await this.pipeline!({
       image,
       task: '<OD>',
     });
+    return result;
   }
 
   private async runOCR(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
-    return this.pipeline!({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const result = await this.pipeline!({
       image,
       task: '<OCR>',
     });
+    return result;
   }
 
   private async runCaption(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
-    return this.pipeline!.({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const result = await this.pipeline!({
       image,
       task: '<CAP>',
     });
+    return result;
   }
 
   private async runVQA(image: HTMLCanvasElement | HTMLImageElement | string, question: string): Promise<unknown> {
-    return this.pipeline!.({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const result = await this.pipeline!({
       image,
       question,
     });
+    return result;
   }
 
   /**
@@ -189,61 +186,60 @@ class Florence2Pipeline {
     if (!result) return undefined;
 
     // Handle object detection output with explicit bboxes field
-    const groundingResult = result as Florence2GroundingOutput;
+    const obj = result as Record<string, unknown>;
 
     // Check for bboxes in various formats
-    const rawBboxes = groundingResult.bboxes;
+    const rawBboxes = obj.bboxes;
     if (Array.isArray(rawBboxes) && rawBboxes.length > 0) {
       // Case 1: Array of {x0, y0, x1, y1} objects
-      if (typeof rawBboxes[0] === 'object' && rawBboxes[0] !== null) {
-        return (rawBboxes as Array<{ x0: number; y0: number; x1: number; y1: number }>).map(
-          (bbox, i) => ({
-            x: bbox.x0,
-            y: bbox.y0,
-            width: bbox.x1 - bbox.x0,
-            height: bbox.y1 - bbox.y0,
-            label: groundingResult.labels?.[i] || `Item ${i}`,
-            score: groundingResult.scores?.[i] ?? 0.5,
-          }),
-        );
+      if (typeof rawBboxes[0] === 'object' && rawBboxes[0] !== null && !Array.isArray(rawBboxes[0])) {
+        const typedBboxes = rawBboxes as Array<{ x0: number; y0: number; x1: number; y1: number }>;
+        return typedBboxes.map((bbox, i) => ({
+          x: bbox.x0,
+          y: bbox.y0,
+          width: bbox.x1 - bbox.x0,
+          height: bbox.y1 - bbox.y0,
+          label: Array.isArray(obj.labels) ? String(obj.labels[i]) : `Item ${i}`,
+          score: Array.isArray(obj.scores) ? (obj.scores[i] as number) ?? 0.5 : 0.5,
+        }));
       }
 
       // Case 2: Array of [x0, y0, x1, y1] arrays
-      return (rawBboxes as number[][]).map((bbox, i) => ({
+      const arrayBboxes = rawBboxes as number[][];
+      return arrayBboxes.map((bbox, i) => ({
         x: bbox[0],
         y: bbox[1],
         width: bbox[2] - bbox[0],
         height: bbox[3] - bbox[1],
-        label: groundingResult.labels?.[i] || `Item ${i}`,
-        score: groundingResult.scores?.[i] ?? 0.5,
+        label: Array.isArray(obj.labels) ? String(obj.labels[i]) : `Item ${i}`,
+        score: Array.isArray(obj.scores) ? (obj.scores[i] as number) ?? 0.5 : 0.5,
       }));
     }
 
     // Handle flat coordinates format (common in Florence-2 OCR/grounding)
-    const coordinates = groundingResult.coordinates;
+    const coordinates = obj.coordinates;
     if (Array.isArray(coordinates)) {
       return (coordinates as number[][]).map((coords, i) => ({
         x: coords[0],
         y: coords[1],
         width: coords[2] - coords[0],
         height: coords[3] - coords[1],
-        label: groundingResult.labels?.[i] || `Item ${i}`,
-        score: groundingResult.scores?.[i] ?? 0.5,
+        label: Array.isArray(obj.labels) ? String(obj.labels[i]) : `Item ${i}`,
+        score: Array.isArray(obj.scores) ? (obj.scores[i] as number) ?? 0.5 : 0.5,
       }));
     }
 
     // Handle single bbox as object
-    const singleBbox = groundingResult.bbox;
+    const singleBbox = obj.bbox;
     if (singleBbox && typeof singleBbox === 'object') {
+      const b = singleBbox as { x0: number; y0: number; x1: number; y1: number };
       return [{
-        x: (singleBbox as { x0: number; y0: number; x1: number; y1: number }).x0,
-        y: (singleBbox as { x0: number; y0: number; x1: number; y1: number }).y0,
-        width: (singleBbox as { x0: number; y0: number; x1: number; y1: number }).x1 -
-               (singleBbox as { x0: number; y0: number; x1: number; y1: number }).x0,
-        height: (singleBbox as { x0: number; y0: number; x1: number; y1: number }).y1 -
-                (singleBbox as { x0: number; y0: number; x1: number; y1: number }).y0,
-        label: groundingResult.labels?.[0] || 'Item',
-        score: groundingResult.scores?.[0] ?? 0.5,
+        x: b.x0,
+        y: b.y0,
+        width: b.x1 - b.x0,
+        height: b.y1 - b.y0,
+        label: Array.isArray(obj.labels) ? String(obj.labels[0]) : 'Item',
+        score: Array.isArray(obj.scores) ? (obj.scores[0] as number) ?? 0.5 : 0.5,
       }];
     }
 
@@ -271,11 +267,11 @@ class Florence2Pipeline {
     return this.initialized;
   }
 
-  getBackend(): 'webgpu' | 'wasm' {
+  getBackend(): BackendType {
     return this.currentBackend;
   }
 
-  getDtype(): 'fp32' | 'fp16' | 'q4' {
+  getDtype(): QuantizationType {
     return this.currentDtype;
   }
 

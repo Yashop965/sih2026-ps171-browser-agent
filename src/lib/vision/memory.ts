@@ -24,7 +24,7 @@ interface PoolStats {
 
 export class TensorMemoryPool {
   private readonly MAX_MEMORY_BYTES = 200 * 1024 * 1024; // 200MB budget
-  private allocations: Map<string, TensorAllocation> = new Map();
+  private allocations = new Map<string, TensorAllocation>();
   private freeList: string[] = [];
   private nextId = 0;
   private currentBytes = 0;
@@ -175,7 +175,7 @@ export class TensorMemoryPool {
   }
 
   private calculateTensorBytes(shape: number[]): number {
-    const elements = shape.reduce((acc, size) => acc * size, 1);
+    const elements = shape.reduce((acc: number, size: number) => acc * size, 1);
     // Assume fp32 (4 bytes per float) for estimation
     return elements * 4;
   }
@@ -186,12 +186,12 @@ export class TensorMemoryPool {
     let oldestId: string | null = null;
     let oldestTimestamp = Infinity;
 
-    for (const [id, alloc] of this.allocations) {
-      if (alloc.timestamp < oldestTimestamp) {
-        oldestTimestamp = alloc.timestamp;
+    this.allocations.forEach((allocation, id) => {
+      if (allocation.timestamp < oldestTimestamp) {
+        oldestTimestamp = allocation.timestamp;
         oldestId = id;
       }
-    }
+    });
 
     if (oldestId) {
       this.free(oldestId);

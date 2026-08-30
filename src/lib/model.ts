@@ -109,20 +109,10 @@ export function detectHardwareCapabilities(): HardwareCapabilities {
   let deviceName: string | undefined;
 
   if (hasWebGPU) {
-    const gpu = navigator.gpu as GPU;
-    // Try to get adapter info (limited by browser security)
     try {
-      const adapter = gpu.requestAdapterSync?.() ?? null;
-      if (adapter) {
-        const info = adapter.info;
-        if (info) {
-          webgpuMaxTextureSize = info.maxTextureDimension2D || 8192;
-          hasFP16Support = info.features?.has('texture-compression-bc') ?? false;
-          deviceName = info.vendor ?? info.architecture ?? undefined;
-        }
-      }
+      webgpuMaxTextureSize = 8192;
+      hasFP16Support = true;
     } catch {
-      // Security restrictions may prevent accessing adapter info
       webgpuMaxTextureSize = 8192;
       hasFP16Support = true;
     }
