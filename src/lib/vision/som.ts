@@ -1,6 +1,6 @@
 /**
  * Set-of-Marks (SoM) Renderer
- * 
+ *
  * Renders numbered bounding boxes on detected UI elements
  * for vision model grounding and human review
  */
@@ -41,7 +41,7 @@ export class SomRenderer {
       opacity: 0.9;
     `;
     document.body.appendChild(this.canvas);
-    
+
     this.ctx = this.canvas.getContext('2d')!;
     this.options = {
       fontSize: 14,
@@ -50,7 +50,7 @@ export class SomRenderer {
       showLabels: true,
       ...options,
     };
-    
+
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -78,11 +78,11 @@ export class SomRenderer {
 
   private render(): void {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    
+
     this.ctx.font = `${this.options.fontSize}px Arial`;
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    
+
     for (const mark of this.marks) {
       this.drawMark(mark);
     }
@@ -90,27 +90,27 @@ export class SomRenderer {
 
   private drawMark(mark: Mark): void {
     const { x, y, width, height, id, label } = mark;
-    
+
     // Draw box
     this.ctx.strokeStyle = this.options.boxColor;
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(x, y, width, height);
-    
+
     // Fill background
     this.ctx.fillStyle = this.options.backgroundColor;
     this.ctx.fillRect(x, y, width, height);
-    
+
     // Draw label
     if (this.options.showLabels) {
       // Label background
       const textWidth = this.ctx.measureText(`${id}`).width;
       this.ctx.fillStyle = this.options.boxColor;
       this.ctx.fillRect(x, y - 20, textWidth + 8, 20);
-      
+
       // Label text
       this.ctx.fillStyle = '#000';
       this.ctx.fillText(`${id}`, x + textWidth / 2 + 4, y - 10);
-      
+
       // Element label below
       if (label) {
         this.ctx.fillStyle = '#FFF';
