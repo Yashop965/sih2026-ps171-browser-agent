@@ -25,7 +25,8 @@ defineContentScript({
         url: window.location.href,
         title: document.title,
         timestamp: Date.now(),
-        rawHtml: html,
+        // SECURITY: Never send raw HTML — it contains user input (passwords, Aadhaar, PAN)
+        // Instead send sanitized interactive elements only
         accessibilityTree: a11yTree,
         interactiveElements,
         detectedPII: piiDetector.scanDocument(),
@@ -287,7 +288,7 @@ class PIIDetector {
   }
   
   // PAN validation
-  private validatePAN.pan: string): boolean {
+  private validatePAN(pan: string): boolean {
     if (!/^[A-Z]{5}\d{4}[A-Z]{1}$/.test(pan)) return false;
     
     const chars = pan.split('');
