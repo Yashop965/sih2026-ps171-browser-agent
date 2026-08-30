@@ -89,38 +89,7 @@ This document tracks individual contributions for the Smart India Hackathon 2026
   - Staleness checks before actions
 - **Commit:** Merged in PR #23
 
----
-
-## anirudh657 (Anirudh Arora)
-
-**Role:** Backend Developer, DOM Extraction Engine
-
-### Completed Work
-
-#### DOM Extraction & Action Executor (Issue #8, #9, PR #23)
-- **Files:**
-  - `src/lib/dom.ts` (189 lines) — DOM extraction engine
-  - `src/lib/actions.ts` (220 lines) — Action executor
-  - `src/entrypoints/content.ts` (60 lines) — Content script entrypoint
-- **Deliverables:**
-  - Finds all buttons, links, and input fields on the page
-  - Skips hidden elements, extracts proper labels
-  - Assigns unique ID to each interactive element for targeting
-  - Implements click, type, scroll, select, navigate actions
-  - Retry logic on action failures
-  - **Privacy-critical:** Never reads `element.value` — only extracts label and type
-  - Fixed WXT entrypoint structure (was missing, blocking builds)
-- **Testing:** Tested on w3schools, incometax.gov.in, demoqa.com
-- **Commit:** `877e1f8`
-- **PR:** #23 (merged)
-
-#### Key Technical Achievements
-1. **Privacy-by-Design:** DOM extraction deliberately avoids reading input values
-2. **Cross-site Compatibility:** Works across different website structures
-3. **Error Resilience:** Actions retry once on failure
-4. **WXT Compliance:** Established correct entrypoint structure for team
-
----
+|---
 
 ## YuvrajGora
 
