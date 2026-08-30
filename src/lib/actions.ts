@@ -31,6 +31,13 @@ function resolve(targetId: number | undefined): Element {
     if (!el) {
         throw new Error(`element ${targetId} not found — page may have changed`);
     }
+    // Staleness check: the page may have re-rendered between extract() and
+    // execute(), leaving us holding a node that is no longer in the document.
+    // Acting on it would silently do nothing, so fail loudly instead and let
+    // the planner re-extract.
+    if (!el.isConnected) {
+        throw new Error(`element ${targetId} is stale — page changed since extract()`);
+    }
     return el;
 }
 
@@ -77,7 +84,17 @@ function doClick(action: Action) {
     const opts = { bubbles: true, cancelable: true, view: window };
     el.dispatchEvent(new MouseEvent('mousedown', opts));
     el.dispatchEvent(new MouseEvent('mouseup', opts));
-    el.dispatchEvent(new MouseEvent('click', opts));
+
+    // Prefer the native click(). It runs the element's real activation
+    // behaviour — following an <a href>, submitting a form, toggling a
+    // checkbox — which a synthetic MouseEvent does not always trigger.
+    // Both HTMLElement and SVGElement have click(); anything else falls
+    // back to a dispatched event.
+    if (typeof (el as HTMLElement).click === 'function') {
+        (el as HTMLElement).click();
+    } else {
+        el.dispatchEvent(new MouseEvent('click', opts));
+    }
 }
 
 function doType(action: Action) {
@@ -170,9 +187,10 @@ export async function execute(action: Action): Promise<ActionResult> {
         await new Promise((r) => setTimeout(r, 120));
     };
 
-    const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('action timed out')), ACTION_TIMEOUT_MS)
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('action timed out')), ACTION_TIMEOUT_MS);
+    });
 
     try {
         await Promise.race([run(), timeout]);
@@ -184,6 +202,9 @@ export async function execute(action: Action): Promise<ActionResult> {
             error: err instanceof Error ? err.message : String(err),
             durationMs: performance.now() - started,
         };
+    } finally {
+        // Without this every action leaves a live 5s timer behind.
+        if (timer !== undefined) clearTimeout(timer);
     }
 }
 
