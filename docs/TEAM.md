@@ -87,7 +87,7 @@ This document tracks individual contributions for the Smart India Hackathon 2026
   - Action executor with click, type, scroll support
   - Added `chrome: any` fix for type safety
   - Staleness checks before actions
-|- **Commit:** Merged in PR #23
+- **Commit:** Merged in PR #23
 
 ---
 
