@@ -21,7 +21,9 @@ export interface ActionResult {
 
 const ACTION_TIMEOUT_MS = 5000;
 
-function resolve(targetId: number | undefined): HTMLElement {
+// Returns Element, not HTMLElement. The registry legitimately holds SVG icon
+// buttons, so every caller below checks before using HTMLElement-only methods.
+function resolve(targetId: number | undefined): Element {
     if (targetId === undefined) {
         throw new Error('targetId missing');
     }
@@ -29,13 +31,16 @@ function resolve(targetId: number | undefined): HTMLElement {
     if (!el) {
         throw new Error(`element ${targetId} not found — page may have changed`);
     }
-    return el as HTMLElement;
+    return el;
 }
 
-function scrollIntoView(el: HTMLElement) {
+function scrollIntoView(el: Element) {
     const rect = el.getBoundingClientRect();
     const offscreen = rect.top < 0 || rect.bottom > window.innerHeight;
     if (offscreen) {
+        // 'instant' is deliberate. 'auto' honours the page's own
+        // scroll-behavior: smooth, which animates the scroll and lets the next
+        // action fire before the element has arrived.
         el.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
     }
 }
@@ -45,7 +50,7 @@ function scrollIntoView(el: HTMLElement) {
 // field looks filled while React still thinks it is empty and submit fails.
 // Calling the native setter bypasses React's override, and the bubbling
 // 'input' event then tells React to sync.
-function setNativeValue(el: HTMLElement, value: string) {
+function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
     const proto =
         el instanceof HTMLTextAreaElement
             ? HTMLTextAreaElement.prototype
@@ -55,20 +60,24 @@ function setNativeValue(el: HTMLElement, value: string) {
     if (setter) {
         setter.call(el, value);
     } else {
-        (el as HTMLInputElement).value = value;
+        el.value = value;
     }
 }
 
 function doClick(action: Action) {
     const el = resolve(action.targetId);
     scrollIntoView(el);
-    el.focus?.();
 
-    // Real mouse sequence — some sites listen for mousedown, not click
+    if (el instanceof HTMLElement) {
+        el.focus();
+    }
+
+    // Real mouse sequence — some sites listen for mousedown, not click.
+    // dispatchEvent works on any Element, including SVG.
     const opts = { bubbles: true, cancelable: true, view: window };
     el.dispatchEvent(new MouseEvent('mousedown', opts));
     el.dispatchEvent(new MouseEvent('mouseup', opts));
-    el.click();
+    el.dispatchEvent(new MouseEvent('click', opts));
 }
 
 function doType(action: Action) {
@@ -76,23 +85,34 @@ function doType(action: Action) {
     const value = action.value ?? '';
 
     scrollIntoView(el);
-    el.focus();
 
-    if (el.isContentEditable) {
+    if (el instanceof HTMLElement && el.isContentEditable) {
+        el.focus();
         el.textContent = value;
         el.dispatchEvent(new InputEvent('input', { bubbles: true }));
         return;
     }
 
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+        throw new Error(`cannot TYPE into <${el.tagName.toLowerCase()}>`);
+    }
+
+    el.focus();
     setNativeValue(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function doSelect(action: Action) {
-    const el = resolve(action.targetId) as HTMLSelectElement;
-    const wanted = (action.value ?? '').toLowerCase().trim();
+    const el = resolve(action.targetId);
 
+    if (!(el instanceof HTMLSelectElement)) {
+        throw new Error(`element ${action.targetId} is not a <select>`);
+    }
+
+    scrollIntoView(el);
+
+    const wanted = (action.value ?? '').toLowerCase().trim();
     const match = Array.from(el.options).find(
         (o) =>
             o.value.toLowerCase() === wanted ||
@@ -118,12 +138,13 @@ function doScroll(action: Action) {
         left: { top: 0, left: -amount },
     }[dir];
 
+    // See note in scrollIntoView — 'instant' avoids animated scrolling.
     window.scrollBy({ ...delta, behavior: 'instant' as ScrollBehavior });
 }
 
 function doNavigate(action: Action) {
     if (!action.url) throw new Error('url missing');
-    // Only same-origin or explicit http(s) — never javascript: URLs
+    // Only http(s) — never javascript: URLs
     const target = new URL(action.url, location.href);
     if (target.protocol !== 'http:' && target.protocol !== 'https:') {
         throw new Error(`refused protocol: ${target.protocol}`);

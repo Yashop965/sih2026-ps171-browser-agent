@@ -34,6 +34,10 @@ export default defineContentScript({
             }
         );
 
-        (window as any).__agent = { extract, execute: executeWithRetry };
+        // Manual testing hook, dev builds only. Stripped from production so we
+        // don't leave a callable agent surface on every page the user visits.
+        if (import.meta.env.DEV) {
+            (window as any).__agent = { extract, execute: executeWithRetry };
+        }
     },
 });

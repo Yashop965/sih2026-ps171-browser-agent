@@ -31,6 +31,11 @@ const SELECTORS = [
 
 // Map of id -> real DOM node. The executor (#9) uses this to act on elements.
 // Rebuilt on every extract() call.
+//
+// Note: this is Element, not HTMLElement. Selectors like [role="button"] and
+// [onclick] legitimately match SVG icon buttons, which are SVGElement. Those
+// are real, clickable UI, so we keep them — actions.ts guards the calls that
+// only exist on HTMLElement instead of dropping them here.
 const registry = new Map<number, Element>();
 
 export function getElementById(id: number): Element | undefined {
@@ -58,10 +63,17 @@ function getLabel(el: Element): string {
     const aria = el.getAttribute('aria-label');
     if (aria) return aria.trim();
 
+    // aria-labelledby may list several ids separated by whitespace; the label
+    // is the concatenation of all of them, in order.
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
-        const source = document.getElementById(labelledBy);
-        if (source?.textContent) return source.textContent.trim().slice(0, 80);
+        const parts = labelledBy
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((refId) => document.getElementById(refId)?.textContent?.trim())
+            .filter(Boolean);
+
+        if (parts.length) return parts.join(' ').slice(0, 80);
     }
 
     if (el.id) {
@@ -88,11 +100,11 @@ function getLabel(el: Element): string {
         if (text) return text.slice(0, 80);
     }
 
-    if (tag === 'input') {
-        const inputType = (el as HTMLInputElement).type;
+    if (el instanceof HTMLInputElement) {
+        const inputType = el.type;
         if (inputType === 'submit' || inputType === 'button') {
-            const val = (el as HTMLInputElement).value;
             // Safe here: submit button labels are static UI text, not user data
+            const val = el.value;
             if (val) return val.trim().slice(0, 80);
         }
         return `${inputType} field`;
@@ -110,8 +122,8 @@ function getRole(el: Element): string {
     if (tag === 'button') return 'button';
     if (tag === 'select') return 'combobox';
     if (tag === 'textarea') return 'textbox';
-    if (tag === 'input') {
-        const t = (el as HTMLInputElement).type;
+    if (el instanceof HTMLInputElement) {
+        const t = el.type;
         if (t === 'checkbox') return 'checkbox';
         if (t === 'radio') return 'radio';
         if (t === 'submit' || t === 'button') return 'button';
@@ -121,7 +133,7 @@ function getRole(el: Element): string {
 }
 
 function isDisabled(el: Element): boolean {
-    if ((el as HTMLInputElement).disabled) return true;
+    if ('disabled' in el && (el as HTMLInputElement).disabled) return true;
     if (el.getAttribute('aria-disabled') === 'true') return true;
     return false;
 }
