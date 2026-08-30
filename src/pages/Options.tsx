@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { browser } from 'wxt/browser';
 
 function Options() {
   const [plannerUrl, setPlannerUrl] = useState('http://localhost:8000');
@@ -6,7 +7,7 @@ function Options() {
   const [backend, setBackend] = useState('webgpu');
 
   const handleSave = async () => {
-    await chrome.storage.sync.set({ plannerUrl, modelId, backend });
+    await browser.storage.sync.set({ plannerUrl, modelId, backend });
     alert('Settings saved!');
   };
 
