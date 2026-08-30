@@ -198,20 +198,20 @@ class Florence2Pipeline {
 
     // Handle array of {x0,y0,x1,y1} objects (common Florence-2 format)
     if (Array.isArray(result)) {
-      return result.map((item: any, i: number) => {
-        if (typeof item === 'object' && item !== null) {
-          const x0 = typeof item.x0 !== 'undefined' ? item.x0 : item xmin;
-          const y0 = typeof item.y0 !== 'undefined' ? item.y0 : item ymin;
-          const x1 = typeof item.x1 !== 'undefined' ? item.x1 : item xmax;
-          const y1 = typeof item.y1 !== 'undefined' ? item.y1 : item ymax;
+      return result.map((item: Record<string, unknown>, i: number) => {
+        if (item && typeof item === 'object') {
+          const x0 = item.x0 ?? item.xmin;
+          const y0 = item.y0 ?? item.ymin;
+          const x1 = item.x1 ?? item.xmax;
+          const y1 = item.y1 ?? item.ymax;
           if (x0 !== undefined && y0 !== undefined && x1 !== undefined && y1 !== undefined) {
             return {
-              x: x0,
-              y: y0,
-              width: x1 - x0,
-              height: y1 - y0,
-              label: item.label || item.text || `Item ${i + 1}`,
-              score: item.score || item.confidence || 0.5,
+              x: x0 as number,
+              y: y0 as number,
+              width: (x1 as number) - (x0 as number),
+              height: (y1 as number) - (y0 as number),
+              label: (item.label as string) || (item.text as string) || `Item ${i + 1}`,
+              score: (item.score as number) || (item.confidence as number) || 0.5,
             };
           }
         }
@@ -234,13 +234,13 @@ class Florence2Pipeline {
     if (typeof result === 'object' && result !== null) {
       const obj = result as Record<string, unknown>;
       if (Array.isArray(obj.bboxes)) {
-        return obj.bboxes.map((bbox: any, i: number) => ({
-          x: bbox[0] ?? bbox.xmin ?? 0,
-          y: bbox[1] ?? bbox.ymin ?? 0,
-          width: (bbox[2] ?? bbox.xmax ?? 0) - (bbox[0] ?? bbox.xmin ?? 0),
-          height: (bbox[3] ?? bbox.ymax ?? 0) - (bbox[1] ?? bbox.ymin ?? 0),
-          label: obj.labels?.[i] || `Item ${i + 1}`,
-          score: obj.scores?.[i] || 0.5,
+        return obj.bboxes.map((bbox: number[] | Record<string, number>, i: number) => ({
+          x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
+          y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
+          width: (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) - (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
+          height: (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) - (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
+          label: obj.labels?.[i] as string || `Item ${i + 1}`,
+          score: obj.scores?.[i] as number || 0.5,
         }));
       }
     }
@@ -260,7 +260,7 @@ class Florence2Pipeline {
         const obj = result as Record<string, unknown>;
         if (typeof obj.text === 'string') return obj.text as string;
         if (Array.isArray(obj.words)) {
-          return (obj.words as any[]).map((w: any) => w.word).join(' ');
+          return (obj.words as Array<{ word: string }>).map((w) => w.word).join(' ');
         }
       }
     }

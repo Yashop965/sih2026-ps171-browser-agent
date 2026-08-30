@@ -355,7 +355,7 @@ class PrivacyLedger {
 
 class AgentState {
   currentTask: string | null = null;
-  lastActionResult: any = null;
+  lastActionResult: { success: boolean; error?: string } | null = null;
   stepCount: number = 0;
 }
 
