@@ -9,7 +9,7 @@ import { defineBackground } from 'wxt/sandbox';
  * - Action execution
  * - Image capture for vision processing
  */
-defineBackground({
+export default defineBackground({
   main() {
     console.log('[PII-Agent] Background service worker started');
 
@@ -216,18 +216,19 @@ async function fetchServerAction(payload: SanitizedPayload): Promise<ServerRespo
 }
 
 async function clickElement(tabId: number, elementId: number): Promise<boolean> {
-  await browser.tabs.executeScript(tabId, {
+  const result = await browser.tabs.executeScript(tabId, {
     code: `
-      const el = document.querySelector('[data-agent-id="${elementId}"]');
-      if (el) {
-        el.click();
-        true;
-      } else {
-        false;
-      }
+      (() => {
+        const el = document.querySelector('[data-agent-id="${elementId}"]');
+        if (el) {
+          el.click();
+          return true;
+        }
+        return false;
+      })()
     `,
   });
-  return true;
+  return (result && result[0] === true);
 }
 
 async function typeInElement(
@@ -235,22 +236,25 @@ async function typeInElement(
   elementId: number,
   text: string
 ): Promise<boolean> {
-  await browser.tabs.executeScript(tabId, {
+  // Use JSON to safely embed text — no escaping issues
+  const jsonText = JSON.stringify(text);
+  const result = await browser.tabs.executeScript(tabId, {
     code: `
-      const el = document.querySelector('[data-agent-id="${elementId}"]');
-      if (el) {
-        el.focus();
-        el.value = '';
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.value = '${text.replace(/'/g, "\\'")}';
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        true;
-      } else {
-        false;
-      }
+      (() => {
+        const el = document.querySelector('[data-agent-id="${elementId}"]');
+        if (el) {
+          el.focus();
+          el.value = '';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.value = ${jsonText};
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        return false;
+      })()
     `,
   });
-  return true;
+  return (result && result[0] === true);
 }
 
 async function scrollPage(
@@ -260,8 +264,10 @@ async function scrollPage(
 ): Promise<boolean> {
   await browser.tabs.executeScript(tabId, {
     code: `
-      window.scrollBy(0, ${direction === 'down' ? amount : -amount});
-      true;
+      (() => {
+        window.scrollBy(0, ${direction === 'down' ? amount : -amount});
+        return true;
+      })()
     `,
   });
   return true;
@@ -272,13 +278,9 @@ async function navigateTo(tabId: number, url: string): Promise<boolean> {
   return true;
 }
 
-async function waitForCondition(tabId: number, condition: string): Promise<boolean> {
-  await browser.tabs.executeScript(tabId, {
-    code: `
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      true;
-    `,
-  });
+async function waitForCondition(_tabId: number, _condition: string): Promise<boolean> {
+  // Fixed delay — do it in service worker, not injected script (no await at top level)
+  await new Promise(resolve => setTimeout(resolve, 1000));
   return true;
 }
 

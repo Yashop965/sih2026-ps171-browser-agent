@@ -8,7 +8,7 @@ import { defineContentScript } from 'wxt/sandbox';
  * 2. Detects and redacts PII before sending to server
  * 3. Posts sanitized data to the background script
  */
-defineContentScript({
+export default defineContentScript({
   matches: ['<all_urls>'],
   main(ctx) {
     console.log('[PII-Agent] Content script loaded');
@@ -48,6 +48,9 @@ defineContentScript({
       elements.forEach((el, index) => {
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return;
+
+        // Annotate DOM with data-agent-id so background actions can find targets
+        el.setAttribute('data-agent-id', String(index));
 
         result.push({
           id: index,
@@ -181,18 +184,20 @@ class PIIDetector {
       }
     });
 
-    // Scan text content for PII
+    // Scan text content for PII — use exec() in a loop for non-anchored matches
     document.querySelectorAll('div, span, p, td, th, label').forEach(el => {
       const text = el.textContent || '';
       for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
         if (piiType === 'PASSWORD_FIELD') continue;
-        const matches = text.match(pattern);
-        if (matches) {
+        // Use a copy without anchors for text content scanning
+        const scanPattern = new RegExp(pattern.source.replace(/^\^|$/g, ''), pattern.flags.replace('u', 'gu'));
+        let match;
+        while ((match = scanPattern.exec(text)) !== null) {
           detections.push({
             type: piiType as PIIType,
-            value: piiType === 'CREDIT_CARD' ? this.maskCard(matches[0]) : matches[0].slice(0, 4) + '***',
+            value: piiType === 'CREDIT_CARD' ? this.maskCard(match[0]) : match[0].slice(0, 4) + '***',
             selector: this.getElementSelector(el),
-            confidence: this.getConfidence(piiType, matches[0]),
+            confidence: this.getConfidence(piiType, match[0]),
             redacted: true,
           });
         }
@@ -212,14 +217,14 @@ class PIIDetector {
     scrubbed = scrubbed.replace(/(<input[^>]*type=["']password["'][^>]*)>/g, '$1 data-pii-redacted="true">');
     scrubbed = scrubbed.replace(/(<input[^>]*name=["'][^"']*password[^"']*["'][^>]*)>/g, '$1 data-pii-redacted="true">');
 
-    // Mask detected PII values in text content
+    // Mask detected PII values in text content — use global flag for multiple matches
     scrubbed = scrubbed.replace(
-      /(\d{4}\s?\d{4}\s?\d{4})/,
+      /(\d{4}\s?\d{4}\s?\d{4})/g,
       'XXX XXX XXX'
     );
 
     scrubbed = scrubbed.replace(
-      /([A-Z]{5}\d{4}[A-Z]{1})/,
+      /([A-Z]{5}\d{4}[A-Z]{1})/g,
       'XXXXX9999X'
     );
 
