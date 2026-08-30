@@ -19,6 +19,7 @@ export default defineConfig({
   outDir: 'dist',
   runner: {
     chromiumArgs: ['--enable-unsafe-webgpu'],
+    firefoxArgs: [],
   },
   modules: ['@wxt-dev/module-react'],
 });
