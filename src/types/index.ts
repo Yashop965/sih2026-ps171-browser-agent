@@ -111,3 +111,25 @@ export interface PrivacyLogEntry {
   actionType?: string;
   error?: string;
 }
+
+export interface PerformanceMetrics {
+  dom_extract_ms: number;
+  vision_inference_ms: number;
+  plan_response_ms: number;
+  action_execution_ms: number;
+  total_step_ms: number;
+  memory_mb: number;
+  marks: PerfMark[];
+}
+
+export interface PerfMark {
+  name: Stage;
+  timestamp: number;
+  durationMs: number;
+}
+
+export type Stage =
+  | 'dom_extract'
+  | 'vision_inference'
+  | 'plan_response'
+  | 'action_execution';
