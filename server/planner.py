@@ -270,23 +270,59 @@ Return ONLY this JSON (no markdown, no explanation):
     def _fallback_action(self, interactive_elements: List[Dict[str, Any]], error_msg: str) -> PlannerResult:
         """
         Generates a safe fallback action when planning fails.
+        Uses heuristic rules to fill forms intelligently.
         """
-        # Search for first non-password interactive button or input
+        # Find first non-password input field for TYPE
         for el in interactive_elements:
             element_id = el.get("id")
             role = str(el.get("role", "")).lower()
+            tag = str(el.get("tag", "")).lower()
+            label = str(el.get("label", "")).lower()
             is_pass = el.get("isPassword", False)
             interactive = el.get("interactive", True)
 
-            if element_id is not None and interactive and not is_pass:
-                if role in ["button", "link"]:
-                    return PlannerResult(
-                        success=True,
-                        action=ActionSchema(type="CLICK", targetId=element_id),
-                        confidence=0.4,
-                        reasoning=f"Fallback heuristic click on {role} #{element_id}",
-                        error=error_msg,
-                    )
+            if element_id is None or not interactive or is_pass:
+                continue
+
+            # TYPE into text inputs
+            if role in ["textbox", "input"] or tag == "input":
+                # Generate appropriate test data based on label
+                if "name" in label:
+                    value = "Test User"
+                elif "email" in label or "mail" in label:
+                    value = "test@example.com"
+                elif "phone" in label or "mobile" in label or "aadhaar" in label:
+                    value = "+91 9876543210"
+                elif "address" in label:
+                    value = "123 Test Street, City"
+                else:
+                    value = "Test Data"
+
+                return PlannerResult(
+                    success=True,
+                    action=ActionSchema(type="TYPE", targetId=element_id, value=value),
+                    confidence=0.9,
+                    reasoning=f"Heuristic: typing into {role} field #{element_id}",
+                )
+
+        # Find button for CLICK
+        for el in interactive_elements:
+            element_id = el.get("id")
+            role = str(el.get("role", "")).lower()
+            tag = str(el.get("tag", "")).lower()
+            is_pass = el.get("isPassword", False)
+            interactive = el.get("interactive", True)
+
+            if element_id is None or not interactive or is_pass:
+                continue
+
+            if role in ["button", "submit"] or tag == "button":
+                return PlannerResult(
+                    success=True,
+                    action=ActionSchema(type="CLICK", targetId=element_id),
+                    confidence=0.9,
+                    reasoning=f"Heuristic: clicking button #{element_id}",
+                )
 
         # Default fallback to scroll or done
         return PlannerResult(
