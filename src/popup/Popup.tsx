@@ -25,51 +25,98 @@ function Popup() {
     addLog(`Starting task: "${task}"`);
 
     const started = performance.now();
+    const maxSteps = 20; // Prevent infinite loops
+    let currentStep = 0;
 
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) throw new Error('No active tab');
 
-      // Ask the content script for the page's interactive elements. It owns
-      // the id -> element registry, so the ids we get back are the same ones
-      // the executor resolves later.
-      addLog('Extracting page elements...');
-      const snapshot: any = await browser.tabs.sendMessage(tab.id, { type: 'EXTRACT' });
+      // Loop until task is complete or max steps reached
+      while (currentStep < maxSteps) {
+        currentStep++;
+        addLog(`--- Step ${currentStep}/${maxSteps} ---`);
+        addLog('Extracting page elements...');
 
-      if (!snapshot?.ok) throw new Error('Content script did not respond');
-      const elements = snapshot.elements ?? [];
-      addLog(`Found ${elements.length} interactive elements`);
+        const snapshot: any = await browser.tabs.sendMessage(tab.id, { type: 'EXTRACT' });
 
-      // Only structural metadata leaves the machine. No values, no HTML.
-      addLog('Sending sanitized context to planner...');
-      const response = await fetch('http://localhost:8000/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, elements, step: 1 }),
-      });
+        if (!snapshot?.ok) {
+          addLog('Failed to extract elements');
+          break;
+        }
 
-      if (!response.ok) throw new Error(`Planner returned ${response.status}`);
+        const elements = snapshot.elements ?? [];
+        addLog(`Found ${elements.length} interactive elements`);
 
-      const plan = await response.json();
-      const action = plan.action; // Server returns single action, not array
-      addLog(`Planner returned: ${action?.type ?? 'NONE'}`);
+        if (elements.length === 0) {
+          addLog('No interactive elements found');
+          break;
+        }
 
-      if (action) {
-        addLog(`Executing: ${action.type} on target ${action.targetId ?? 'scroll'}`);
-
-        const result: any = await browser.tabs.sendMessage(tab.id, {
-          type: 'EXECUTE',
-          action,
+        addLog('Sending sanitized context to planner...');
+        const response = await fetch('http://localhost:8000/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task,
+            elements,
+            step: currentStep,
+            history: logs.filter(l => l.includes('Executing:')).map(l => ({
+              action: l.replace('Executing: ', '').split(' on ')[0],
+              targetId: parseInt(l.split(' on ')[1]) || null,
+              result: 'OK'
+            }))
+          }),
         });
 
-        if (result?.ok) {
-          addLog('Action executed');
-          setStep(1);
-        } else {
-          addLog(`Action failed: ${result?.error ?? 'unknown error'}`);
+        if (!response.ok) {
+          addLog(`Planner error: ${response.status}`);
+          break;
         }
-      } else {
-        addLog('No action returned from planner');
+
+        const plan = await response.json();
+        const action = plan.action;
+
+        addLog(`Planner returned: ${action?.type ?? 'NONE'}`);
+
+        if (!action || action.type === 'DONE') {
+          addLog('Task complete (planner signaled DONE)');
+          break;
+        }
+
+        if (action.type === 'SCROLL' && !action.targetId) {
+          addLog('Scrolling page...');
+          const scrollResult = await browser.tabs.sendMessage(tab.id, {
+            type: 'EXECUTE',
+            action: { type: 'SCROLL', direction: 'down', amount: 500 }
+          });
+          if (!scrollResult?.ok) {
+            addLog('Scroll failed');
+          }
+        } else if (action.targetId) {
+          addLog(`Executing: ${action.type} on target ${action.targetId}`);
+          const result: any = await browser.tabs.sendMessage(tab.id, {
+            type: 'EXECUTE',
+            action,
+          });
+
+          if (result?.ok) {
+            addLog('Action executed successfully');
+            setStep(currentStep);
+          } else {
+            addLog(`Action failed: ${result?.error ?? 'unknown error'}`);
+            // Continue to next action even if one fails
+          }
+        } else {
+          addLog('No target ID for action, scrolling...');
+        }
+
+        // Small delay between actions
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      if (currentStep >= maxSteps) {
+        addLog(`Reached maximum steps (${maxSteps})`);
       }
 
       addLog('Task completed');
