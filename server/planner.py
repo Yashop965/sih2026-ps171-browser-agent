@@ -361,9 +361,39 @@ Return ONLY this JSON (no markdown, no explanation):
         try:
             # Log which provider we're using
             logger.info(f"Using LLM provider: {self.llm_client.name} / {self.llm_client.model_name}")
-            
+
             llm_response = await self.llm_client.generate(prompt, system_prompt)
-            return self.parse_llm_output(llm_response, interactive_elements)
+            result = self.parse_llm_output(llm_response, interactive_elements)
+
+            # POST-PROCESSING: Override SCROLL with TYPE if input fields exist
+            if result.success and result.action and result.action.type == "SCROLL":
+                input_fields = [
+                    el for el in interactive_elements
+                    if el.get("role") in ["textbox", "input"]
+                    and not el.get("isPassword", False)
+                ]
+
+                if input_fields:
+                    first_input = input_fields[0]
+                    element_id = first_input.get("id")
+                    label = str(first_input.get("label", "")).lower()
+
+                    if "name" in label:
+                        value = "Test User"
+                    elif "email" in label or "mail" in label:
+                        value = "test@example.com"
+                    elif "phone" in label or "mobile" in label or "aadhaar" in label:
+                        value = "+91 9876543210"
+                    elif "address" in label:
+                        value = "123 Test Street, City"
+                    else:
+                        value = "Test Data"
+
+                    result.action = ActionSchema(type="TYPE", targetId=element_id, value=value)
+                    result.reasoning = f"Override: LLM returned SCROLL but input #{element_id} exists"
+                    logger.info(result.reasoning)
+
+            return result
         except Exception as e:
             logger.error(f"Planner LLM execution error: {e}")
             return self._fallback_action(interactive_elements, f"LLM execution error: {e}")
