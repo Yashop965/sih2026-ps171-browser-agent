@@ -25,14 +25,14 @@ function Popup() {
     addLog(`Starting task: "${task}"`);
 
     const started = performance.now();
-    const maxSteps = 20; // Prevent infinite loops
+    const maxSteps = 15;
     let currentStep = 0;
+    let consecutiveScrolls = 0; // Track scroll spam
 
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) throw new Error('No active tab');
 
-      // Loop until task is complete or max steps reached
       while (currentStep < maxSteps) {
         currentStep++;
         addLog(`--- Step ${currentStep}/${maxSteps} ---`);
@@ -53,6 +53,12 @@ function Popup() {
           break;
         }
 
+        // Count input fields vs buttons
+        const inputFields = elements.filter((e: any) => e.role === 'textbox' || e.tag === 'input');
+        const buttons = elements.filter((e: any) => e.role === 'button' || e.tag === 'button');
+
+        addLog(`Elements: ${inputFields.length} inputs, ${buttons.length} buttons`);
+
         addLog('Sending sanitized context to planner...');
         const response = await fetch('http://localhost:8000/plan', {
           method: 'POST',
@@ -61,6 +67,8 @@ function Popup() {
             task,
             elements,
             step: currentStep,
+            inputCount: inputFields.length,
+            buttonCount: buttons.length,
             history: logs.filter(l => l.includes('Executing:')).map(l => ({
               action: l.replace('Executing: ', '').split(' on ')[0],
               targetId: parseInt(l.split(' on ')[1]) || null,
@@ -80,12 +88,17 @@ function Popup() {
         addLog(`Planner returned: ${action?.type ?? 'NONE'}`);
 
         if (!action || action.type === 'DONE') {
-          addLog('Task complete (planner signaled DONE)');
+          addLog('✅ Task complete (planner signaled DONE)');
           break;
         }
 
-        if (action.type === 'SCROLL' && !action.targetId) {
-          addLog('Scrolling page...');
+        if (action.type === 'SCROLL') {
+          consecutiveScrolls++;
+          if (consecutiveScrolls > 3) {
+            addLog('⚠️ Too many scrolls, stopping to prevent loop');
+            break;
+          }
+          addLog(`Scrolling page... (${consecutiveScrolls}/3)`);
           const scrollResult = await browser.tabs.sendMessage(tab.id, {
             type: 'EXECUTE',
             action: { type: 'SCROLL', direction: 'down', amount: 500 }
@@ -93,30 +106,50 @@ function Popup() {
           if (!scrollResult?.ok) {
             addLog('Scroll failed');
           }
-        } else if (action.targetId) {
-          addLog(`Executing: ${action.type} on target ${action.targetId}`);
+        } else if (action.type === 'TYPE' && action.targetId && action.value) {
+          consecutiveScrolls = 0; // Reset scroll counter on successful action
+          addLog(`Typing: "${action.value}" into element #${action.targetId}`);
           const result: any = await browser.tabs.sendMessage(tab.id, {
             type: 'EXECUTE',
             action,
           });
 
           if (result?.ok) {
-            addLog('Action executed successfully');
+            addLog('✅ Typed successfully');
             setStep(currentStep);
           } else {
-            addLog(`Action failed: ${result?.error ?? 'unknown error'}`);
-            // Continue to next action even if one fails
+            addLog(`❌ Type failed: ${result?.error ?? 'unknown'}`);
+          }
+        } else if (action.type === 'CLICK' && action.targetId) {
+          consecutiveScrolls = 0;
+          addLog(`Clicking element #${action.targetId}`);
+          const result: any = await browser.tabs.sendMessage(tab.id, {
+            type: 'EXECUTE',
+            action,
+          });
+
+          if (result?.ok) {
+            addLog('✅ Clicked successfully');
+            setStep(currentStep);
+
+            // If we clicked submit, task might be done
+            if (action.targetId === buttons[buttons.length - 1]?.id) {
+              addLog('🎯 Submit button clicked - task likely complete');
+              break;
+            }
+          } else {
+            addLog(`❌ Click failed: ${result?.error ?? 'unknown'}`);
           }
         } else {
-          addLog('No target ID for action, scrolling...');
+          addLog(`Unknown action: ${JSON.stringify(action)}`);
+          break;
         }
 
-        // Small delay between actions
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 800));
       }
 
       if (currentStep >= maxSteps) {
-        addLog(`Reached maximum steps (${maxSteps})`);
+        addLog(`⚠️ Reached maximum steps (${maxSteps})`);
       }
 
       addLog('Task completed');

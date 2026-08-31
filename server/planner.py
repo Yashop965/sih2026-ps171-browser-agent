@@ -138,16 +138,26 @@ RECENT ACTION HISTORY:
 AVAILABLE INTERACTIVE ELEMENTS:
 {json.dumps(sanitized_elements, indent=2)}
 
-Determine the SINGLE next best browser action to take to complete the task.
-Output ONLY a JSON object matching this schema:
+INSTRUCTIONS:
+You are a form-filling agent. Your task is to COMPLETELY FILL ALL FORM FIELDS and SUBMIT.
+
+RULES:
+1. For TEXT input fields (role=textbox): Use TYPE action with appropriate test data
+   - Name fields: "Test User"
+   - Email fields: "test@example.com"
+   - Phone fields: "+91 9876543210"
+   - Address fields: "123 Test Street, City, State"
+2. For BUTTON elements: Use CLICK action
+3. Only use SCROLL if there are no visible input fields
+4. After filling all fields, CLICK the Submit button
+5. When form is complete, return DONE action
+
+Return ONLY a JSON object (no markdown, no explanations):
 {{
-  "type": "CLICK" | "TYPE" | "SCROLL" | "SELECT" | "NAVIGATE" | "DONE",
-  "targetId": <number or null>,
-  "value": "<text to type or option to select or null>",
-  "scrollDirection": "<up|down|left|right or null>",
-  "scrollAmount": <number or null>,
-  "url": "<http(s) URL or null>",
-  "reasoning": "<short explanation>"
+  "type": "TYPE" | "CLICK" | "SCROLL" | "DONE",
+  "targetId": <element_id_number>,
+  "value": "<text to type>" (only for TYPE actions),
+  "reasoning": "<why this action>"
 }}"""
         return prompt
 
