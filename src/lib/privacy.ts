@@ -4,7 +4,7 @@
  * PII detection, redaction helpers, and client-side outbound payload scanner.
  */
 
-import type { PrivacyEvent } from '../types';
+import type { PrivacyLogEntry, PIIType } from '../types';
 
 export interface PIIDetection {
   type: string;
