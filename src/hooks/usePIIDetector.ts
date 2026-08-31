@@ -24,7 +24,7 @@ export function usePIIDetector() {
       newEvents.push({
         type: 'detected',
         category: det.type,
-        detail: `${det.type}: ${det.value}`,
+        detail: `${det.type} detected`,
         confidence: det.confidence,
       });
     }
@@ -41,7 +41,7 @@ export function usePIIDetector() {
     const newEvents: PrivacyEvent[] = detections.map(det => ({
       type: 'redacted',
       category: det.type,
-      detail: `Redacted ${det.type}: ${det.value}`,
+      detail: `Redacted ${det.type}`,
       confidence: det.confidence,
     }));
 
