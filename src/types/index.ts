@@ -117,17 +117,6 @@ export interface PrivacyLogEntry {
   error?: string;
 }
 
-export interface PrivacyEvent {
-  id?: string;
-  type: 'detected' | 'redacted' | 'warning' | string;
-  category: string;
-  detail: string;
-  confidence?: number;
-  timestamp?: Date | number;
-  selector?: string;
-  value?: string;
-}
-
 export interface TaskState {
   status: 'idle' | 'running' | 'paused' | 'complete' | 'error';
   step: number;
