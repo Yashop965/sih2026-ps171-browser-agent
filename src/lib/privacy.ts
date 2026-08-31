@@ -12,108 +12,35 @@ export interface PIIDetection {
   confidence: number;
 }
 
-// Pattern definitions for PII detection
-const PATTERNS: Record<string, { regex: RegExp; confidence: number }> = {
-  AADHAAR: {
-    regex: /\b(\d{4}\s?\d{4}\s?\d{4})\b/g,
-    confidence: 0.7,
-  },
-  PAN: {
-    regex: /\b([A-Z]{5}\d{4}[A-Z]{1})\b/g,
-    confidence: 0.85,
-  },
-  CREDIT_CARD: {
-    regex: /\b(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})\b/g,
-    confidence: 0.7,
-  },
-  IFSC: {
-    regex: /\b([A-Z]{4}0[A-Z0-9]{7})\b/g,
-    confidence: 0.85,
-  },
-  PHONE: {
-    regex: /\b([+]?[\d\s-]{10,13})\b/g,
-    confidence: 0.6,
-  },
-  EMAIL: {
-    regex: /\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/g,
-    confidence: 0.95,
-  },
-  PASSWORD_FIELD: {
-    regex: /type=["']password["']/g,
-    confidence: 0.99,
-  },
-};
+import { redactString } from './pii/sanitizer';
 
 /**
  * Detect PII in text
+ * Wraps sanitizer.ts
  */
 export function detectPII(text: string): PIIDetection[] {
-  const detections: PIIDetection[] = [];
-
-  for (const [type, { regex, confidence }] of Object.entries(PATTERNS)) {
-    // Reset lastIndex for global regexes
-    regex.lastIndex = 0;
-    
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      detections.push({
-        type,
-        value: maskValue(match[1], type),
-        confidence,
-      });
-    }
-  }
-
-  return detections;
+  const { matches } = redactString(text, 'legacy_detect');
+  return matches.map(m => ({
+    type: m.type,
+    value: '[REDACTED]',
+    confidence: m.confidence,
+  }));
 }
 
 /**
  * Redact PII from text
+ * Wraps sanitizer.ts
  */
 export function redactPII(text: string): { redacted: string; events: PIIDetection[] } {
-  let redacted = text;
-  const events: PIIDetection[] = [];
-
-  for (const [type, { regex, confidence }] of Object.entries(PATTERNS)) {
-    regex.lastIndex = 0;
-    
-    const matches = text.match(regex);
-    if (matches) {
-      for (const match of matches) {
-        const masked = maskValue(match, type);
-        redacted = redacted.replace(match, masked);
-        events.push({ type, value: masked, confidence });
-      }
-    }
-  }
-
-  return { redacted, events };
-}
-
-/**
- * Mask sensitive values for display
- */
-function maskValue(value: string, type: string): string {
-  switch (type) {
-    case 'AADHAAR':
-      return value.replace(/(\d{4})\s?\d{4}\s?\d{4}/, '$1 XXX XXX');
-    case 'PAN':
-      return value.replace(/([A-Z]{5})(\d{4})([A-Z]{1})/, '$1*****$3');
-    case 'CREDIT_CARD': {
-      const digits = value.replace(/[\s-]/g, '');
-      return `${digits.slice(0, 4)} **** **** ${digits.slice(-4)}`;
-    }
-    case 'IFSC':
-      return value.replace(/([A-Z]{4})0([A-Z0-9]{7})/, '$1********');
-    case 'PHONE':
-      return value.replace(/(\+\d{2}|\d{2}) (\d{5}) (\d{5})/, '$1 $2 *****');
-    case 'EMAIL': {
-      const [local, domain] = value.split('@');
-      return `${local.slice(0, 2)}***@${domain}`;
-    }
-    default:
-      return '•'.repeat(Math.min(value.length, 8));
-  }
+  const { sanitized, matches } = redactString(text, 'legacy_redact');
+  return {
+    redacted: sanitized,
+    events: matches.map(m => ({
+      type: m.type,
+      value: '[REDACTED]',
+      confidence: m.confidence,
+    })),
+  };
 }
 
 /**

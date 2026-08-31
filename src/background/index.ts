@@ -1,52 +1,62 @@
 import { defineBackground } from 'wxt/sandbox';
+import { sanitizeSnapshot, redactString, type RawSnapshot } from '../lib/pii/sanitizer';
+import { checkOutboundPayload } from '../lib/pii/firewall';
+import { PrivacyAuditLedger } from '../lib/pii/audit';
 
 /**
  * Background Service Worker
- * 
+ *
  * Handles:
  * - Message routing between content scripts and server
- * - Privacy ledger management
+ * - Privacy pipeline: sanitize → firewall → transmit
+ * - Privacy ledger management (legacy + new audit ledger)
  * - Action execution
  * - Image capture for vision processing
  */
 defineBackground({
   main() {
     console.log('[PII-Agent] Background service worker started');
-    
+
     const privacyLedger = new PrivacyLedger();
+    const auditLedger = new PrivacyAuditLedger();
     const agentState = new AgentState();
-    
+
     // Listen for messages from content scripts
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.log('[PII-Agent] Received message:', message.type);
-      
+
       switch (message.type) {
         case 'CAPTURE_AND_SEND':
-          return handleCaptureAndSend(message, sender, privacyLedger, agentState);
-        
+          return handleCaptureAndSend(message, sender, privacyLedger, auditLedger, agentState);
+
         case 'EXECUTE_ACTION':
           return executeAction(message, sender, privacyLedger);
-        
+
         case 'GET_PRIVACY_LEDGER':
           sendResponse(privacyLedger.getEntries());
           return true;
-        
+
+        case 'GET_AUDIT_LOG':
+          sendResponse(auditLedger.getEntries());
+          return true;
+
         case 'CLEAR_LEDGER':
           privacyLedger.clear();
+          auditLedger.clear();
           sendResponse({ success: true });
           return true;
-        
+
         case 'CAPTURE_SCREENSHOT':
           return captureScreenshot(message, sender);
-        
+
         default:
           sendResponse({ error: `Unknown message type: ${message.type}` });
           return true;
       }
     });
-    
+
     // Handle actions returned from server
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    browser.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
       if (message.type === 'ACTION_RESULT') {
         agentState.lastActionResult = message.result;
       }
@@ -54,23 +64,49 @@ defineBackground({
   },
 });
 
+
 async function handleCaptureAndSend(
   message: CaptureMessage,
   sender: browser.runtime.MessageSender,
   ledger: PrivacyLedger,
+  auditLedger: PrivacyAuditLedger,
   state: AgentState
 ): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
-  
-  // Get sanitized DOM from content script
-  const snapshot = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
-  
+
+  // 1. Capture raw DOM snapshot from content script
+  const snapshot: RawSnapshot | null = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
+
   if (!snapshot) {
     return { error: 'Failed to capture page' };
   }
-  
-  // Log PII detections to privacy ledger
+
+  // 2. Run sanitizer — replaces PII in labels, names, title, URL, a11y tree
+  const sanitized = sanitizeSnapshot(snapshot);
+
+  // 3. Record PII detections in both ledgers
+  for (const match of sanitized.matches) {
+    // Legacy ledger (UI reads this)
+    ledger.log({
+      timestamp: Date.now(),
+      tabId,
+      url: snapshot.url,
+      type: match.type,
+      selector: match.selector,
+      confidence: match.confidence,
+      verified: match.isVerified,
+      action: 'REDACTED',
+    });
+    // New audit ledger
+    if (match.redacted) {
+      auditLedger.redacted(match.type, match.selector, match.confidence);
+    } else {
+      auditLedger.detected(match.type, match.selector, match.confidence, match.isVerified);
+    }
+  }
+
+  // Also log content-script-detected PII (from the detectedPII array)
   for (const pii of snapshot.detectedPII || []) {
     ledger.log({
       timestamp: Date.now(),
@@ -79,29 +115,65 @@ async function handleCaptureAndSend(
       type: pii.type,
       selector: pii.selector,
       confidence: pii.confidence,
-      verified: pii.isVerified,
+      verified: pii.isVerified ?? false,
       action: 'REDACTED',
     });
   }
-  
-  // Prepare payload for server (sanitized metadata only)
-  const payload = {
-    url: snapshot.url,
-    title: snapshot.title,
-    timestamp: snapshot.timestamp,
-    interactiveElements: snapshot.interactiveElements,
-    accessibilityTree: snapshot.accessibilityTree,
-    detectedPII: snapshot.detectedPII.map(pii => ({
-      type: pii.type,
-      selector: pii.selector,
-      confidence: pii.confidence,
-      verified: pii.isVerified,
-    })),
-    // Intentionally exclude raw HTML and sensitive values
-    hasScreenshots: false,
+
+  // 4. Sanitize task_description and history
+  let safeTaskDescription = (message as any).task_description ?? null;
+  if (typeof safeTaskDescription === 'string') {
+    const { sanitized, matches } = redactString(safeTaskDescription, 'task_description');
+    safeTaskDescription = sanitized;
+    for (const match of matches) {
+      if (match.redacted) auditLedger.redacted(match.type, match.selector, match.confidence);
+      else auditLedger.detected(match.type, match.selector, match.confidence, match.isVerified);
+    }
+  }
+
+  let safeHistory = (message as any).history ?? null;
+  if (Array.isArray(safeHistory)) {
+    safeHistory = safeHistory.map((item, i) => {
+      if (!item || typeof item !== 'object') return item;
+      const safeItem = { ...item };
+      for (const [key, value] of Object.entries(safeItem)) {
+        if (typeof value === 'string') {
+          const { sanitized, matches } = redactString(value, `history[${i}].${key}`);
+          safeItem[key] = sanitized;
+          for (const match of matches) {
+            if (match.redacted) auditLedger.redacted(match.type, match.selector, match.confidence);
+            else auditLedger.detected(match.type, match.selector, match.confidence, match.isVerified);
+          }
+        }
+      }
+      return safeItem;
+    });
+  }
+
+  // 5. Build the final server payload matching PlanRequest
+  const serverPayload = {
+    payload: sanitized.payload,
+    task_description: safeTaskDescription,
+    history: safeHistory,
   };
-  
-  // Log outbound payload
+
+  // 6. Outbound firewall — final check before network transmission on ENTIRE payload
+  const firewallResult = checkOutboundPayload(serverPayload);
+  if (!firewallResult.passed) {
+    auditLedger.blocked(
+      firewallResult.blockedCategory ?? 'UNKNOWN',
+      firewallResult.location ?? 'unknown',
+      firewallResult.reason ?? 'PII detected in outbound payload',
+    );
+    console.error('[PII-Agent] BLOCKED: outbound firewall caught residual PII at',
+      firewallResult.location, '— category:', firewallResult.blockedCategory);
+    return {
+      success: false,
+      error: 'Privacy firewall blocked the request — residual PII detected',
+    };
+  }
+
+  // Log outbound (legacy ledger)
   ledger.log({
     timestamp: Date.now(),
     tabId,
@@ -111,13 +183,18 @@ async function handleCaptureAndSend(
     confidence: 1,
     verified: true,
     action: 'SENT_TO_SERVER',
-    payloadSize: JSON.stringify(payload).length,
+    payloadSize: JSON.stringify(serverPayload).length,
   });
-  
-  // Send to server for action planning
-  const serverResponse = await fetchServerAction(payload);
-  
+
+  // 7. Send to server
+  const serverResponse = await fetchServerAction(serverPayload);
+
   if (serverResponse.success) {
+    // Audit: SENT
+    auditLedger.sent(
+      sanitized.payload.interactiveElements.length,
+      sanitized.payload.detectedPII.length,
+    );
     ledger.log({
       timestamp: Date.now(),
       tabId,
@@ -197,7 +274,7 @@ async function captureScreenshot(
   }
 }
 
-async function fetchServerAction(payload: SanitizedPayload): Promise<ServerResponse> {
+async function fetchServerAction(payload: any): Promise<ServerResponse> {
   const serverUrl = __SERVER_URL__;
   
   try {

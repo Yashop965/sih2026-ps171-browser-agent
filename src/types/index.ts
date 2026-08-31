@@ -23,17 +23,38 @@ export interface ARIAElement {
   depth: number;
 }
 
-export type PIIType = 
+export type PIIType =
   | 'AADHAAR'
   | 'PAN'
   | 'CREDIT_CARD'
+  | 'DEBIT_CARD'
   | 'IFSC'
+  | 'UPI'
   | 'PHONE'
   | 'EMAIL'
   | 'PASSWORD_FIELD'
+  | 'PASSWORD_VALUE'
   | 'API_KEY'
   | 'FACE_DETECTED'
-  | 'TEXT_PASSWORD';
+  | 'TEXT_PASSWORD'
+  | 'SSN';
+
+/**
+ * A privacy event recorded by the PII pipeline.
+ * Never stores the raw sensitive value.
+ */
+export interface PrivacyEvent {
+  id?: string;
+  timestamp?: Date;
+  /** Event category: detected, redacted, blocked, or sent */
+  type: 'detected' | 'redacted' | 'blocked' | 'sent';
+  /** PII category label, e.g. AADHAAR */
+  category: string;
+  /** Human-readable description — must NOT contain the raw value */
+  detail: string;
+  confidence?: number;
+  selector?: string;
+}
 
 export interface DetectedPII {
   type: PIIType;

@@ -22,6 +22,8 @@ export interface PIIDetection {
   metadata?: Record<string, any>;
 }
 
+import { validateAadhaar, validatePAN, validateCard } from './validators';
+
 export type PIIType =
   | 'AADHAAR'
   | 'PAN'
@@ -135,13 +137,13 @@ export class PIIManager {
 
   private scanTextContent(element: Element, text: string): void {
     const patterns: [RegExp, PIIType, number][] = [
-      [/(\\d{4}\\s?\\d{4}\\s?\\d{4})/g, 'AADHAAR', 0.7],
-      [/([A-Z]{5}\\d{4}[A-Z]{1})/g, 'PAN', 0.8],
-      [/(\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4})/g, 'CREDIT_CARD', 0.7],
+      [/(\d{4}\s?\d{4}\s?\d{4})/g, 'AADHAAR', 0.7],
+      [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
+      [/(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})/g, 'CREDIT_CARD', 0.7],
       [/^([A-Z]{4}0[A-Z0-9]{7})$/, 'IFSC', 0.85],
-      [/([+]?[\\d\\s-]{10,13})/g, 'PHONE', 0.6],
-      /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
-      /(api[_-]?key|apikey|access[_-]?token)\\s*[:=]\\s*([^\\s,;]+)/gi, 'API_KEY', 0.8],
+      [/([+]?[\d\s-]{10,13})/g, 'PHONE', 0.6],
+      [/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
+      [/(api[_-]?key|apikey|access[_-]?token)\s*[:=]\s*([^\s,;]+)/gi, 'API_KEY', 0.8],
     ];
 
     for (const pattern of patterns) {
@@ -204,14 +206,14 @@ export class PIIManager {
     
     switch (detection.type) {
       case 'AADHAAR':
-        isVerified = this.verhoeffCheck(rawValue.replace(/\s/g, ''));
+        isVerified = validateAadhaar(rawValue);
         break;
       case 'PAN':
-        isVerified = this.validatePAN(rawValue);
+        isVerified = validatePAN(rawValue);
         break;
       case 'CREDIT_CARD':
       case 'DEBIT_CARD':
-        isVerified = this.luhnCheck(rawValue.replace(/[\s-]/g, ''));
+        isVerified = validateCard(rawValue);
         break;
     }
     
@@ -250,80 +252,6 @@ export class PIIManager {
         // Face detection failed, continue
       }
     }
-  }
-
-  // Verhoeff checksum algorithm for Aadhaar validation
-  private verhoeffCheck(digits: string): boolean {
-    if (digits.length !== 12) return false;
-    if (!/^\d{12}$/.test(digits)) return false;
-    
-    const d = [
-      [0,1,2,3,4,5,6,7,8,9],
-      [1,2,3,4,0,6,7,8,9,5],
-      [2,3,4,0,1,7,8,9,5,6],
-      [3,4,0,1,2,8,9,5,6,7],
-      [4,0,1,2,3,9,5,6,7,8],
-      [5,9,8,7,6,0,4,3,2,1],
-      [6,5,9,8,7,1,0,4,3,2],
-      [7,6,5,9,8,2,1,0,4,3],
-      [8,7,6,5,9,3,2,1,0,4],
-      [9,8,7,6,5,4,3,2,1,0],
-    ];
-    
-    const p = [
-      [0,1,2,3,4,5,6,7,8,9],
-      [1,2,3,4,0,6,7,8,9,5],
-      [2,3,4,0,1,7,8,9,5,6],
-      [3,4,0,1,2,8,9,5,6,7],
-      [4,0,1,2,3,9,5,6,7,8],
-      [5,0,9,8,7,4,3,2,1,6],
-      [6,0,8,7,5,2,1,3,4,9],
-      [7,0,5,6,8,3,4,2,9,1],
-      [8,0,3,4,5,9,6,1,2,7],
-      [9,0,2,1,3,8,7,4,6,5],
-    ];
-    
-    let checksum = 0;
-    const reversed = digits.split('').reverse().map(Number);
-    
-    for (let i = 0; i < reversed.length - 1; i++) {
-      checksum = d[checksum][p[i % 8][reversed[i]]];
-    }
-    
-    return checksum === reversed[reversed.length - 1];
-  }
-
-  // PAN validation
-  private validatePAN(pan: string): boolean {
-    if (!/^[A-Z]{5}\d{4}[A-Z]{1}$/.test(pan)) return false;
-    
-    const chars = pan.split('');
-    const entityTypes = ['C', 'P', 'H', 'F', 'C', 'T', 'A', 'J', 'G', 'L'];
-    if (!entityTypes.includes(chars[2])) return false;
-    
-    return true;
-  }
-
-  // Luhn algorithm for card validation
-  private luhnCheck(number: string): boolean {
-    if (number.length < 13 || number.length > 19) return false;
-    
-    let sum = 0;
-    let isEven = false;
-    
-    for (let i = number.length - 1; i >= 0; i--) {
-      let digit = parseInt(number[i], 10);
-      
-      if (isEven) {
-        digit *= 2;
-        if (digit > 9) digit -= 9;
-      }
-      
-      sum += digit;
-      isEven = !isEven;
-    }
-    
-    return sum % 10 === 0;
   }
 
   private maskValue(value: string): string {

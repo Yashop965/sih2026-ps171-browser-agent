@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { browser } from 'wxt/browser';
+import React, { useState, useEffect, useRef } from 'react';
 import './Popup.css';
-import PrivacyLedger from '../components/PrivacyLedger';
+
+interface SoMBox {
+  id: number;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  score: number;
+}
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
@@ -9,11 +17,11 @@ function Popup() {
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
+  const [elements, setElements] = useState<SoMBox[]>([]);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const addLog = (message: string) => {
-    setLogs(prev =>
-      [`${new Date().toLocaleTimeString()}: ${message}`, ...prev].slice(0, 50)
-    );
+    setLogs(prev => [`${new Date().toLocaleTimeString()}: ${message}`, ...prev].slice(0, 50));
   };
 
   const handleStart = async () => {
@@ -21,61 +29,36 @@ function Popup() {
     setIsRunning(true);
     setStep(0);
     setLogs([]);
-    setLatency(null);
     addLog(`Starting task: "${task}"`);
 
-    const started = performance.now();
-
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) throw new Error('No active tab');
-
-      // Ask the content script for the page's interactive elements. It owns
-      // the id -> element registry, so the ids we get back are the same ones
-      // the executor resolves later.
-      addLog('Extracting page elements...');
-      const snapshot: any = await browser.tabs.sendMessage(tab.id, { type: 'EXTRACT' });
-
-      if (!snapshot?.ok) throw new Error('Content script did not respond');
-      const elements = snapshot.elements ?? [];
-      addLog(`Found ${elements.length} interactive elements`);
-
-      // Only structural metadata leaves the machine. No values, no HTML.
-      addLog('Sending sanitized context to planner...');
-      const response = await fetch('http://localhost:8000/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, elements, step: 1 }),
+      // Step 1 & 2 & 3: Send to background agent for secure capture and planning
+      addLog('Sending task to background agent...');
+      const plan = await browser.runtime.sendMessage({
+        type: 'CAPTURE_AND_SEND',
+        task_description: task,
       });
 
-      if (!response.ok) throw new Error(`Planner returned ${response.status}`);
-
-      const plan = await response.json();
-      const actions = plan.actions ?? [];
-      addLog(`Planner returned ${actions.length} action(s)`);
-
-      if (actions[0]) {
-        const action = actions[0];
-        addLog(`Executing: ${action.type ?? action.action} on ${action.targetId ?? action.target}`);
-
-        const result: any = await browser.tabs.sendMessage(tab.id, {
-          type: 'EXECUTE',
-          action,
-        });
-
-        if (result?.ok) {
-          addLog('Action executed');
-          setStep(1);
-        } else {
-          addLog(`Action failed: ${result?.error ?? 'unknown error'}`);
-        }
+      if (plan.error) {
+        throw new Error(plan.error);
       }
 
-      addLog('Task completed');
+      addLog(`Planner returned action: ${plan.action?.type}`);
+
+      // Execute first action
+      if (plan.action) {
+        addLog(`Executing: ${plan.action.type}`);
+        await browser.runtime.sendMessage({
+          type: 'EXECUTE_ACTION',
+          action: plan.action,
+        });
+        setStep(1);
+      }
+
+      addLog('Task completed successfully!');
     } catch (err) {
       addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setLatency(Math.round(performance.now() - started));
       setIsRunning(false);
     }
   };
@@ -83,7 +66,7 @@ function Popup() {
   return (
     <div className="popup">
       <header className="popup-header">
-        <h1 className="popup-title">SIH2026 PS171</h1>
+        <h1 className="popup-title">🤖 SIH2026 PS171</h1>
         <p className="popup-subtitle">Browser Agent</p>
       </header>
 
@@ -108,11 +91,15 @@ function Popup() {
         </button>
 
         {step > 0 && (
-          <div className="step-indicator">Step {step} of task execution</div>
+          <div className="step-indicator">
+            Step {step} of task execution
+          </div>
         )}
 
         {latency !== null && (
-          <div className="latency-display">Latency: {latency}ms</div>
+          <div className="latency-display">
+            Latency: {latency}ms
+          </div>
         )}
 
         <div className="log-section">
@@ -122,18 +109,6 @@ function Popup() {
               <div key={i} className="log-entry">{log}</div>
             ))}
           </div>
-        </div>
-
-        <div
-          style={{
-            height: 300,
-            marginTop: 12,
-            border: '1px solid #1E242D',
-            borderRadius: 6,
-            overflow: 'hidden',
-          }}
-        >
-          <PrivacyLedger />
         </div>
       </div>
 
