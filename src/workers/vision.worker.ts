@@ -37,7 +37,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
 
   switch (type) {
     case 'LOAD_MODEL':
-      modelId = payload?.modelId || modelId;
+      modelId = (payload?.modelId as string) || modelId;
       await loadModel(modelId);
       break;
 
@@ -65,8 +65,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
       postMessage({
         type: 'MEM_STATS',
         payload: {
-          heapSize: performance.memory?.usedJSHeapSize || 0,
-          limit: performance.memory?.jsHeapSizeLimit || 0,
+          heapSize: (performance as any).memory?.usedJSHeapSize || 0,
+          limit: (performance as any).memory?.jsHeapSizeLimit || 0,
+          isReady: isModelReady,
         }
       } as WorkerResponse);
       break;
@@ -188,12 +189,12 @@ function parseFlorence2Result(result: any): BoundingBox[] {
       if (Array.isArray(item) && item.length >= 4) {
         boxes.push({
           id: idx + 1,
-          label: item.label || `Item ${idx + 1}`,
+          label: (item as any).label || `Item ${idx + 1}`,
           x: item[0],
           y: item[1],
           width: item[2] - item[0],
           height: item[3] - item[1],
-          score: item.score || 0.5,
+          score: (item as any).score || 0.5,
         });
       } else if (typeof item === 'object' && item !== null) {
         // Handle object format: {x0, y0, x1, y1, label, score}

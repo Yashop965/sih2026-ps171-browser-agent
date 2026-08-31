@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { SanitizedElement, BoundingBox } from '../types';
+import type { BoundingBox } from '../types';
 import { isWebGPUSupported } from '../lib/vision';
 
 interface UseVisionModelOptions {
@@ -14,7 +14,6 @@ export function useVisionModel(options: UseVisionModelOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const [webGPUSupported] = useState(isWebGPUSupported());
   const modelRef = useRef<any>(null);
-  const processorRef = useRef<any>(null);
 
   const loadModel = useCallback(async () => {
     if (isLoaded) return;
@@ -32,7 +31,7 @@ export function useVisionModel(options: UseVisionModelOptions = {}) {
       modelRef.current = await pipeline(
         'image-to-text',
         modelId,
-        { backend }
+        { backend } as any
       );
 
       setIsLoaded(true);

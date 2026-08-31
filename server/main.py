@@ -1,13 +1,13 @@
 """
 Server-side Action Planner (FastAPI)
 
-Receives sanitized page metadata and returns actionable instructions
-using LLM (Ollama or cloud API)
+Receives sanitized page metadata and returns actionable instructions using LLM or fallback planner.
+Includes 50KB request limit, sliding window rate limiting, and structured JSON logging.
 """
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 from typing import Optional, List, Dict, Any
 import json
 import uuid
@@ -15,18 +15,20 @@ import time
 import asyncio
 from datetime import datetime
 
-# Ollama client (optional, falls back to mock)
-try:
-    import httpx
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+from server.middleware.logging import JSONLoggingMiddleware
+from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimiterMiddleware
+from server.planner import ActionPlanner, ActionSchema, PlannerResult
 
 app = FastAPI(
     title="SIH2026 Browser Agent Server",
     description="Server-side action planner for privacy-preserving browser agent",
     version="1.0.0",
 )
+
+# Attach Middlewares (Logging, Rate Limiter, Payload Size Limiter)
+app.add_middleware(JSONLoggingMiddleware)
+app.add_middleware(RateLimiterMiddleware, max_requests=60, window_seconds=60)
+app.add_middleware(PayloadSizeLimitMiddleware, max_bytes=50 * 1024)
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,60 +42,83 @@ app.add_middleware(
 # ===== Request/Response Models =====
 
 class InteractiveElement(BaseModel):
-    id: int
-    tag: str
-    role: str
-    label: str
-    name: str
-    rect: Dict[str, int]
-    isPassword: bool
+    id: Optional[int] = None
+    tag: Optional[str] = None
+    role: Optional[str] = None
+    label: Optional[str] = ""
+    name: Optional[str] = ""
+    rect: Optional[Dict[str, Any]] = None
+    isPassword: Optional[bool] = False
+    interactive: Optional[bool] = True
+
 
 class ARIAElement(BaseModel):
-    role: str
-    name: str
-    expanded: Optional[bool]
-    checked: Optional[str]
-    required: Optional[bool]
-    disabled: Optional[bool]
-    depth: int
+    role: Optional[str] = ""
+    name: Optional[str] = ""
+    expanded: Optional[bool] = None
+    checked: Optional[str] = None
+    required: Optional[bool] = None
+    disabled: Optional[bool] = None
+    depth: Optional[int] = 0
+
 
 class DetectedPII(BaseModel):
     type: str
-    selector: str
-    confidence: float
-    verified: bool
+    selector: Optional[str] = ""
+    confidence: Optional[float] = 1.0
+    verified: Optional[bool] = False
+    redacted: Optional[bool] = True
+
 
 class SanitizedPayload(BaseModel):
     url: str
-    title: str
-    timestamp: int
-    interactiveElements: List[InteractiveElement]
-    accessibilityTree: List[ARIAElement]
-    detectedPII: List[DetectedPII]
-    hasScreenshots: bool = False
-
-class AgentAction(BaseModel):
-    type: str  # CLICK, TYPE, SCROLL, NAVIGATE, WAIT, COMPLETE
-    targetId: Optional[int]
-    text: Optional[str]
-    url: Optional[str]
-    direction: Optional[str]
-    amount: Optional[int]
-    condition: Optional[str]
-
-class PlanRequest(BaseModel):
-    payload: SanitizedPayload
+    title: Optional[str] = ""
+    timestamp: Optional[int] = None
+    interactiveElements: List[InteractiveElement] = Field(default_factory=list)
+    accessibilityTree: List[ARIAElement] = Field(default_factory=list)
+    detectedPII: List[DetectedPII] = Field(default_factory=list)
+    hasScreenshots: Optional[bool] = False
     task_description: Optional[str] = None
     history: Optional[List[Dict[str, Any]]] = None
 
+
+class PlanRequest(BaseModel):
+    payload: Optional[SanitizedPayload] = None
+    url: Optional[str] = None
+    title: Optional[str] = ""
+    timestamp: Optional[int] = None
+    interactiveElements: Optional[List[InteractiveElement]] = None
+    accessibilityTree: Optional[List[ARIAElement]] = None
+    detectedPII: Optional[List[DetectedPII]] = None
+    task_description: Optional[str] = None
+    history: Optional[List[Dict[str, Any]]] = None
+
+    def get_sanitized_payload(self) -> SanitizedPayload:
+        """Flexible parser supporting both nested payload and flat root payloads."""
+        if self.payload:
+            return self.payload
+        return SanitizedPayload(
+            url=self.url or "http://localhost",
+            title=self.title or "",
+            timestamp=self.timestamp,
+            interactiveElements=self.interactiveElements or [],
+            accessibilityTree=self.accessibilityTree or [],
+            detectedPII=self.detectedPII or [],
+            task_description=self.task_description,
+            history=self.history,
+        )
+
+
 class PlanResponse(BaseModel):
     success: bool
-    action: Optional[AgentAction]
+    action: Optional[ActionSchema]
     message: str
-    error: Optional[str]
-    reasoning: Optional[str]
+    error: Optional[str] = None
+    reasoning: Optional[str] = None
+    confidence: Optional[float] = 0.0
     session_id: str
     timestamp: float
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -102,10 +127,11 @@ class HealthResponse(BaseModel):
     uptime_seconds: float
 
 
-# ===== State =====
+# ===== State & Planner Initialization =====
 
 session_store: Dict[str, Dict[str, Any]] = {}
 start_time = time.time()
+planner = ActionPlanner()
 
 
 # ===== Endpoints =====
@@ -115,8 +141,8 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         version="1.0.0",
-        models_loaded=["qwen2.5:1.5b"],
-        uptime_seconds=time.time() - start_time,
+        models_loaded=["action_planner"],
+        uptime_seconds=round(time.time() - start_time, 2),
     )
 
 
@@ -124,33 +150,46 @@ async def health_check():
 async def plan_action(request: PlanRequest):
     """
     Main endpoint: receives sanitized page state, returns next action.
+    Supports both nested PlanRequest and flat extension payloads.
     """
     session_id = str(uuid.uuid4())[:8]
-    
+    payload = request.get_sanitized_payload()
+
     try:
-        # Log the request
-        print(f"[{session_id}] Received plan request for: {request.payload.url}")
-        
-        # Generate action using LLM
-        action_result = await generate_action(request, session_id)
-        
+        # Convert elements & history to dictionary representations
+        raw_elements = [el.model_dump() for el in payload.interactiveElements]
+        raw_a11y = [el.model_dump() for el in payload.accessibilityTree]
+        task_desc = payload.task_description or request.task_description
+        history_list = payload.history or request.history
+
+        # Delegate planning to planner module
+        planner_result: PlannerResult = await planner.plan(
+            url=payload.url,
+            title=payload.title,
+            interactive_elements=raw_elements,
+            accessibility_tree=raw_a11y,
+            task_description=task_desc,
+            history=history_list,
+        )
+
         return PlanResponse(
-            success=True,
-            action=action_result,
-            message="Action generated successfully",
-            error=None,
-            reasoning=f"Generated action for {request.payload.url}",
+            success=planner_result.success,
+            action=planner_result.action,
+            message="Action generated successfully" if planner_result.success else "Action generation degraded",
+            error=planner_result.error,
+            reasoning=planner_result.reasoning,
+            confidence=planner_result.confidence,
             session_id=session_id,
             timestamp=time.time(),
         )
     except Exception as e:
-        print(f"[{session_id}] Error: {e}")
         return PlanResponse(
             success=False,
             action=None,
             message="Failed to generate action",
             error=str(e),
             reasoning=None,
+            confidence=0.0,
             session_id=session_id,
             timestamp=time.time(),
         )
@@ -161,10 +200,11 @@ async def verify_pii(request: PlanRequest):
     """
     Verify and categorize detected PII.
     """
+    payload = request.get_sanitized_payload()
     results = []
     
-    for pii in request.payload.detectedPII:
-        verification = verify_pii_type(pii.type, pii.value if hasattr(pii, 'value') else None)
+    for pii in payload.detectedPII:
+        verification = verify_pii_type(pii.type)
         results.append({
             "type": pii.type,
             "verified": verification["verified"],
@@ -183,9 +223,6 @@ async def execute_action(request: Dict[str, Any]):
     action_type = request.get("type")
     target_id = request.get("targetId")
     
-    # Log execution
-    print(f"[EXEC] {action_type} on element #{target_id}")
-    
     return {
         "success": True,
         "action_type": action_type,
@@ -196,166 +233,15 @@ async def execute_action(request: Dict[str, Any]):
 
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
-    """
-    Get session details.
-    """
     session = session_store.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
 
-# ===== Helper Functions =====
+# ===== Helpers =====
 
-async def generate_action(request: PlanRequest, session_id: str) -> AgentAction:
-    """
-    Generate next action using LLM or heuristic rules.
-    """
-    # Store session context
-    if session_id not in session_store:
-        session_store[session_id] = {
-            "url": request.payload.url,
-            "steps": [],
-            "created_at": datetime.now().isoformat(),
-        }
-    
-    session = session_store[session_id]
-    session["steps"].append({
-        "timestamp": time.time(),
-        "url": request.payload.url,
-        "elements": len(request.payload.interactiveElements),
-        "pii_detected": len(request.payload.detectedPII),
-    })
-    
-    # Try Ollama first
-    if OLLAMA_AVAILABLE:
-        try:
-            return await call_ollama(request, session)
-        except Exception as e:
-            print(f"Ollama failed, falling back to heuristic: {e}")
-    
-    # Fallback to heuristic rules
-    return heuristic_action(request)
-
-
-async def call_ollama(request: PlanRequest, session: Dict) -> AgentAction:
-    """
-    Call local Ollama instance for action planning.
-    """
-    async with httpx.AsyncClient() as client:
-        prompt = build_planning_prompt(request, session)
-        
-        response = await client.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "qwen2.5:1.5b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 500,
-                },
-            },
-            timeout=30.0,
-        )
-        
-        response.raise_for_status()
-        result = response.json()
-        
-        # Parse action from response
-        return parse_action(result.get("response", ""), request)
-
-
-def build_planning_prompt(request: PlanRequest, session: Dict) -> str:
-    """
-    Build prompt for action planning LLM.
-    """
-    elements_preview = request.payload.interactiveElements[:20]
-    elements_json = json.dumps([
-        {
-            "id": e.id,
-            "role": e.role,
-            "label": e.label[:30],
-            "isPassword": e.isPassword,
-        }
-        for e in elements_preview
-    ], indent=2)
-    
-    prompt = f"""You are a browser automation agent. Given the current page state, determine the next action.
-
-PAGE: {request.payload.url}
-TITLE: {request.payload.title}
-
-INTERACTIVE ELEMENTS (showing first 20):
-{elements_json}
-
-DETECTED PII (already redacted):
-{len(request.payload.detectedPII)} items detected and redacted
-
-TASK (if provided): {request.payload.task_description or 'Follow user instructions'}
-
-Previous steps in this session: {len(session.get('steps', []))}
-
-Return a JSON object with the next action:
-{{
-  "type": "CLICK|TYPE|SCROLL|NAVIGATE|WAIT|COMPLETE",
-  "targetId": <element_id or null>,
-  "text": "<text to type or null>",
-  "url": "<url to navigate to or null>",
-  "direction": "<up|down or null>",
-  "amount": <scroll amount or null>
-}}
-
-Only return valid JSON, no explanation."""
-    
-    return prompt
-
-
-def parse_action(response: str, request: PlanRequest) -> AgentAction:
-    """
-    Parse action from LLM response.
-    """
-    try:
-        # Extract JSON from response
-        import re
-        json_match = re.search(r'\{[^}]+\}', response)
-        if json_match:
-            action_data = json.loads(json_match.group())
-            return AgentAction(**action_data)
-    except Exception as e:
-        print(f"Failed to parse action: {e}")
-    
-    # Return default complete action
-    return AgentAction(type="COMPLETE")
-
-
-def heuristic_action(request: PlanRequest) -> AgentAction:
-    """
-    Fallback heuristic action generator.
-    """
-    elements = request.payload.interactiveElements
-    
-    # Find first non-disabled, non-password button
-    for el in elements:
-        if el.role == 'button' and not el.disabled:
-            return AgentAction(type="CLICK", targetId=el.id)
-    
-    # Find first text input
-    for el in elements:
-        if el.role == 'textbox' and not el.isPassword:
-            return AgentAction(type="TYPE", targetId=el.id, text="")
-    
-    # Scroll down if elements exist
-    if elements:
-        return AgentAction(type="SCROLL", direction="down", amount=500)
-    
-    return AgentAction(type="COMPLETE")
-
-
-def verify_pii_type(pii_type: str, value: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Verify PII type using appropriate algorithm.
-    """
+def verify_pii_type(pii_type: str) -> Dict[str, Any]:
     category_map = {
         "AADHAAR": "Indian Government ID",
         "PAN": "Indian Tax ID",
@@ -372,25 +258,9 @@ def verify_pii_type(pii_type: str, value: Optional[str] = None) -> Dict[str, Any
     
     return {
         "verified": pii_type in ["PASSWORD_FIELD", "FACE"],
-        "confidence": 0.9 if pii_type in ["PASSWORD_FIELD", "FACE"] else 0.5,
+        "confidence": 0.99 if pii_type in ["PASSWORD_FIELD", "FACE"] else 0.7,
         "category": category_map.get(pii_type, "Unknown"),
     }
-
-
-# ===== Startup Event =====
-
-@app.on_event("startup")
-async def startup_event():
-    print("=" * 50)
-    print("SIH2026 Browser Agent Server Started")
-    print("=" * 50)
-    print(f"Ollama available: {OLLAMA_AVAILABLE}")
-    print("Endpoints:")
-    print("  POST /plan       - Generate next action")
-    print("  POST /verify-pii - Verify PII detections")
-    print("  POST /execute    - Execute action")
-    print("  GET  /health     - Health check")
-    print("=" * 50)
 
 
 if __name__ == "__main__":

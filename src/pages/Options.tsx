@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { browser } from 'wxt/browser';
 
 function Options() {
-  const [plannerUrl, setPlannerUrl] = useState('http://localhost:8000');
+  const [plannerUrl, setPlannerUrl] = useState(import.meta.env.VITE_SERVER_URL || 'http://localhost:8000');
   const [modelId, setModelId] = useState('onnx-community/Florence-2-base-ft');
   const [backend, setBackend] = useState('webgpu');
 

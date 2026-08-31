@@ -1,4 +1,6 @@
 import { defineBackground } from 'wxt/sandbox';
+import { browser } from 'wxt/browser';
+import { scanOutboundPayload } from '../lib/privacy';
 
 /**
  * Background Service Worker
@@ -17,15 +19,23 @@ export default defineBackground({
     const agentState = new AgentState();
 
     // Listen for messages from content scripts
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('[PII-Agent] Received message:', message.type);
+    browser.runtime.onMessage.addListener((message: any, sender: any, sendResponse: (res: any) => void): true => {
+      console.log('[PII-Agent] Received message:', message?.type);
+      if (!message || typeof message !== 'object') {
+        sendResponse({ error: 'Invalid message' });
+        return true;
+      }
 
       switch (message.type) {
         case 'CAPTURE_AND_SEND':
-          return handleCaptureAndSend(message, sender, privacyLedger, agentState);
+          handleCaptureAndSend(message as CaptureMessage, sender, privacyLedger, agentState)
+            .then(sendResponse);
+          return true;
 
         case 'EXECUTE_ACTION':
-          return executeAction(message, sender, privacyLedger);
+          executeAction(message as ActionMessage, sender, privacyLedger)
+            .then(sendResponse);
+          return true;
 
         case 'GET_PRIVACY_LEDGER':
           sendResponse(privacyLedger.getEntries());
@@ -37,7 +47,9 @@ export default defineBackground({
           return true;
 
         case 'CAPTURE_SCREENSHOT':
-          return captureScreenshot(message, sender);
+          captureScreenshot(message as ScreenshotMessage, sender)
+            .then(sendResponse);
+          return true;
 
         default:
           sendResponse({ error: `Unknown message type: ${message.type}` });
@@ -48,16 +60,16 @@ export default defineBackground({
 });
 
 async function handleCaptureAndSend(
-  message: CaptureMessage,
-  sender: browser.runtime.MessageSender,
+  _message: CaptureMessage,
+  sender: any,
   ledger: PrivacyLedger,
-  state: AgentState
+  _state: AgentState
 ): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
 
   // Get sanitized DOM from content script
-  const snapshot = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
+  const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
 
   if (!snapshot) {
     return { error: 'Failed to capture page' };
@@ -68,37 +80,58 @@ async function handleCaptureAndSend(
     ledger.log({
       timestamp: Date.now(),
       tabId,
-      url: snapshot.url,
-      type: pii.type,
-      selector: pii.selector,
-      confidence: pii.confidence,
-      verified: pii.isVerified,
+      url: snapshot.url || '',
+      type: pii.type || 'PII',
+      selector: pii.selector || '',
+      confidence: pii.confidence || 1,
+      verified: Boolean(pii.isVerified),
       action: 'REDACTED',
     });
   }
 
   // Prepare payload for server (sanitized metadata only)
-  const payload = {
-    url: snapshot.url,
-    title: snapshot.title,
-    timestamp: snapshot.timestamp,
-    interactiveElements: snapshot.interactiveElements,
-    accessibilityTree: snapshot.accessibilityTree,
-    detectedPII: snapshot.detectedPII.map(pii => ({
+  const payload: SanitizedPayload = {
+    url: snapshot.url || '',
+    title: snapshot.title || '',
+    timestamp: snapshot.timestamp || Date.now(),
+    interactiveElements: snapshot.interactiveElements || [],
+    accessibilityTree: snapshot.accessibilityTree || [],
+    detectedPII: (snapshot.detectedPII || []).map((pii: any) => ({
       type: pii.type,
       selector: pii.selector,
       confidence: pii.confidence,
-      verified: pii.isVerified,
+      redacted: true,
     })),
     // Intentionally exclude raw HTML and sensitive values
     hasScreenshots: false,
   };
 
+  // OUTBOUND PAYLOAD SECURITY SCANNER (Issue #11)
+  const scanResult = scanOutboundPayload(payload);
+  if (!scanResult.safe) {
+    ledger.log({
+      timestamp: Date.now(),
+      tabId,
+      url: snapshot.url || '',
+      type: 'SECURITY_BLOCK',
+      selector: '',
+      confidence: 1,
+      verified: true,
+      action: 'FAILURE',
+      error: scanResult.error,
+    });
+    return {
+      success: false,
+      action: null,
+      error: scanResult.error,
+    };
+  }
+
   // Log outbound payload
   ledger.log({
     timestamp: Date.now(),
     tabId,
-    url: snapshot.url,
+    url: snapshot.url || '',
     type: 'PAYLOAD',
     selector: '',
     confidence: 1,
@@ -114,7 +147,7 @@ async function handleCaptureAndSend(
     ledger.log({
       timestamp: Date.now(),
       tabId,
-      url: snapshot.url,
+      url: snapshot.url || '',
       type: 'ACTION',
       selector: '',
       confidence: 1,
@@ -129,7 +162,7 @@ async function handleCaptureAndSend(
 
 async function executeAction(
   message: ActionMessage,
-  sender: browser.runtime.MessageSender,
+  sender: any,
   ledger: PrivacyLedger
 ): Promise<any> {
   const tabId = sender.tab?.id;
@@ -142,22 +175,22 @@ async function executeAction(
   try {
     switch (action.type) {
       case 'CLICK':
-        success = await clickElement(tabId, action.targetId);
+        success = await clickElement(tabId, action.targetId ?? 0);
         break;
       case 'TYPE':
-        success = await typeInElement(tabId, action.targetId, action.text);
+        success = await typeInElement(tabId, action.targetId ?? 0, action.text ?? '');
         break;
       case 'SCROLL':
-        success = await scrollPage(tabId, action.direction, action.amount);
+        success = await scrollPage(tabId, action.direction ?? 'down', action.amount ?? 100);
         break;
       case 'NAVIGATE':
-        success = await navigateTo(tabId, action.url);
+        success = await navigateTo(tabId, action.url ?? '');
         break;
       case 'WAIT':
-        success = await waitForCondition(tabId, action.condition);
+        success = await waitForCondition(tabId, action.condition ?? '');
         break;
       default:
-        error = `Unknown action type: ${action.type}`;
+        error = `Unknown action type: ${(action as any).type}`;
     }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -166,7 +199,7 @@ async function executeAction(
   ledger.log({
     timestamp: Date.now(),
     tabId,
-    url: message.url,
+    url: message.url || '',
     type: 'EXECUTION',
     selector: action.targetId?.toString() || '',
     confidence: 1,
@@ -179,8 +212,8 @@ async function executeAction(
 }
 
 async function captureScreenshot(
-  message: ScreenshotMessage,
-  sender: browser.runtime.MessageSender
+  _message: ScreenshotMessage,
+  sender: any
 ): Promise<{ dataUrl?: string; error?: string }> {
   try {
     const dataUrl = await browser.tabs.captureVisibleTab(sender.tab?.windowId);
@@ -191,7 +224,7 @@ async function captureScreenshot(
 }
 
 async function fetchServerAction(payload: SanitizedPayload): Promise<ServerResponse> {
-  const serverUrl = __SERVER_URL__;
+  const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
 
   try {
     const response = await fetch(`${serverUrl}/plan`, {
@@ -216,7 +249,7 @@ async function fetchServerAction(payload: SanitizedPayload): Promise<ServerRespo
 }
 
 async function clickElement(tabId: number, elementId: number): Promise<boolean> {
-  const result = await browser.tabs.executeScript(tabId, {
+  const result = await (browser.tabs as any).executeScript(tabId, {
     code: `
       (() => {
         const el = document.querySelector('[data-agent-id="${elementId}"]');
@@ -228,7 +261,7 @@ async function clickElement(tabId: number, elementId: number): Promise<boolean> 
       })()
     `,
   });
-  return (result && result[0] === true);
+  return Boolean(result && result[0] === true);
 }
 
 async function typeInElement(
@@ -238,7 +271,7 @@ async function typeInElement(
 ): Promise<boolean> {
   // Use JSON to safely embed text — no escaping issues
   const jsonText = JSON.stringify(text);
-  const result = await browser.tabs.executeScript(tabId, {
+  const result = await (browser.tabs as any).executeScript(tabId, {
     code: `
       (() => {
         const el = document.querySelector('[data-agent-id="${elementId}"]');
@@ -254,7 +287,7 @@ async function typeInElement(
       })()
     `,
   });
-  return (result && result[0] === true);
+  return Boolean(result && result[0] === true);
 }
 
 async function scrollPage(
@@ -262,7 +295,7 @@ async function scrollPage(
   direction: 'up' | 'down',
   amount: number
 ): Promise<boolean> {
-  await browser.tabs.executeScript(tabId, {
+  await (browser.tabs as any).executeScript(tabId, {
     code: `
       (() => {
         window.scrollBy(0, ${direction === 'down' ? amount : -amount});

@@ -1,26 +1,26 @@
 /**
- * Redaction Engine
+ * Redaction Engine (src/lib/pii/redactor.ts)
  * 
  * Applies visual redaction to detected PII:
  * - Password fields: blackout overlay
- * - Faces: blur effect
- * - Text PII: highlight with privacy badge
+ * - Faces: backdrop blur effect
+ * - Text PII: highlight overlay badge
+ * - Canvas utilities for DOM & screenshot canvas redactions
  */
 
 export interface RedactionOptions {
   mode: 'blur' | 'blackout' | 'overlay' | 'replace';
-  strength?: number; // 0-1 for blur
-  color?: string;    // For blackout/overlay
+  strength?: number;
+  color?: string;
 }
 
 export class RedactionEngine {
   private overlays: Map<string, HTMLElement> = new Map();
 
   /**
-   * Apply redaction to all detected PII elements
+   * Apply visual DOM redaction overlays
    */
   applyRedactions(detections: Array<{ selector: string; type: string; redacted: boolean }>): void {
-    // Clear previous redactions
     this.clearRedactions();
 
     for (const detection of detections) {
@@ -43,8 +43,29 @@ export class RedactionEngine {
             this.overlayElement(element, detection);
         }
       } catch (e) {
-        console.warn('[Redaction] Failed to redact:', detection.selector, e);
+        console.warn('[Redaction] Failed to redact:', detection.selector);
       }
+    }
+  }
+
+  /**
+   * Canvas Redaction Utility: Redacts bounding regions directly on HTMLCanvasElement context
+   */
+  redactCanvasRegion(
+    canvas: HTMLCanvasElement,
+    rect: { x: number; y: number; width: number; height: number },
+    mode: 'blackout' | 'blur' = 'blackout'
+  ): void {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (mode === 'blackout') {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    } else if (mode === 'blur') {
+      // Draw pixelated / blurred box over canvas region
+      ctx.fillStyle = '#777777';
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     }
   }
 
@@ -63,16 +84,15 @@ export class RedactionEngine {
       pointer-events: none;
     `;
     overlay.dataset.piiRedaction = 'true';
-    overlay.dataset.type = detection.type;
+    overlay.dataset.type = 'PASSWORD';
     
     document.body.appendChild(overlay);
     this.overlays.set(detection.selector, overlay);
   }
 
-  private blurFace(element: Element, detection: any): void {
+  private blurFace(element: Element, _detection: any): void {
     const rect = element.getBoundingClientRect();
     
-    // Create blur overlay
     const blurDiv = document.createElement('div');
     blurDiv.style.cssText = `
       position: fixed;
@@ -82,6 +102,7 @@ export class RedactionEngine {
       height: ${rect.height}px;
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
+      background: rgba(0, 0, 0, 0.2);
       z-index: 2147483647;
       pointer-events: none;
     `;
@@ -89,7 +110,7 @@ export class RedactionEngine {
     blurDiv.dataset.type = 'FACE';
     
     document.body.appendChild(blurDiv);
-    this.overlays.set(`face_${Date.now()}`, blurDiv);
+    this.overlays.set(`face_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, blurDiv);
   }
 
   private overlayElement(element: Element, detection: any): void {
@@ -99,7 +120,7 @@ export class RedactionEngine {
     badge.style.cssText = `
       position: fixed;
       left: ${rect.left}px;
-      top: ${rect.top - 24}px;
+      top: ${Math.max(0, rect.top - 24)}px;
       background: rgba(220, 38, 38, 0.9);
       color: white;
       padding: 2px 8px;
@@ -109,7 +130,7 @@ export class RedactionEngine {
       pointer-events: none;
       border-radius: 4px;
     `;
-    badge.textContent = `🔒 ${detection.type}`;
+    badge.textContent = `🔒 REDACTED PII`;
     badge.dataset.piiRedaction = 'true';
     
     document.body.appendChild(badge);
@@ -117,7 +138,7 @@ export class RedactionEngine {
   }
 
   clearRedactions(): void {
-    for (const [key, element] of this.overlays) {
+    for (const [_, element] of this.overlays) {
       element.remove();
     }
     this.overlays.clear();

@@ -16,8 +16,18 @@ const THRESHOLDS: Record<Stage, number> = {
 
 export class Profiler {
   private marks: PerfMark[] = [];
-  private stageStarts: Record<string, number> = {};
   private stepStart: number | null = null;
+  private stageStarts: Record<string, number> = {};
+
+  /** Mark the start of an entire step. */
+  startStep(): void {
+    this.stepStart = performance.now();
+  }
+
+  /** Get duration since step start. */
+  getStepDuration(): number {
+    return this.stepStart ? Math.round((performance.now() - this.stepStart) * 100) / 100 : 0;
+  }
 
   /** Mark the start of a stage. Multiple calls for the same stage reset the timer. */
   start(stage: Stage): void {

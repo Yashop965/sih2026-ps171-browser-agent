@@ -92,19 +92,19 @@ export class SomRenderer {
     const { x, y, width, height, id, label } = mark;
 
     // Draw box
-    this.ctx.strokeStyle = this.options.boxColor;
+    this.ctx.strokeStyle = this.options.boxColor || '#00FF00';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(x, y, width, height);
 
     // Fill background
-    this.ctx.fillStyle = this.options.backgroundColor;
+    this.ctx.fillStyle = this.options.backgroundColor || 'rgba(0, 255, 0, 0.1)';
     this.ctx.fillRect(x, y, width, height);
 
     // Draw label
     if (this.options.showLabels) {
       // Label background
       const textWidth = this.ctx.measureText(`${id}`).width;
-      this.ctx.fillStyle = this.options.boxColor;
+      this.ctx.fillStyle = this.options.boxColor || '#00FF00';
       this.ctx.fillRect(x, y - 20, textWidth + 8, 20);
 
       // Label text

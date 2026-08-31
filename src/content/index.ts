@@ -1,4 +1,7 @@
 import { defineContentScript } from 'wxt/sandbox';
+import { browser } from 'wxt/browser';
+import type { SanitizedDOMSnapshot, InteractiveElement, ARIAElement, DetectedPII, PIIType } from '../types';
+import { PIIManager } from '../lib/pii/detector';
 
 /**
  * Content Script - DOM Capture + PII Redaction
@@ -13,13 +16,14 @@ defineContentScript({
     console.log('[PII-Agent] Content script loaded');
     
     // Initialize PII detector
+    const piiManager = new PIIManager();
     const piiDetector = new PIIDetector();
     
     // Capture DOM snapshot with PII redaction
-    function captureDOM(): SanitizedDOMSnapshot {
-      const html = document.documentElement.outerHTML;
-      const a11yTree = buildAccessibilityTree(document);
+    async function captureDOM(): Promise<SanitizedDOMSnapshot> {
+      const a11yTree = buildAccessibilityTree(document.body || document.documentElement);
       const interactiveElements = captureInteractiveElements();
+      const detectedPII = await piiManager.scanDocumentAsync();
       
       return {
         url: window.location.href,
@@ -29,7 +33,7 @@ defineContentScript({
         // Instead send sanitized interactive elements only
         accessibilityTree: a11yTree,
         interactiveElements,
-        detectedPII: piiDetector.scanDocument(),
+        detectedPII: detectedPII as any,
       };
     }
     
@@ -84,7 +88,7 @@ defineContentScript({
               expanded: el.getAttribute('aria-expanded') === 'true',
               checked: el.getAttribute('aria-checked') || undefined,
               required: el.getAttribute('aria-required') === 'true',
-              disabled: el.disabled || el.getAttribute('aria-disabled') === 'true',
+              disabled: Boolean((el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true'),
               depth,
             });
           }
@@ -119,8 +123,13 @@ defineContentScript({
     }
     
     // Expose to background via message passing
-    ctx.addCommand('capturePage', captureDOM);
-    
+    browser.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res: any) => void): true => {
+      if (msg?.type === 'capturePage') {
+        captureDOM().then(sendResponse);
+      }
+      return true;
+    });
+
     // Listen for PII scrubbing requests
     ctx.addEventListener(window, 'message', (event) => {
       if (event.data?.type === 'SCRUB_PII') {
@@ -154,11 +163,11 @@ class PIIDetector {
     const detections: DetectedPII[] = [];
     
     // Scan input values
-    document.querySelectorAll('input').forEach(input => {
+    document.querySelectorAll<HTMLInputElement>('input').forEach(input => {
       const type = input.getAttribute('type')?.toLowerCase() || 'text';
       const name = input.getAttribute('name') || input.getAttribute('id') || '';
       
-      if (type === 'password' || this.PATTERNS.PASSWORD_FIELD.test(name)) {
+      if (type === 'password' || PIIDetector.PATTERNS.PASSWORD_FIELD.test(name)) {
         detections.push({
           type: 'PASSWORD_FIELD',
           selector: this.getElementSelector(input),
@@ -166,7 +175,7 @@ class PIIDetector {
           redacted: true,
         });
       } else if (input.value) {
-        for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
+        for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
           if (piiType === 'PASSWORD_FIELD') continue;
           if (pattern.test(input.value)) {
             detections.push({
@@ -184,7 +193,7 @@ class PIIDetector {
     // Scan text content for PII
     document.querySelectorAll('div, span, p, td, th, label').forEach(el => {
       const text = el.textContent || '';
-      for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
+      for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
         if (piiType === 'PASSWORD_FIELD') continue;
         const matches = text.match(pattern);
         if (matches) {
@@ -214,12 +223,12 @@ class PIIDetector {
     
     // Mask detected PII values in text content
     scrubbed = scrubbed.replace(
-      /(\\d{4}\\s?\\d{4}\\s?\\d{4})/,
+      /(\d{4}\s?\d{4}\s?\d{4})/g,
       'XXX XXX XXX'
     );
     
     scrubbed = scrubbed.replace(
-      /([A-Z]{5}\\d{4}[A-Z]{1})/,
+      /([A-Z]{5}\d{4}[A-Z]{1})/g,
       'XXXXX9999X'
     );
     
@@ -326,7 +335,7 @@ class PIIDetector {
     return digits.slice(0, 4) + ' **** **** ' + digits.slice(-4);
   }
   
-  private getConfidence(type: string, value: string): number {
+  private getConfidence(type: string, _value: string): number {
     const baseConfidence: Record<string, number> = {
       AADHAAR: 0.85,
       PAN: 0.90,

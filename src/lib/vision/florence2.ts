@@ -60,7 +60,7 @@ class Florence2Pipeline {
   /** Check WebGPU availability */
   static isWebGPUSupported(): boolean {
     if (typeof navigator === 'undefined') return false;
-    return 'gpu' in navigator && (navigator as Navigator & { gpu?: GPUAdapter }).gpu !== null;
+    return 'gpu' in navigator && (navigator as any).gpu !== null;
   }
 
   async initialize(config: VisionModelConfig = {
@@ -93,7 +93,7 @@ class Florence2Pipeline {
 
         console.log(`[Vision] Initializing ${config.modelId} with ${backend} backend...`);
 
-        this.pipeline = await pipeline('image-to-text', config.modelId, {
+        this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
           device: backend === 'webgpu' ? 'webgpu' : 'wasm',
           dtype: selectedDtype,
         });
@@ -158,7 +158,7 @@ class Florence2Pipeline {
 
   private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
     if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return this.pipeline({
+    return (this.pipeline as any)({
       image,
       task: '<OD>',
     });
@@ -166,7 +166,7 @@ class Florence2Pipeline {
 
   private async runOCR(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
     if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return this.pipeline({
+    return (this.pipeline as any)({
       image,
       task: '<OCR>',
     });
@@ -174,7 +174,7 @@ class Florence2Pipeline {
 
   private async runCaption(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
     if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return this.pipeline({
+    return (this.pipeline as any)({
       image,
       task: '<CAP>',
     });
@@ -182,7 +182,7 @@ class Florence2Pipeline {
 
   private async runVQA(image: HTMLCanvasElement | HTMLImageElement | string, question: string): Promise<unknown> {
     if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return this.pipeline({
+    return (this.pipeline as any)({
       image,
       task: '<VQA>',
       question,
@@ -193,54 +193,58 @@ class Florence2Pipeline {
    * Extract bounding boxes from Florence-2 output.
    * Florence-2 returns coordinates as [x0, y0, x1, y1] or array of such arrays.
    */
-  private extractBoxes(result: unknown, task: string): BoundingBox[] | undefined {
+  private extractBoxes(result: unknown, _task: string): BoundingBox[] | undefined {
     if (!result) return undefined;
 
     // Handle array of {x0,y0,x1,y1} objects (common Florence-2 format)
     if (Array.isArray(result)) {
-      return result.map((item: Record<string, unknown>, i: number) => {
-        if (item && typeof item === 'object') {
+      const parsedBoxes: BoundingBox[] = [];
+      result.forEach((item: any, i: number) => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
           const x0 = item.x0 ?? item.xmin;
           const y0 = item.y0 ?? item.ymin;
           const x1 = item.x1 ?? item.xmax;
           const y1 = item.y1 ?? item.ymax;
           if (x0 !== undefined && y0 !== undefined && x1 !== undefined && y1 !== undefined) {
-            return {
-              x: x0 as number,
-              y: y0 as number,
-              width: (x1 as number) - (x0 as number),
-              height: (y1 as number) - (y0 as number),
+            parsedBoxes.push({
+              x: Number(x0),
+              y: Number(y0),
+              width: Number(x1) - Number(x0),
+              height: Number(y1) - Number(y0),
               label: (item.label as string) || (item.text as string) || `Item ${i + 1}`,
               score: (item.score as number) || (item.confidence as number) || 0.5,
-            };
+            });
+            return;
           }
         }
         // Handle array [x0,y0,x1,y1] format
         if (Array.isArray(item) && item.length >= 4) {
-          return {
-            x: item[0],
-            y: item[1],
-            width: item[2] - item[0],
-            height: item[3] - item[1],
+          parsedBoxes.push({
+            x: Number(item[0]),
+            y: Number(item[1]),
+            width: Number(item[2]) - Number(item[0]),
+            height: Number(item[3]) - Number(item[1]),
             label: `Item ${i + 1}`,
             score: 0.5,
-          };
+          });
         }
-        return null;
-      }).filter((box): box is BoundingBox => box !== null);
+      });
+      return parsedBoxes;
     }
 
     // Handle object with bboxes property
     if (typeof result === 'object' && result !== null) {
       const obj = result as Record<string, unknown>;
       if (Array.isArray(obj.bboxes)) {
+        const labels = obj.labels as string[] | undefined;
+        const scores = obj.scores as number[] | undefined;
         return obj.bboxes.map((bbox: number[] | Record<string, number>, i: number) => ({
           x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
           y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
           width: (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) - (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
           height: (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) - (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
-          label: obj.labels?.[i] as string || `Item ${i + 1}`,
-          score: obj.scores?.[i] as number || 0.5,
+          label: labels?.[i] || `Item ${i + 1}`,
+          score: scores?.[i] || 0.5,
         }));
       }
     }
@@ -316,6 +320,6 @@ export async function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 // Utility: Capture visible tab as image
-export async function captureTabAsImage(tabId?: number): Promise<HTMLCanvasElement> {
+export async function captureTabAsImage(_tabId?: number): Promise<HTMLCanvasElement> {
   throw new Error('Use browser.tabs.captureVisibleTab from background script');
 }

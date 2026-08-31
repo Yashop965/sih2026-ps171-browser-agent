@@ -5,8 +5,6 @@
  * for on-device vision inference.
  */
 
-import { visionMemoryPool } from './vision/memory';
-
 export type QuantizationMode = 'fp32' | 'fp16' | 'q4';
 export type DeviceBackend = 'webgpu' | 'wasm';
 
@@ -22,18 +20,19 @@ export interface HardwareProfile {
   webgpuMaxTextureSize: number;
   hasFP16Support: boolean;
   isFirefox: boolean;
+  backend?: DeviceBackend;
 }
 
 /** Detect hardware capabilities */
 export function detectHardware(): HardwareProfile {
-  const isFirefox = navigator.userAgent.includes('Firefox');
+  const isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox');
   const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-  const gpu = (navigator as Navigator & { gpu?: GPUAdapter }).gpu;
+  const gpu = typeof navigator !== 'undefined' ? (navigator as any).gpu : undefined;
 
   // Estimate max texture size
   let maxTextureSize = 8192; // Default conservative value
   if (hasWebGPU && gpu) {
-    const limits = gpu.adapterLimits;
+    const limits = gpu.limits || gpu.adapterLimits || {};
     maxTextureSize = Math.min(limits.maxTextureDimension2D || 8192, 8192);
   }
 
@@ -41,7 +40,7 @@ export function detectHardware(): HardwareProfile {
   let hasFP16Support = false;
   if (hasWebGPU && gpu) {
     // Check for float16 feature
-    hasFP16Support = gpu.features.has('float32-filterable-texture') || maxTextureSize >= 8192;
+    hasFP16Support = (gpu.features && gpu.features.has('float32-filterable-texture')) || maxTextureSize >= 8192;
   }
 
   return {
@@ -49,6 +48,7 @@ export function detectHardware(): HardwareProfile {
     webgpuMaxTextureSize: maxTextureSize,
     hasFP16Support,
     isFirefox,
+    backend: hasWebGPU && !isFirefox ? 'webgpu' : 'wasm',
   };
 }
 
@@ -107,10 +107,11 @@ export function getQuantizationInfo(
 ): string {
   const sizeMB = getModelSizeEstimate(quantization);
   const withinBudget = sizeMB < 500;
+  const backend = hardware.backend || (hardware.hasWebGPU ? 'webgpu' : 'wasm');
 
   return `Quantization: ${quantization.toUpperCase()} | ` +
          `Model: ~${sizeMB}MB | ` +
-         `Backend: ${hardware.backend} | ` +
+         `Backend: ${backend} | ` +
          `GPU: ${hardware.hasWebGPU ? 'Yes' : 'No'} | ` +
          `${withinBudget ? '✓ Within 500MB budget' : '✗ Over budget'}`;
 }
