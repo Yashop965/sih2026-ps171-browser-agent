@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+
+# Build output
+dist/
+build/
+.wxt/
+.vite/
+.cache/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# WXT
+.wxt/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+tsconfig.tsbuildinfo
+
+# Ollama
+.ollama/
+
+# Media assets (keep src/assets but not generated)
+/public/generated/
