@@ -22,6 +22,8 @@ export function usePIIDetector() {
 
     for (const det of detections) {
       newEvents.push({
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date(),
         type: 'detected',
         category: det.type as PIIType,
         detail: `${det.type} detected`,

@@ -163,4 +163,5 @@ export interface PrivacyEvent {
   category: PIIType;
   detail: string;
   confidence: number;
-}  
+  selector?: string;
+}
