@@ -18,6 +18,26 @@ from datetime import datetime
 from server.middleware.logging import JSONLoggingMiddleware
 from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimiterMiddleware
 from server.planner import ActionPlanner, ActionSchema, PlannerResult
+import os
+
+# LLM Configuration from environment
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto")
+LLM_API_URL = os.getenv("LLM_API_URL")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL")
+
+# Initialize planner with configured LLM client
+try:
+    planner = ActionPlanner(
+        provider=LLM_PROVIDER,
+        api_url=LLM_API_URL,
+        api_key=LLM_API_KEY,
+        model=LLM_MODEL,
+    )
+except Exception as e:
+    print(f"[WARN] Failed to initialize LLM client: {e}, using mock fallback")
+    from server.llm_clients import MockLLMClient
+    planner = ActionPlanner(llm_client=MockLLMClient())
 
 app = FastAPI(
     title="SIH2026 Browser Agent Server",

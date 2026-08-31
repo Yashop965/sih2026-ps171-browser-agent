@@ -1,47 +1,89 @@
-# WXT v0.19 Entrypoint Structure
+# WXT v0.19+ Entrypoint Structure
 
-## Correct Structure (Flat)
+## Critical Rule
+WXT v0.19+ REQUIRES flat entrypoint structure. Nested directories will FAIL.
 
+## Correct Structure
 ```
 src/
-├── entrypoints/
-│   ├── background.ts      # export default defineBackground(...)
-│   ├── content.ts         # export default defineContentScript(...)
-│   └── popup/
-│       ├── index.html     # Must reference ./main.tsx
-│       └── main.tsx       # React entrypoint with ReactDOM.createRoot
+└── entrypoints/
+    ├── background.ts          # Must export default defineBackground({...})
+    ├── content.ts             # Must export default defineContentScript({...})
+    └── popup/
+        ├── index.html         # References ./main.tsx
+        └── main.tsx           # React entrypoint
 ```
 
-## Common Mistake (Nested - WRONG)
+## Wrong Structures (Will Fail)
 
+### Nested Entrypoints ❌
 ```
 src/
-├── entrypoints/
-│   ├── background/
-│   │   └── main.ts        # WRONG - causes "No entrypoints found"
-│   ├── content/
-│   │   └── main.ts        # WRONG
-│   └── popup/
-│       └── main.tsx       # WRONG - HTML expects ./main.tsx relative
+└── entrypoints/
+    └── background/
+        └── main.ts            # ERROR: WXT won't find this
 ```
 
-## Key Points
-
-1. `background.ts` and `content.ts` must be direct children of `entrypoints/`
-2. `popup/` needs both `index.html` AND `main.tsx` inside it
-3. `index.html` must use `<script type="module" src="./main.tsx">`
-4. All entrypoints must use `export default` with WXT decorators
-
-## Build Verification
-
-Always run `npm run build` after creating entrypoints to verify structure.
-
-Example error if wrong:
+### Duplicate Source Files ❌
 ```
-ERROR  No entrypoints found in src/entrypoints
+src/
+├── background/
+│   └── index.ts               # ERROR: Not used by WXT
+└── entrypoints/
+    └── background.ts          # Only this is used
 ```
 
-Example error if nested:
+## Common Errors and Fixes
+
+### Error: "No entrypoints found"
+**Cause**: Entrypoints in wrong location or nested structure
+**Fix**: Move to `src/entrypoints/*.ts` (flat, not nested)
+
+### Error: "Cannot find name 'browser'"
+**Cause**: Missing WXT types or wrong entrypoint file
+**Fix**: Ensure file is at `src/entrypoints/background.ts` with:
+```typescript
+import { defineBackground } from 'wxt/sandbox';
+export default defineBackground({ main() { ... } });
 ```
-ERROR  [vite:build-html] Failed to resolve ./Popup.tsx from popup.html
+
+### Error: "Duplicate export"
+**Cause**: Same module exported from multiple files
+**Fix**: Remove duplicates, keep only `src/entrypoints/` versions
+
+## WXT Configuration
+```typescript
+// wxt.config.ts
+export default defineConfig({
+  browserify: {
+    // Optional: configure browserify if needed
+  },
+  runner: {
+    chromiumArgs: ['--enable-unsafe-webgpu'],
+    firefoxArgs: [],
+  },
+  // No need to specify entrypoints — WXT auto-discovers src/entrypoints/*
+});
+```
+
+## Build Commands
+```bash
+# Chrome MV3
+npm run build
+
+# Firefox MV2  
+npx wxt build -b firefox
+
+# Both
+npm run build && npx wxt build -b firefox
+```
+
+## Verification
+```bash
+# Check entrypoint structure
+ls src/entrypoints/
+
+# Build and verify output
+npm run build
+ls dist/chrome-mv3/
 ```

@@ -3,7 +3,7 @@ Action Planner Module (server/planner.py)
 
 Responsible for:
 1. Building LLM prompt context from sanitized page elements and task history.
-2. Interfacing with LLM models via an abstract BaseLLMClient interface boundary.
+2. Interfacing with LLM models via flexible client system (Custom API + Ollama fallback).
 3. Parsing, validating, and scoring actions against the browser action protocol:
    Action Types: CLICK, TYPE, SCROLL, SELECT, NAVIGATE, DONE
    Parameters: targetId, value, scrollDirection, scrollAmount, url
@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 import json
 import re
 import logging
+
+from server.llm_clients import create_llm_client, BaseLLMClient
 
 logger = logging.getLogger("sih_agent_planner")
 
@@ -62,8 +64,28 @@ class MockLLMClient(BaseLLMClient):
 # ===== Action Planner Engine =====
 
 class ActionPlanner:
-    def __init__(self, llm_client: Optional[BaseLLMClient] = None):
-        self.llm_client = llm_client or MockLLMClient()
+    def __init__(
+        self,
+        llm_client: Optional[BaseLLMClient] = None,
+        provider: str = "auto",
+        api_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
+        # Use provided client or create from config
+        if llm_client:
+            self.llm_client = llm_client
+        else:
+            try:
+                self.llm_client = create_llm_client(
+                    provider=provider,
+                    api_url=api_url,
+                    api_key=api_key,
+                    model=model,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create LLM client: {e}, using mock")
+                self.llm_client = MockLLMClient()
 
     def build_context_prompt(
         self,
@@ -294,8 +316,15 @@ Output ONLY a JSON object matching this schema:
         )
 
         try:
+            # Log which provider we're using
+            logger.info(f"Using LLM provider: {self.llm_client.name} / {self.llm_client.model_name}")
+            
             llm_response = await self.llm_client.generate(prompt, system_prompt)
             return self.parse_llm_output(llm_response, interactive_elements)
         except Exception as e:
             logger.error(f"Planner LLM execution error: {e}")
             return self._fallback_action(interactive_elements, f"LLM execution error: {e}")
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Check if LLM provider is healthy."""
+        return await self.llm_client.health_check()
