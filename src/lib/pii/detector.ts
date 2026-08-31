@@ -94,7 +94,7 @@ export class PIIManager {
 
     // 1. Password & Sensitive Input Auto-Blacklisting
     if (typeof document !== 'undefined') {
-      document.querySelectorAll('input, textarea').forEach(input => {
+      document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea').forEach(input => {
         const type = input.getAttribute('type')?.toLowerCase() || 'text';
         const name = (input.getAttribute('name') || '').toLowerCase();
         const id = (input.getAttribute('id') || '').toLowerCase();
@@ -137,7 +137,7 @@ export class PIIManager {
       });
 
       // 3. Input values (non-password)
-      document.querySelectorAll('input:not([type="password"])').forEach(input => {
+      document.querySelectorAll<HTMLInputElement>('input:not([type="password"])').forEach(input => {
         if (input.value) {
           this.scanValue(input, input.value);
         }

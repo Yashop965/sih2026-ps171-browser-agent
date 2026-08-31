@@ -10,7 +10,7 @@
 export function isWebGPUSupported(): boolean {
   if (typeof navigator === 'undefined') return false;
   
-  return 'gpu' in navigator && (navigator.gpu as GPU | null) !== null;
+  return 'gpu' in navigator && Boolean((navigator as any).gpu);
 }
 
 /**
@@ -46,7 +46,7 @@ export async function canvasToDataURL(canvas: HTMLCanvasElement): Promise<string
 /**
  * Capture visible tab as canvas (to be called from background context)
  */
-export async function captureVisibleTab(windowId?: number): Promise<HTMLCanvasElement> {
+export async function captureVisibleTab(_windowId?: number): Promise<HTMLCanvasElement> {
   // This needs to be called from background script context
   throw new Error('Use browser.tabs.captureVisibleTab from background context');
 }

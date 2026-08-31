@@ -90,7 +90,7 @@ export class RedactionEngine {
     this.overlays.set(detection.selector, overlay);
   }
 
-  private blurFace(element: Element, detection: any): void {
+  private blurFace(element: Element, _detection: any): void {
     const rect = element.getBoundingClientRect();
     
     const blurDiv = document.createElement('div');

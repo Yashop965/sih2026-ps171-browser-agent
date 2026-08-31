@@ -2,6 +2,7 @@ import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { extract, getPageContext } from '../lib/dom';
 import { executeWithRetry } from '../lib/actions';
+import { PIIManager } from '../lib/pii/detector';
 
 /**
  * Content Script - DOM Capture + PII Redaction + Action Execution
@@ -32,11 +33,12 @@ export default defineContentScript({
         console.log('[agent] content script loaded on', location.href);
 
         // Initialize PII detector
+        const piiManager = new PIIManager();
         const piiDetector = new PIIDetector();
 
         // Capture DOM snapshot with PII redaction
         async function captureDOM(): Promise<SanitizedDOMSnapshot> {
-            const a11yTree = buildAccessibilityTree(document);
+            const a11yTree = buildAccessibilityTree(document.body || document.documentElement);
             const interactiveElements = captureInteractiveElements();
             const detectedPII = await piiManager.scanDocumentAsync();
 
@@ -48,7 +50,7 @@ export default defineContentScript({
                 // Instead send sanitized interactive elements only
                 accessibilityTree: a11yTree,
                 interactiveElements,
-                detectedPII,
+                detectedPII: detectedPII as any,
             };
         }
 
@@ -106,7 +108,7 @@ export default defineContentScript({
                             expanded: el.getAttribute('aria-expanded') === 'true',
                             checked: el.getAttribute('aria-checked') || undefined,
                             required: el.getAttribute('aria-required') === 'true',
-                            disabled: el.disabled || el.getAttribute('aria-disabled') === 'true',
+                            disabled: Boolean((el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true'),
                             depth,
                         });
                     }
@@ -139,9 +141,6 @@ export default defineContentScript({
             };
             return roleMap[tag.toUpperCase()] || '';
         }
-
-        // Expose to background via message passing
-        ctx.addCommand('capturePage', captureDOM);
 
         // Listen for messages from background script
         browser.runtime.onMessage.addListener((message: unknown) => {
@@ -220,7 +219,7 @@ class PIIDetector {
             const type = input.getAttribute('type')?.toLowerCase() || 'text';
             const name = input.getAttribute('name') || input.getAttribute('id') || '';
 
-            if (type === 'password' || this.PATTERNS.PASSWORD_FIELD.test(name)) {
+            if (type === 'password' || PIIDetector.PATTERNS.PASSWORD_FIELD.test(name)) {
                 detections.push({
                     type: 'PASSWORD_FIELD',
                     selector: this.getElementSelector(input),
@@ -228,7 +227,7 @@ class PIIDetector {
                     redacted: true,
                 });
             } else if (input.value) {
-                for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
+                for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
                     if (piiType === 'PASSWORD_FIELD') continue;
                     if (pattern.test(input.value)) {
                         detections.push({
@@ -246,7 +245,7 @@ class PIIDetector {
         // Scan text content for PII — use exec() in a loop for non-anchored matches
         document.querySelectorAll('div, span, p, td, th, label').forEach(el => {
             const text = el.textContent || '';
-            for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
+            for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
                 if (piiType === 'PASSWORD_FIELD') continue;
                 // Use a copy without anchors for text content scanning
                 const scanPattern = new RegExp(pattern.source.replace(/^\^|$/g, ''), pattern.flags.replace('u', 'gu'));
@@ -390,7 +389,7 @@ class PIIDetector {
         return digits.slice(0, 4) + ' **** **** ' + digits.slice(-4);
     }
 
-    private getConfidence(type: string, value: string): number {
+    private getConfidence(type: string, _value: string): number {
         const baseConfidence: Record<string, number> = {
             AADHAAR: 0.85,
             PAN: 0.90,

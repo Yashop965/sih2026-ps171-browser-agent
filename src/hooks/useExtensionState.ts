@@ -25,20 +25,20 @@ export function useExtensionState() {
   }, []);
 
   const pauseTask = useCallback(() => {
-    setState(prev => ({ ...prev, status: 'paused' }));
+    setState((prev: TaskState) => ({ ...prev, status: 'paused' }));
   }, []);
 
   const resumeTask = useCallback(() => {
-    setState(prev => ({ ...prev, status: 'running' }));
+    setState((prev: TaskState) => ({ ...prev, status: 'running' }));
   }, []);
 
   const stopTask = useCallback(() => {
     abortRef.current = true;
-    setState(prev => ({ ...prev, status: 'idle', step: 0 }));
+    setState((prev: TaskState) => ({ ...prev, status: 'idle', step: 0 }));
   }, []);
 
   const advanceStep = useCallback((action: ActionCommand) => {
-    setState(prev => ({
+    setState((prev: TaskState) => ({
       ...prev,
       step: prev.step + 1,
       history: [...prev.history, action],
@@ -46,11 +46,11 @@ export function useExtensionState() {
   }, []);
 
   const completeTask = useCallback(() => {
-    setState(prev => ({ ...prev, status: 'complete' }));
+    setState((prev: TaskState) => ({ ...prev, status: 'complete' }));
   }, []);
 
   const setError = useCallback((error: string) => {
-    setState(prev => ({ ...prev, status: 'error', error }));
+    setState((prev: TaskState) => ({ ...prev, status: 'error', error }));
   }, []);
 
   return {

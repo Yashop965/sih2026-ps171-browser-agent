@@ -1,16 +1,16 @@
 import React from 'react';
 import { useProfiler } from '../hooks/useProfiler';
-import type { Stage } from '../lib/profiler';
+import type { Stage, PerformanceMetrics } from '../types';
 
 interface LatencyHUDProps {
   isVisible: boolean;
 }
 
-const STAGE_CONFIG: Array<{ key: Stage; label: string; color: string; threshold: number }> = [
-  { key: 'dom_extract', label: 'DOM', color: '#10b981', threshold: 10 },
-  { key: 'vision_inference', label: 'Vision', color: '#6366f1', threshold: 1000 },
-  { key: 'plan_response', label: 'Planner', color: '#f59e0b', threshold: 500 },
-  { key: 'action_execution', label: 'Action', color: '#ec4899', threshold: 100 },
+const STAGE_CONFIG: Array<{ key: Stage; metricKey: keyof PerformanceMetrics; label: string; color: string; threshold: number }> = [
+  { key: 'dom_extract', metricKey: 'dom_extract_ms', label: 'DOM', color: '#10b981', threshold: 10 },
+  { key: 'vision_inference', metricKey: 'vision_inference_ms', label: 'Vision', color: '#6366f1', threshold: 1000 },
+  { key: 'plan_response', metricKey: 'plan_response_ms', label: 'Planner', color: '#f59e0b', threshold: 500 },
+  { key: 'action_execution', metricKey: 'action_execution_ms', label: 'Action', color: '#ec4899', threshold: 100 },
 ];
 
 const LatencyHUD: React.FC<LatencyHUDProps> = ({ isVisible }) => {
@@ -34,8 +34,8 @@ const LatencyHUD: React.FC<LatencyHUDProps> = ({ isVisible }) => {
         <button onClick={reset} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }} title="Reset profiler">↺</button>
       </div>
 
-      {STAGE_CONFIG.map(({ key, label, color, threshold }) => {
-        const value = metrics?.[key] ?? 0;
+      {STAGE_CONFIG.map(({ key, metricKey, label, color, threshold }) => {
+        const value = metrics ? (metrics[metricKey] as number) : 0;
         const over = value >= threshold;
         return (
           <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>

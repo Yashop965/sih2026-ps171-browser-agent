@@ -157,8 +157,8 @@ async def plan_action(request: PlanRequest):
 
     try:
         # Convert elements & history to dictionary representations
-        raw_elements = [el.dict() for el in payload.interactiveElements]
-        raw_a11y = [el.dict() for el in payload.accessibilityTree]
+        raw_elements = [el.model_dump() for el in payload.interactiveElements]
+        raw_a11y = [el.model_dump() for el in payload.accessibilityTree]
         task_desc = payload.task_description or request.task_description
         history_list = payload.history or request.history
 
