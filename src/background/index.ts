@@ -1,4 +1,5 @@
 import { defineBackground } from 'wxt/sandbox';
+import { scanOutboundPayload } from '../lib/privacy';
 
 /**
  * Background Service Worker
@@ -7,7 +8,7 @@ import { defineBackground } from 'wxt/sandbox';
  * - Message routing between content scripts and server
  * - Privacy ledger management
  * - Action execution
- * - Image capture for vision processing
+ * - Outbound payload security scanning
  */
 defineBackground({
   main() {
@@ -70,7 +71,7 @@ async function handleCaptureAndSend(
     return { error: 'Failed to capture page' };
   }
   
-  // Log PII detections to privacy ledger
+  // Log PII detections to privacy ledger (without raw sensitive values)
   for (const pii of snapshot.detectedPII || []) {
     ledger.log({
       timestamp: Date.now(),
@@ -91,17 +92,38 @@ async function handleCaptureAndSend(
     timestamp: snapshot.timestamp,
     interactiveElements: snapshot.interactiveElements,
     accessibilityTree: snapshot.accessibilityTree,
-    detectedPII: snapshot.detectedPII.map(pii => ({
+    detectedPII: (snapshot.detectedPII || []).map((pii: any) => ({
       type: pii.type,
       selector: pii.selector,
       confidence: pii.confidence,
       verified: pii.isVerified,
     })),
-    // Intentionally exclude raw HTML and sensitive values
     hasScreenshots: false,
   };
+
+  // OUTBOUND PAYLOAD SECURITY SCANNER (Issue #11)
+  // Scans serialized payload right before network egress
+  const scanResult = scanOutboundPayload(payload);
+  if (!scanResult.safe) {
+    ledger.log({
+      timestamp: Date.now(),
+      tabId,
+      url: snapshot.url,
+      type: 'SECURITY_BLOCK',
+      selector: '',
+      confidence: 1,
+      verified: true,
+      action: 'BLOCKED_OUTBOUND_PII',
+      error: scanResult.error,
+    });
+    return {
+      success: false,
+      action: null,
+      error: scanResult.error,
+    };
+  }
   
-  // Log outbound payload
+  // Log outbound payload transmission metadata
   ledger.log({
     timestamp: Date.now(),
     tabId,
@@ -197,8 +219,8 @@ async function captureScreenshot(
   }
 }
 
-async function fetchServerAction(payload: SanitizedPayload): Promise<ServerResponse> {
-  const serverUrl = __SERVER_URL__;
+async function fetchServerAction(payload: any): Promise<any> {
+  const serverUrl = 'http://localhost:8000';
   
   try {
     const response = await fetch(`${serverUrl}/plan`, {
@@ -222,7 +244,8 @@ async function fetchServerAction(payload: SanitizedPayload): Promise<ServerRespo
   }
 }
 
-async function clickElement(tabId: number, elementId: number): Promise<boolean> {
+async function clickElement(tabId: number, elementId?: number): Promise<boolean> {
+  if (elementId === undefined) return false;
   await browser.tabs.executeScript(tabId, {
     code: `
       const el = document.querySelector('[data-agent-id="${elementId}"]');
@@ -239,9 +262,10 @@ async function clickElement(tabId: number, elementId: number): Promise<boolean> 
 
 async function typeInElement(
   tabId: number,
-  elementId: number,
-  text: string
+  elementId?: number,
+  text?: string
 ): Promise<boolean> {
+  if (elementId === undefined || !text) return false;
   await browser.tabs.executeScript(tabId, {
     code: `
       const el = document.querySelector('[data-agent-id="${elementId}"]');
@@ -262,24 +286,25 @@ async function typeInElement(
 
 async function scrollPage(
   tabId: number,
-  direction: 'up' | 'down',
-  amount: number
+  direction?: 'up' | 'down',
+  amount?: number
 ): Promise<boolean> {
   await browser.tabs.executeScript(tabId, {
     code: `
-      window.scrollBy(0, ${direction === 'down' ? amount : -amount});
+      window.scrollBy(0, ${direction === 'down' ? (amount || 500) : -(amount || 500)});
       true;
     `,
   });
   return true;
 }
 
-async function navigateTo(tabId: number, url: string): Promise<boolean> {
+async function navigateTo(tabId: number, url?: string): Promise<boolean> {
+  if (!url) return false;
   await browser.tabs.update(tabId, { url });
   return true;
 }
 
-async function waitForCondition(tabId: number, condition: string): Promise<boolean> {
+async function waitForCondition(tabId: number, condition?: string): Promise<boolean> {
   await browser.tabs.executeScript(tabId, {
     code: `
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -296,7 +321,7 @@ interface CaptureMessage {
 
 interface ActionMessage {
   type: 'EXECUTE_ACTION';
-  action: AgentAction;
+  action: any;
   url: string;
 }
 
@@ -339,22 +364,6 @@ class PrivacyLedger {
   
   clear(): void {
     this.entries = [];
-  }
-  
-  getSummary(): { total: number; byType: Record<string, number>; byAction: Record<string, number> } {
-    const byType: Record<string, number> = {};
-    const byAction: Record<string, number> = {};
-    
-    for (const entry of this.entries) {
-      byType[entry.type] = (byType[entry.type] || 0) + 1;
-      byAction[entry.action] = (byAction[entry.action] || 0) + 1;
-    }
-    
-    return {
-      total: this.entries.length,
-      byType,
-      byAction,
-    };
   }
 }
 

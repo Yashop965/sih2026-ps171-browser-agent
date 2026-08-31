@@ -35,9 +35,10 @@ export default defineContentScript({
         const piiDetector = new PIIDetector();
 
         // Capture DOM snapshot with PII redaction
-        function captureDOM(): SanitizedDOMSnapshot {
+        async function captureDOM(): Promise<SanitizedDOMSnapshot> {
             const a11yTree = buildAccessibilityTree(document);
             const interactiveElements = captureInteractiveElements();
+            const detectedPII = await piiManager.scanDocumentAsync();
 
             return {
                 url: window.location.href,
@@ -47,7 +48,7 @@ export default defineContentScript({
                 // Instead send sanitized interactive elements only
                 accessibilityTree: a11yTree,
                 interactiveElements,
-                detectedPII: piiDetector.scanDocument(),
+                detectedPII,
             };
         }
 
