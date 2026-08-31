@@ -138,27 +138,24 @@ RECENT ACTION HISTORY:
 AVAILABLE INTERACTIVE ELEMENTS:
 {json.dumps(sanitized_elements, indent=2)}
 
-INSTRUCTIONS:
-You are a form-filling agent. Your task is to COMPLETELY FILL ALL FORM FIELDS and SUBMIT.
+CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
+You are filling a FORM. The FIRST action must be to TYPE into the FIRST input field.
 
-RULES:
-1. For TEXT input fields (role=textbox): Use TYPE action with appropriate test data
-   - Name fields: "Test User"
-   - Email fields: "test@example.com"
-   - Phone fields: "+91 9876543210"
-   - Address fields: "123 Test Street, City, State"
-2. For BUTTON elements: Use CLICK action
-3. Only use SCROLL if there are no visible input fields
-4. After filling all fields, CLICK the Submit button
-5. When form is complete, return DONE action
+STEP-BY-STEP:
+1. If there are INPUT fields (role=textbox): TYPE test data into the FIRST input
+   - Use: "TYPE" action with targetId and value
+   - Example value: "Test User" for name fields
+2. Continue TYPEing into each input field one by one
+3. When ALL inputs are filled, CLICK the SUBMIT button
+4. Only use SCROLL if there are NO visible input fields
 
-Return ONLY a JSON object (no markdown, no explanations):
-{{
-  "type": "TYPE" | "CLICK" | "SCROLL" | "DONE",
-  "targetId": <element_id_number>,
-  "value": "<text to type>" (only for TYPE actions),
-  "reasoning": "<why this action>"
-}}"""
+YOUR NEXT ACTION MUST BE:
+- TYPE into an input field (if inputs exist)
+- CLICK a button (if no inputs remain)
+- SCROLL (ONLY if absolutely necessary)
+
+Return ONLY this JSON (no markdown, no explanation):
+{{"type": "TYPE", "targetId": <first_input_id>, "value": "Test User", "reasoning": "filling first name field"}}"""
         return prompt
 
     def parse_llm_output(self, llm_response: str, interactive_elements: List[Dict[str, Any]]) -> PlannerResult:
