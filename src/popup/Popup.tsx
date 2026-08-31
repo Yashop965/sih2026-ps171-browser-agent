@@ -51,12 +51,11 @@ function Popup() {
       if (!response.ok) throw new Error(`Planner returned ${response.status}`);
 
       const plan = await response.json();
-      const actions = plan.actions ?? [];
-      addLog(`Planner returned ${actions.length} action(s)`);
+      const action = plan.action; // Server returns single action, not array
+      addLog(`Planner returned: ${action?.type ?? 'NONE'}`);
 
-      if (actions[0]) {
-        const action = actions[0];
-        addLog(`Executing: ${action.type ?? action.action} on ${action.targetId ?? action.target}`);
+      if (action) {
+        addLog(`Executing: ${action.type} on target ${action.targetId ?? 'scroll'}`);
 
         const result: any = await browser.tabs.sendMessage(tab.id, {
           type: 'EXECUTE',
@@ -69,6 +68,8 @@ function Popup() {
         } else {
           addLog(`Action failed: ${result?.error ?? 'unknown error'}`);
         }
+      } else {
+        addLog('No action returned from planner');
       }
 
       addLog('Task completed');
