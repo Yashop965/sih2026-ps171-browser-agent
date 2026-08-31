@@ -133,3 +133,20 @@ export type Stage =
   | 'vision_inference'
   | 'plan_response'
   | 'action_execution';
+
+/**
+ * A privacy event surfaced in the UI.
+ *
+ * `detail` is rendered on screen, so it must describe what was found without
+ * ever containing the value itself — putting a detected Aadhaar number or
+ * password in here would display real PII inside the very panel meant to
+ * prove none escaped.
+ */
+export interface PrivacyEvent {
+  id: string;
+  timestamp: Date;
+  type: 'detected' | 'redacted';
+  category: PIIType;
+  detail: string;
+  confidence: number;
+}  
