@@ -135,13 +135,13 @@ export class PIIManager {
 
   private scanTextContent(element: Element, text: string): void {
     const patterns: [RegExp, PIIType, number][] = [
-      [/(\d{4}\s?\d{4}\s?\d{4})/g, 'AADHAAR', 0.7],
-      [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
-      [/(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})/g, 'CREDIT_CARD', 0.7],
-      /^([A-Z]{4}0[A-Z0-9]{7})$/, 'IFSC', 0.85,
-      [/([+]?[\d\s-]{10,13})/g, 'PHONE', 0.6],
-      /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95,
-      /(api[_-]?key|apikey|access[_-]?token)\s*[:=]\s*([^\s,;]+)/gi, 'API_KEY', 0.8],
+      [/(\\d{4}\\s?\\d{4}\\s?\\d{4})/g, 'AADHAAR', 0.7],
+      [/([A-Z]{5}\\d{4}[A-Z]{1})/g, 'PAN', 0.8],
+      [/(\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4})/g, 'CREDIT_CARD', 0.7],
+      [/^([A-Z]{4}0[A-Z0-9]{7})$/, 'IFSC', 0.85],
+      [/([+]?[\\d\\s-]{10,13})/g, 'PHONE', 0.6],
+      /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
+      /(api[_-]?key|apikey|access[_-]?token)\\s*[:=]\\s*([^\\s,;]+)/gi, 'API_KEY', 0.8],
     ];
 
     for (const pattern of patterns) {
