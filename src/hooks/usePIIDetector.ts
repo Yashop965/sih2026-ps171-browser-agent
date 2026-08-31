@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { detectPII, redactPII } from '../lib/privacy';
-import type { PrivacyEvent } from '../types';
+import type { PrivacyEvent, PIIType } from '../types';
 
 export function usePIIDetector() {
   const [events, setEvents] = useState<PrivacyEvent[]>([]);
@@ -23,7 +23,7 @@ export function usePIIDetector() {
     for (const det of detections) {
       newEvents.push({
         type: 'detected',
-        category: det.type,
+        category: det.type as PIIType,
         detail: `${det.type} detected`,
         confidence: det.confidence,
       });
@@ -39,8 +39,10 @@ export function usePIIDetector() {
   const redactText = useCallback((text: string): { redacted: string; events: PrivacyEvent[] } => {
     const { redacted, events: detections } = redactPII(text);
     const newEvents: PrivacyEvent[] = detections.map(det => ({
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date(),
       type: 'redacted',
-      category: det.type,
+      category: det.type as PIIType,
       detail: `Redacted ${det.type}`,
       confidence: det.confidence,
     }));

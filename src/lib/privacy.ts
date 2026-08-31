@@ -199,7 +199,7 @@ export function isPasswordField(element: Element): boolean {
  * Generate privacy event from detection
  */
 export function createPrivacyEvent(
-  type: string,
+  type: PIIType,
   value: string,
   confidence: number,
   selector?: string
