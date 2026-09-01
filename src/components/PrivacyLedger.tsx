@@ -205,8 +205,8 @@ export default function PrivacyLedger() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#0E1116',
-        color: '#D7DDE5',
+        background: '#ffffff',
+        color: '#1f2328',
       }}
     >
       <header style={{ borderBottom: '1px solid #1E242D', padding: '8px 12px 0' }}>
