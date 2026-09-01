@@ -121,6 +121,8 @@ function Popup() {
             filledIds.add(action.targetId); // Track this ID as filled
           } else {
             addLog(`❌ Type failed: ${result?.error ?? 'unknown'}`);
+            // Still mark as attempted so planner doesn't retry forever
+            filledIds.add(action.targetId);
           }
         } else if (action.type === 'CLICK' && action.targetId) {
           consecutiveScrolls = 0;

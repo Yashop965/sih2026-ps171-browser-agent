@@ -306,10 +306,10 @@ class PIIDetector {
                 if (piiType === 'PASSWORD_FIELD') continue;
 
                 // Strip the anchors so the pattern can match anywhere in the
-                // text. The trailing anchor needs escaping — a bare `$` in the
-                // search pattern means "end of string", so it never matched the
-                // literal `$` character and the anchor was left in place.
-                const source = pattern.source.replace(/^\^/, '').replace(/\$$/, '');
+                // text. Remove both ^ and $ anchors.
+                let source = pattern.source;
+                if (source.startsWith('^')) source = source.slice(1);
+                if (source.endsWith('$')) source = source.slice(0, -1);
                 const scanPattern = new RegExp(source, pattern.flags.replace('u', 'gu'));
 
                 let match: RegExpExecArray | null;
