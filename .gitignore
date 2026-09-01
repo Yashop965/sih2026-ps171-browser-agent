@@ -1,24 +1,64 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
 
-node_modules
-dist
-dist-ssr
-*.local
+# Build output
+dist/
+build/
+.wxt/
+.vite/
+.cache/
+*.tsbuildinfo
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# WXT
+.wxt/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+tsconfig.tsbuildinfo
+
+# Ollama
+.ollama/
+
+# Media assets (keep src/assets but not generated)
+/public/generated/
