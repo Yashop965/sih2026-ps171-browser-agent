@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
+import { PROVIDERS, ProviderKey, getProvider } from '../lib/providerConfig';
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
@@ -9,6 +10,19 @@ function Popup() {
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<ProviderKey>('custom');
+  const [providerKey, setProviderKey] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Load saved provider config from chrome.storage
+  useState(() => {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.get(['providerKey', 'apiKey'], (result) => {
+        if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
+        if (result.apiKey) setProviderKey(result.apiKey);
+      });
+    }
+  });
 
   const addLog = (message: string) => {
     setLogs(prev =>
@@ -185,6 +199,48 @@ function Popup() {
             onChange={(e) => setTask(e.target.value)}
             rows={3}
           />
+        </div>
+
+        <div className="provider-section">
+          <label className="input-label">Provider</label>
+          <div className="provider-row">
+            <select
+              className="provider-select"
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value as ProviderKey)}
+            >
+              {Object.values(PROVIDERS).map(p => (
+                <option key={p.name} value={p.name}>{p.label}</option>
+              ))}
+            </select>
+            <button
+              className="settings-button"
+              onClick={() => setShowSettings(!showSettings)}
+              title="Provider Settings"
+            >⚙</button>
+          </div>
+
+          {showSettings && (
+            <div className="provider-settings">
+              <input
+                type="password"
+                className="api-key-input"
+                placeholder={getProvider(selectedProvider).url.includes('localhost') ? 'No key needed' : 'API Key'}
+                value={providerKey}
+                onChange={(e) => setProviderKey(e.target.value)}
+                disabled={getProvider(selectedProvider).url.includes('localhost')}
+              />
+              <button
+                className="save-key-button"
+                onClick={() => {
+                  if (typeof chrome !== 'undefined' && chrome.storage) {
+                    chrome.storage.local.set({ providerKey: selectedProvider, apiKey: providerKey });
+                  }
+                  setShowSettings(false);
+                }}
+              >Save</button>
+            </div>
+          )}
         </div>
 
         <button

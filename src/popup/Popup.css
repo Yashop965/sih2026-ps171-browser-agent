@@ -1,207 +1,69 @@
-.popup {
-  width: 400px;
-  min-height: 500px;
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.popup-header {
-  padding: 16px;
-  border-bottom: 1px solid #334155;
-}
-
-.popup-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #f8fafc;
-  margin: 0;
-}
-
-.popup-subtitle {
-  font-size: 12px;
-  color: #94a3b8;
-  margin: 4px 0 0;
-}
-
-.popup-body {
-  flex: 1;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.task-input-section {
+.provider-section {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.input-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #cbd5e1;
-}
-
-.task-textarea {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  background: #1e293b;
-  color: #f8fafc;
-  font-size: 14px;
-  resize: vertical;
-  font-family: inherit;
-}
-
-.task-textarea:focus {
-  outline: none;
-  border-color: #6366f1;
-}
-
-.start-button {
-  width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: white;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.start-button:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.start-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.start-button.running {
-  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-}
-
-.step-indicator {
-  padding: 8px 12px;
-  background: #1e293b;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #6366f1;
-  text-align: center;
-}
-
-.latency-display {
-  padding: 8px 12px;
-  background: #0f172a;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #10b981;
-  text-align: center;
-}
-
-.log-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 200px;
-}
-
-.log-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #cbd5e1;
-  margin-bottom: 8px;
-}
-
-.log-container {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.log-entry {
-  font-size: 12px;
-  color: #94a3b8;
-  padding: 6px 8px;
-  background: #0f172a;
-  border-radius: 4px;
-  font-family: 'Monaco', 'Consolas', monospace;
-}
-
-.popup-footer {
-  padding: 12px 16px;
-  border-top: 1px solid #334155;
-  font-size: 11px;
-  color: #64748b;
-  text-align: center;
-}
-
-/* Privacy Ledger Section */
-.privacy-ledger-section {
-  margin-top: 16px;
-  border-top: 1px solid #334155;
-  padding-top: 16px;
-}
-
-.privacy-ledger-container {
-  height: 250px;
-  overflow: hidden;
-  border-radius: 8px;
-  border: 1px solid #334155;
-}
-
-/* Button Group */
-.button-group {
+.provider-row {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 
-.overlay-button {
+.provider-select {
   flex: 1;
-  padding: 10px 16px;
+  padding: 8px 10px;
   border: 1px solid #334155;
-  border-radius: 8px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.settings-button {
+  padding: 8px 12px;
+  border: 1px solid #334155;
+  border-radius: 6px;
   background: #1e293b;
   color: #94a3b8;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s;
 }
 
-.overlay-button:hover:not(:disabled) {
+.settings-button:hover {
   background: #334155;
   color: #f8fafc;
-  border-color: #6366f1;
 }
 
-.overlay-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.provider-settings {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: #1e293b;
+  border-radius: 6px;
 }
 
-.overlay-button.active {
-  background: #6366f1;
+.api-key-input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.save-key-button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #3b82f6;
   color: white;
-  border-color: #6366f1;
+  font-size: 13px;
+  cursor: pointer;
 }
 
-/* Overlay Container */
-.overlay-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  pointer-events: none;
-  z-index: 2147483647;
+.save-key-button:hover {
+  background: #2563eb;
 }
