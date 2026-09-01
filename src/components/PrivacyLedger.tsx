@@ -390,104 +390,127 @@ export default function PrivacyLedger() {
           </div>
         </>
       ) : view === 'heatmap' ? (
-        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden', minHeight: 250 }}>
-          {/* Page simulation */}
+        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden', minHeight: 300 }}>
+          {/* Stats bar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 16px',
+            borderBottom: '1px solid #E8E6E1',
+            background: '#ffffff',
+            fontSize: 10,
+            fontFamily: MONO,
+            color: '#6B6B6B',
+          }}>
+            <span>
+              <strong style={{ color: '#0D0D0D' }}>{detections.length}</strong> total fields
+              {dStats.verified > 0 && (
+                <span style={{ marginLeft: 12 }}>
+                  <span style={{ color: '#8B2E2E' }}>{dStats.verified}</span> verified
+                </span>
+              )}
+            </span>
+            <span style={{ color: '#9A9A9A' }}>
+              {dStats.byType.slice(0, 3).map(t => `${t.type}: ${t.count}`).join(' · ')}
+            </span>
+          </div>
+
+          {/* Heatmap canvas */}
           <div
             style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
+              flex: 1,
+              position: 'relative',
               background: '#ffffff',
-              border: '1px solid #E8E6E1',
-              margin: 12,
-              borderRadius: 1,
               overflow: 'hidden',
             }}
           >
-            {/* Field count indicator */}
-            <div style={{ 
-              position: 'absolute', 
-              top: 10, 
-              right: 10, 
-              background: detections.length > 0 ? '#0D0D0D' : '#F0EFEC', 
-              color: detections.length > 0 ? '#FFFFFF' : '#9A9A9A',
-              padding: '6px 12px', 
-              borderRadius: 1, 
-              fontSize: 9, 
-              fontFamily: "'SF Mono', Monaco, monospace", 
-              zIndex: 10,
-              fontWeight: 600,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase'
-            }}>
-              {detections.length} field{detections.length !== 1 ? 's' : ''}
-            </div>
+            {/* Grid pattern background */}
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: 'linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px)',
+              backgroundSize: '40px 40px',
+            }} />
 
             {detections.length > 0 ? (
-              detections.slice(0, 20).map((d, i) => {
-                // Position based on element type for better distribution
-                const typePositions: Record<string, { x: number; y: number }> = {
-                  'EMAIL': { x: 30, y: 15 },
-                  'PHONE': { x: 70, y: 25 },
-                  'PASSWORD': { x: 30, y: 40 },
-                  'SSN': { x: 70, y: 50 },
-                  'CREDIT_CARD': { x: 30, y: 65 },
-                  'AADHAAR': { x: 70, y: 75 },
-                  'PAN': { x: 50, y: 85 },
-                };
-                
-                const defaultPos = { 
-                  x: 20 + ((i % 4) * 22), 
-                  y: 10 + Math.floor(i / 4) * 20 
-                };
-                
-                const pos = typePositions[d.type] || defaultPos;
+              <>
+                {/* Render all detections as a scatter plot */}
+                {detections.map((d, i) => {
+                  // Distribute across canvas using golden ratio spiral for even distribution
+                  const angle = i * 2.399963; // Golden angle
+                  const radius = Math.sqrt(i / detections.length) * 0.45;
+                  const x = 50 + radius * Math.cos(angle) * 100;
+                  const y = 50 + radius * Math.sin(angle) * 100;
 
-                return (
-                  <div
-                    key={`heatmap-${d.selector}-${i}`}
-                    onClick={() => onRowClick(d)}
-                    title={`${d.type}: ${d.selector} (${Math.round(d.confidence * 100)}%)`}
-                    style={{
-                      position: 'absolute',
-                      left: `${pos.x}%`,
-                      top: `${pos.y}%`,
-                      transform: 'translate(-50%, -50%)',
-                      width: 32,
-                      height: 32,
-                      borderRadius: '50%',
-                      background: d.verified ? 'rgba(139, 46, 46, 0.12)' : 'rgba(139, 105, 20, 0.12)',
-                      border: `2px solid ${d.verified ? '#8B2E2E' : '#8B6914'}`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      zIndex: 5,
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1.2)';
-                      (e.currentTarget as HTMLElement).style.zIndex = '20';
-                      (e.currentTarget as HTMLElement).style.boxShadow = `0 0 12px ${d.verified ? '#8B2E2E40' : '#8B691440'}`;
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1)';
-                      (e.currentTarget as HTMLElement).style.zIndex = '5';
-                      (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-                    }}
-                  >
-                    {/* Inner dot */}
-                    <div style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      background: d.verified ? '#8B2E2E' : '#8B6914',
-                    }} />
+                  // Size based on confidence
+                  const size = 8 + (d.confidence * 12);
+                  const color = d.verified ? '#8B2E2E' : '#8B6914';
+
+                  return (
+                    <div
+                      key={`heatmap-${d.selector}-${i}`}
+                      onClick={() => onRowClick(d)}
+                      title={`${d.type}: ${d.selector} (${Math.round(d.confidence * 100)}%)`}
+                      style={{
+                        position: 'absolute',
+                        left: `${x}%`,
+                        top: `${y}%`,
+                        transform: `translate(-50%, -50%)`,
+                        width: size,
+                        height: size,
+                        borderRadius: '50%',
+                        background: d.verified ? 'rgba(139, 46, 46, 0.15)' : 'rgba(139, 105, 20, 0.15)',
+                        border: `1.5px solid ${color}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        zIndex: 5,
+                      }}
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget as HTMLElement;
+                        el.style.transform = 'translate(-50%, -50%) scale(1.5)';
+                        el.style.zIndex = '20';
+                        el.style.boxShadow = `0 0 16px ${color}60`;
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget as HTMLElement;
+                        el.style.transform = 'translate(-50%, -50%) scale(1)';
+                        el.style.zIndex = '5';
+                        el.style.boxShadow = 'none';
+                      }}
+                    >
+                      {/* Inner dot - smaller for high count */}
+                      <div style={{
+                        width: Math.max(3, size * 0.35),
+                        height: Math.max(3, size * 0.35),
+                        borderRadius: '50%',
+                        background: color,
+                      }} />
+                    </div>
+                  );
+                })}
+
+                {/* Cluster indicator for large datasets */}
+                {detections.length > 50 && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: 12,
+                    right: 12,
+                    background: '#0D0D0D',
+                    color: '#FFFFFF',
+                    padding: '6px 10px',
+                    borderRadius: 1,
+                    fontSize: 9,
+                    fontFamily: MONO,
+                    zIndex: 10,
+                  }}>
+                    {detections.length} fields
                   </div>
-                );
-              })
+                )}
+              </>
             ) : (
               <div style={{
                 position: 'absolute',
@@ -501,7 +524,7 @@ export default function PrivacyLedger() {
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 8v4l3 3" />
                 </svg>
-                <div style={{ fontFamily: "'SF Mono', Monaco, monospace", fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>No fields detected</div>
+                <div style={{ fontFamily: MONO, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>No fields detected</div>
                 <div style={{ fontSize: 10, color: '#B0B0B0' }}>Visit a page with PII to see detection heatmap</div>
               </div>
             )}
@@ -510,22 +533,23 @@ export default function PrivacyLedger() {
             {detections.length > 0 && (
               <div style={{
                 position: 'absolute',
-                bottom: 12,
+                top: 12,
                 left: 12,
                 background: '#ffffff',
                 border: '1px solid #E8E6E1',
                 borderRadius: 1,
                 padding: '10px 14px',
                 fontSize: 10,
-                fontFamily: "'SF Mono', Monaco, monospace",
+                fontFamily: MONO,
+                zIndex: 10,
               }}>
                 <div style={{ marginBottom: 8, color: '#9A9A9A', textTransform: 'uppercase', letterSpacing: '0.1em', fontSize: 9, fontWeight: 600 }}>Legend</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B2E2E' }} />
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B2E2E' }} />
                   <span style={{ color: '#0D0D0D', fontSize: 9 }}>Verified</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B6914' }} />
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B6914' }} />
                   <span style={{ color: '#0D0D0D', fontSize: 9 }}>Pattern match</span>
                 </div>
               </div>
