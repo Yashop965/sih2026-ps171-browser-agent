@@ -35,7 +35,7 @@ const TONE: Record<LedgerTone, { fg: string; bg: string; bar: string }> = {
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 const POLL_MS = 1000;
 
-type View = 'detections' | 'log';
+type View = 'detections' | 'log' | 'heatmap';
 type SortKey = 'type' | 'confidence' | 'selector';
 
 function clockTime(ms: number) {
@@ -216,6 +216,9 @@ export default function PrivacyLedger() {
             <span style={{ fontFamily: MONO, fontSize: 11, color: '#8A8A8A' }}>
               {dStats.total}
             </span>
+          </button>
+          <button onClick={() => setView('heatmap')} style={tab('heatmap')}>
+            Heatmap
           </button>
           <button onClick={() => setView('log')} style={tab('log')}>
             Audit log{' '}
