@@ -18,13 +18,18 @@ type AgentRequest =
     | { type: 'EXTRACT' }
     | { type: 'EXECUTE'; action: import('../lib/actions').Action }
     | { type: 'PING' }
-    | { type: 'capturePage' };
+    | { type: 'capturePage' }
+    | { type: 'HIGHLIGHT'; selector: string };
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
     if (typeof msg !== 'object' || msg === null || !('type' in msg)) return false;
     const t = (msg as { type: unknown }).type;
-    return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING' || t === 'capturePage';
+    return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING'
+        || t === 'capturePage' || t === 'HIGHLIGHT';
 }
+
+const HIGHLIGHT_ID = '__agent-highlight';
+const HIGHLIGHT_MS = 2500;
 
 export default defineContentScript({
     matches: ['<all_urls>'],
@@ -145,7 +150,52 @@ export default defineContentScript({
             return roleMap[tag.toUpperCase()] || '';
         }
 
-        // Listen for messages from background script.
+        /**
+         * Outline an element so the person can see where a detection came
+         * from. Called when a row in the detections table is clicked.
+         *
+         * The overlay is a fixed-position div with no href, role or tabindex,
+         * so captureInteractiveElements() and extract() will not pick it up as
+         * a page element. pointer-events: none keeps it from swallowing clicks.
+         */
+        function highlight(selector: string): { ok: boolean; error?: string } {
+            let el: Element | null = null;
+            try {
+                el = document.querySelector(selector);
+            } catch {
+                return { ok: false, error: 'invalid selector' };
+            }
+            if (!el) return { ok: false, error: 'element not on page' };
+
+            el.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+
+            // Read the rect after scrolling, or the box lands where the
+            // element used to be.
+            const rect = el.getBoundingClientRect();
+
+            document.getElementById(HIGHLIGHT_ID)?.remove();
+
+            const box = document.createElement('div');
+            box.id = HIGHLIGHT_ID;
+            box.style.cssText = [
+                'position:fixed',
+                `top:${rect.top - 3}px`,
+                `left:${rect.left - 3}px`,
+                `width:${rect.width + 6}px`,
+                `height:${rect.height + 6}px`,
+                'border:2px solid #C2413B',
+                'border-radius:3px',
+                'background:rgba(194,65,59,0.12)',
+                'pointer-events:none',
+                'z-index:2147483647',
+            ].join(';');
+            document.body.appendChild(box);
+
+            setTimeout(() => box.remove(), HIGHLIGHT_MS);
+            return { ok: true };
+        }
+
+        // Listen for messages from background script and the popup.
         // 'capturePage' is handled here rather than through a command
         // registration — WXT's ctx has no addCommand().
         browser.runtime.onMessage.addListener((message: unknown) => {
@@ -171,6 +221,10 @@ export default defineContentScript({
                 return Promise.resolve(captureDOM());
             }
 
+            if (message.type === 'HIGHLIGHT') {
+                return Promise.resolve(highlight(message.selector));
+            }
+
             return;
         });
 
@@ -191,6 +245,7 @@ export default defineContentScript({
                 execute: executeWithRetry,
                 context: getPageContext,
                 captureDOM,
+                highlight,
                 piiDetector,
             };
         }
