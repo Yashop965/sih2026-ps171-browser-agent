@@ -27,9 +27,9 @@ import {
 // Colour carries meaning, not decoration. Red is something we stopped,
 // green is something we let through, amber is something that needs a look.
 const TONE: Record<LedgerTone, { fg: string; bg: string; bar: string }> = {
-  blocked: { fg: '#820710', bg: 'rgba(130,7,16,0.08)', bar: '#cf222e' },
-  clean: { fg: '#1a7f37', bg: 'rgba(26,127,55,0.08)', bar: '#2da44e' },
-  warning: { fg: '#9a6700', bg: 'rgba(154,103,0,0.08)', bar: '#d0ab00' },
+  blocked: { fg: '#8B2E2E', bg: 'rgba(139,46,46,0.08)', bar: '#8B2E2E' },
+  clean: { fg: '#2D5A27', bg: 'rgba(45,90,39,0.08)', bar: '#2D5A27' },
+  warning: { fg: '#8B6914', bg: 'rgba(139,105,20,0.08)', bar: '#8B6914' },
 };
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -389,6 +389,112 @@ export default function PrivacyLedger() {
             )}
           </div>
         </>
+      ) : view === 'heatmap' ? (
+        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden' }}>
+          {/* Page simulation */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: '#ffffff',
+              border: '1px solid #E8E6E1',
+              margin: 12,
+              borderRadius: 1,
+            }}
+          >
+            {/* Simulated form fields */}
+            {visible.slice(0, 15).map((d, i) => {
+              const yPercent = ((i + 1) / Math.max(visible.length, 1)) * 85 + 5;
+              const xPercent = 20 + ((i % 3) * 25);
+              const color = d.verified ? '#8B2E2E' : '#8B6914';
+
+              return (
+                <div
+                  key={`heatmap-${d.selector}-${i}`}
+                  onClick={() => onRowClick(d)}
+                  title={`${d.type}: ${d.selector}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${xPercent}%`,
+                    top: `${yPercent}%`,
+                    transform: 'translate(-50%, -50%)',
+                    width: 28,
+                    height: 28,
+                    borderRadius: '50%',
+                    background: `${color}15`,
+                    border: `1.5px solid ${color}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1.15)';
+                    (e.currentTarget as HTMLElement).style.zIndex = '10';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1)';
+                    (e.currentTarget as HTMLElement).style.zIndex = '1';
+                  }}
+                >
+                  {/* Simple dot indicator */}
+                  <div style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: color,
+                  }} />
+                </div>
+              );
+            })}
+
+            {/* Legend */}
+            <div style={{
+              position: 'absolute',
+              bottom: 12,
+              left: 12,
+              background: '#ffffff',
+              border: '1px solid #E8E6E1',
+              borderRadius: 1,
+              padding: '10px 14px',
+              fontSize: 10,
+              fontFamily: MONO,
+            }}>
+              <div style={{ marginBottom: 8, color: '#9A9A9A', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 9 }}>Legend</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B2E2E' }} />
+                <span style={{ color: '#0D0D0D' }}>Verified PII</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B6914' }} />
+                <span style={{ color: '#0D0D0D' }}>Pattern match</span>
+              </div>
+            </div>
+
+            {/* Empty state */}
+            {visible.length === 0 && (
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                color: '#9A9A9A',
+              }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: 0.5 }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 8v4l3 3" />
+                </svg>
+                <div style={{ fontFamily: MONO, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>No fields detected</div>
+                <div style={{ fontSize: 10, marginTop: 6, color: '#B0B0B0' }}>PII will appear here when detected</div>
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto' }}>
           {error ? (
