@@ -439,13 +439,14 @@ export default function PrivacyLedger() {
                 {detections.map((d, i) => {
                   // Distribute across canvas using golden ratio spiral for even distribution
                   const angle = i * 2.399963; // Golden angle
-                  const radius = Math.sqrt(i / detections.length) * 0.45;
-                  const x = 50 + radius * Math.cos(angle) * 100;
-                  const y = 50 + radius * Math.sin(angle) * 100;
+                  const radius = Math.sqrt(i / detections.length) * 0.42;
+                  const x = 50 + radius * Math.cos(angle) * 95;
+                  const y = 50 + radius * Math.sin(angle) * 95;
 
-                  // Size based on confidence
-                  const size = 8 + (d.confidence * 12);
+                  // Size based on confidence - make them more visible
+                  const size = d.verified ? 10 : 8;
                   const color = d.verified ? '#8B2E2E' : '#8B6914';
+                  const opacity = d.verified ? 0.9 : 0.75;
 
                   return (
                     <div
@@ -460,36 +461,29 @@ export default function PrivacyLedger() {
                         width: size,
                         height: size,
                         borderRadius: '50%',
-                        background: d.verified ? 'rgba(139, 46, 46, 0.15)' : 'rgba(139, 105, 20, 0.15)',
-                        border: `1.5px solid ${color}`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        background: color,
+                        opacity: opacity,
+                        border: `1px solid ${color}`,
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                         zIndex: 5,
+                        boxShadow: `0 0 4px ${color}40`,
                       }}
                       onMouseEnter={(e) => {
                         const el = e.currentTarget as HTMLElement;
-                        el.style.transform = 'translate(-50%, -50%) scale(1.5)';
+                        el.style.transform = 'translate(-50%, -50%) scale(2)';
                         el.style.zIndex = '20';
-                        el.style.boxShadow = `0 0 16px ${color}60`;
+                        el.style.opacity = '1';
+                        el.style.boxShadow = `0 0 12px ${color}80`;
                       }}
                       onMouseLeave={(e) => {
                         const el = e.currentTarget as HTMLElement;
                         el.style.transform = 'translate(-50%, -50%) scale(1)';
                         el.style.zIndex = '5';
-                        el.style.boxShadow = 'none';
+                        el.style.opacity = String(opacity);
+                        el.style.boxShadow = `0 0 4px ${color}40`;
                       }}
-                    >
-                      {/* Inner dot - smaller for high count */}
-                      <div style={{
-                        width: Math.max(3, size * 0.35),
-                        height: Math.max(3, size * 0.35),
-                        borderRadius: '50%',
-                        background: color,
-                      }} />
-                    </div>
+                    />
                   );
                 })}
 
