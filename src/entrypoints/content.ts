@@ -55,41 +55,24 @@ export default defineContentScript({
         }
 
         // Capture interactive elements for action targeting
+        // Reuses extract() from lib/dom.ts to ensure ID consistency
+        // with the registry used by execute() in actions.ts
         function captureInteractiveElements(): InteractiveElement[] {
-            const selectors = [
-                'button', 'a[href]', 'input', 'select', 'textarea',
-                '[role="button"]', '[role="link"]', '[role="textbox"]',
-                '[tabindex]:not([tabindex="-1"])',
-                'details summary', 'summary'
-            ].join(', ');
-
-            const elements = document.querySelectorAll(selectors) as NodeListOf<HTMLElement>;
-            const result: InteractiveElement[] = [];
-
-            elements.forEach((el, index) => {
-                const rect = el.getBoundingClientRect();
-                if (rect.width === 0 && rect.height === 0) return;
-
-                // Annotate DOM with data-agent-id so background actions can find targets
-                el.setAttribute('data-agent-id', String(index));
-
-                result.push({
-                    id: index,
-                    tag: el.tagName.toLowerCase(),
-                    role: el.getAttribute('role') || el.tagName.toLowerCase(),
-                    label: el.textContent?.trim().slice(0, 50) || '',
-                    name: el.getAttribute('name') || el.getAttribute('id') || '',
-                    rect: {
-                        x: Math.round(rect.x),
-                        y: Math.round(rect.y),
-                        width: Math.round(rect.width),
-                        height: Math.round(rect.height),
-                    },
-                    isPassword: el.getAttribute('type') === 'password',
-                });
-            });
-
-            return result;
+            const extracted = extract();
+            return extracted.map(el => ({
+                id: el.id,
+                tag: el.tag,
+                role: el.role,
+                label: el.label.slice(0, 50),
+                name: '',
+                rect: {
+                    x: el.x,
+                    y: el.y,
+                    width: el.width,
+                    height: el.height,
+                },
+                isPassword: el.type === 'password',
+            }));
         }
 
         // Build simplified accessibility tree

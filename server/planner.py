@@ -99,22 +99,42 @@ class ActionPlanner:
         """
         Builds a structured prompt for the LLM based on sanitized page metadata.
         """
+        # Parse task description into key-value pairs
+        task_kv = {}
+        if task_description:
+            # Pattern: "Label: Value" separated by commas
+            # e.g. "First Name: John, Last Name: Doe, Email: john@example.com"
+            pairs = re.split(r',\s*(?=[A-Za-z][A-Za-z ]+\s*:)', task_description)
+            for pair in pairs:
+                if ':' in pair:
+                    key, val = pair.split(':', 1)
+                    task_kv[key.strip().lower()] = val.strip()
+
         # Filter and preview elements safely (ensuring zero password leaks)
         sanitized_elements = []
         for el in interactive_elements[:30]:
             element_id = el.get("id")
             role = el.get("role", el.get("tag", "element"))
-            label = str(el.get("label", ""))[:40]
+            label = str(el.get("label", "")).lower()[:50]
             is_password = el.get("isPassword", False)
 
             if is_password:
-                label = "[REDACTED PASSWORD FIELD]"
+                label = "[redacted password field]"
+
+            # Check if this element was already filled in history
+            already_filled = False
+            if history:
+                for step in history:
+                    if step.get("targetId") == element_id and step.get("result") == "OK":
+                        already_filled = True
+                        break
 
             sanitized_elements.append({
                 "targetId": element_id,
                 "role": role,
                 "label": label,
                 "interactive": el.get("interactive", True),
+                "filled": already_filled,
             })
 
         history_summary = []
@@ -127,35 +147,44 @@ class ActionPlanner:
         history_str = "\n".join(history_summary) if history_summary else "None"
         task_str = task_description or "Interact with the page to assist the user."
 
+        # Build key-value map for the LLM
+        kv_str = json.dumps(task_kv, indent=2) if task_kv else "None"
+
         prompt = f"""URL: {url}
 PAGE TITLE: {title}
 
 TASK: {task_str}
 
-RECENT ACTION HISTORY:
+KEY-VALUE PAIRS FROM TASK:
+{kv_str}
+
+RECENT ACTION HISTORY (already filled fields):
 {history_str}
 
 AVAILABLE INTERACTIVE ELEMENTS:
 {json.dumps(sanitized_elements, indent=2)}
 
-CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
-You are filling a FORM. The FIRST action must be to TYPE into the FIRST input field.
+CRITICAL INSTRUCTIONS:
+1. Match KEY names from the task to LABEL names on elements
+2. TYPE the matching VALUE into elements that are NOT already filled
+3. Skip elements that are already filled (marked as "filled": true)
+4. When all inputs are filled, CLICK the SUBMIT button
+5. Only use SCROLL if there are NO visible input fields
 
-STEP-BY-STEP:
-1. If there are INPUT fields (role=textbox): TYPE test data into the FIRST input
-   - Use: "TYPE" action with targetId and value
-   - Example value: "Test User" for name fields
-2. Continue TYPEing into each input field one by one
-3. When ALL inputs are filled, CLICK the SUBMIT button
-4. Only use SCROLL if there are NO visible input fields
+MATCHING RULES:
+- "first name" → type the value for "First Name" key
+- "last name" → type the value for "Last Name" key  
+- "email" → type the value for "Email" key
+- "phone" → type the value for "Phone" key
+- Match keywords loosely: "name" matches "Full Name", "First Name", etc.
 
 YOUR NEXT ACTION MUST BE:
-- TYPE into an input field (if inputs exist)
-- CLICK a button (if no inputs remain)
-- SCROLL (ONLY if absolutely necessary)
+- TYPE into an unfilled input field (if any exist) using the matching value from the task
+- CLICK a button (if all inputs are filled)
+- DONE (if no more actions needed)
 
 Return ONLY this JSON (no markdown, no explanation):
-{{"type": "TYPE", "targetId": <first_input_id>, "value": "Test User", "reasoning": "filling first name field"}}"""
+{{"type": "TYPE", "targetId": <unfilled_input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
         return prompt
 
     def parse_llm_output(self, llm_response: str, interactive_elements: List[Dict[str, Any]]) -> PlannerResult:

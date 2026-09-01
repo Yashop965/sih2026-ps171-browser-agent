@@ -14,6 +14,12 @@ import uuid
 import time
 import asyncio
 from datetime import datetime
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+env_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(env_path)
 
 from server.middleware.logging import JSONLoggingMiddleware
 from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimiterMiddleware
@@ -103,28 +109,54 @@ class SanitizedPayload(BaseModel):
 
 
 class PlanRequest(BaseModel):
-    payload: Optional[SanitizedPayload] = None
+    # Flexible flat payload (for popup direct calls)
+    task: Optional[str] = None
+    elements: Optional[List[Any]] = Field(default_factory=list, validation_alias="interactiveElements", alias="interactiveElements")
     url: Optional[str] = None
     title: Optional[str] = ""
     timestamp: Optional[int] = None
-    interactiveElements: Optional[List[InteractiveElement]] = None
-    accessibilityTree: Optional[List[ARIAElement]] = None
-    detectedPII: Optional[List[DetectedPII]] = None
+    interactiveElements: Optional[List[InteractiveElement]] = Field(default_factory=list)
+    accessibilityTree: Optional[List[ARIAElement]] = Field(default_factory=list)
+    detectedPII: Optional[List[DetectedPII]] = Field(default_factory=list)
     task_description: Optional[str] = None
-    history: Optional[List[Dict[str, Any]]] = None
+    history: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    step: Optional[int] = None
+    inputCount: Optional[int] = None
+    buttonCount: Optional[int] = None
+
+    model_config = {"populate_by_name": True}
 
     def get_sanitized_payload(self) -> SanitizedPayload:
         """Flexible parser supporting both nested payload and flat root payloads."""
-        if self.payload:
-            return self.payload
+        # Map 'task' → 'task_description' and 'elements' → 'interactiveElements'
+        task_desc = self.task_description or self.task or ""
+        elements = self.interactiveElements or (self.elements if hasattr(self, 'elements') else [])
+
+        # Convert elements to InteractiveElement format if needed
+        converted_elements = []
+        for el in elements:
+            if isinstance(el, InteractiveElement):
+                converted_elements.append(el)
+            elif isinstance(el, dict):
+                converted_elements.append(InteractiveElement(
+                    id=el.get("id"),
+                    tag=el.get("tag"),
+                    role=el.get("role"),
+                    label=el.get("label", ""),
+                    name=el.get("name", ""),
+                    rect=el.get("rect"),
+                    isPassword=el.get("isPassword", False),
+                    interactive=el.get("interactive", True),
+                ))
+
         return SanitizedPayload(
             url=self.url or "http://localhost",
             title=self.title or "",
             timestamp=self.timestamp,
-            interactiveElements=self.interactiveElements or [],
+            interactiveElements=converted_elements,
             accessibilityTree=self.accessibilityTree or [],
             detectedPII=self.detectedPII or [],
-            task_description=self.task_description,
+            task_description=task_desc,
             history=self.history,
         )
 

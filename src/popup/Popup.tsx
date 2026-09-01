@@ -27,7 +27,8 @@ function Popup() {
     const started = performance.now();
     const maxSteps = 15;
     let currentStep = 0;
-    let consecutiveScrolls = 0; // Track scroll spam
+    let consecutiveScrolls = 0;
+    let filledIds = new Set<number>(); // Track which element IDs are already filled
 
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -38,10 +39,11 @@ function Popup() {
         addLog(`--- Step ${currentStep}/${maxSteps} ---`);
         addLog('Extracting page elements...');
 
-        const snapshot: any = await browser.tabs.sendMessage(tab.id, { type: 'EXTRACT' });
+        const snapshot: any = await browser.runtime.sendMessage({ type: 'EXTRACT' });
+        console.log('[Popup] EXTRACT response:', snapshot);
 
         if (!snapshot?.ok) {
-          addLog('Failed to extract elements');
+          addLog(`Failed to extract elements: ${snapshot?.error ?? 'no ok flag'}`);
           break;
         }
 
@@ -60,6 +62,9 @@ function Popup() {
         addLog(`Elements: ${inputFields.length} inputs, ${buttons.length} buttons`);
 
         addLog('Sending sanitized context to planner...');
+        // Build history with actually filled element IDs
+        const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK' }));
+
         const response = await fetch('http://localhost:8000/plan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -69,11 +74,7 @@ function Popup() {
             step: currentStep,
             inputCount: inputFields.length,
             buttonCount: buttons.length,
-            history: logs.filter(l => l.includes('Executing:')).map(l => ({
-              action: l.replace('Executing: ', '').split(' on ')[0],
-              targetId: parseInt(l.split(' on ')[1]) || null,
-              result: 'OK'
-            }))
+            history: history,
           }),
         });
 
@@ -99,7 +100,7 @@ function Popup() {
             break;
           }
           addLog(`Scrolling page... (${consecutiveScrolls}/3)`);
-          const scrollResult = await browser.tabs.sendMessage(tab.id, {
+          const scrollResult = await browser.runtime.sendMessage({
             type: 'EXECUTE',
             action: { type: 'SCROLL', direction: 'down', amount: 500 }
           });
@@ -109,7 +110,7 @@ function Popup() {
         } else if (action.type === 'TYPE' && action.targetId && action.value) {
           consecutiveScrolls = 0; // Reset scroll counter on successful action
           addLog(`Typing: "${action.value}" into element #${action.targetId}`);
-          const result: any = await browser.tabs.sendMessage(tab.id, {
+          const result: any = await browser.runtime.sendMessage({
             type: 'EXECUTE',
             action,
           });
@@ -117,13 +118,14 @@ function Popup() {
           if (result?.ok) {
             addLog('✅ Typed successfully');
             setStep(currentStep);
+            filledIds.add(action.targetId); // Track this ID as filled
           } else {
             addLog(`❌ Type failed: ${result?.error ?? 'unknown'}`);
           }
         } else if (action.type === 'CLICK' && action.targetId) {
           consecutiveScrolls = 0;
           addLog(`Clicking element #${action.targetId}`);
-          const result: any = await browser.tabs.sendMessage(tab.id, {
+          const result: any = await browser.runtime.sendMessage({
             type: 'EXECUTE',
             action,
           });
@@ -131,6 +133,7 @@ function Popup() {
           if (result?.ok) {
             addLog('✅ Clicked successfully');
             setStep(currentStep);
+            filledIds.add(action.targetId);
 
             // If we clicked submit, task might be done
             if (action.targetId === buttons[buttons.length - 1]?.id) {
