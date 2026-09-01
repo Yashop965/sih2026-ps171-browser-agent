@@ -299,3 +299,92 @@
   color: #64748b;
   text-align: center;
 }
+
+/* Resource Monitor */
+.resource-monitor {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.resource-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #334155;
+}
+
+.resource-icon {
+  font-size: 14px;
+}
+
+.resource-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  flex: 1;
+}
+
+.resource-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.resource-status-healthy {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.resource-status-warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.resource-status-critical {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.resource-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.metric-label {
+  color: #94a3b8;
+  min-width: 50px;
+}
+
+.metric-bar {
+  flex: 1;
+  height: 6px;
+  background: #334155;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.metric-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.metric-value {
+  color: #e2e8f0;
+  font-family: monospace;
+  min-width: 60px;
+  text-align: right;
+}

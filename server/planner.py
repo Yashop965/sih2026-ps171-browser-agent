@@ -183,8 +183,19 @@ YOUR NEXT ACTION MUST BE:
 - CLICK a button (if all inputs are filled)
 - DONE (if no more actions needed)
 
-Return ONLY this JSON (no markdown, no explanation):
-{{"type": "TYPE", "targetId": <unfilled_input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
+ELEMENT TYPE RULES (CRITICAL):
+- input[type="text"], input[type="email"], input[type="password"], input[type="number"], textarea → TYPE
+- select → SELECT (use value like "Option 1", not a random string)
+- button, [role="button"], a[href], [role="link"] → CLICK
+- checkbox, radio → CLICK to toggle
+- NEVER TYPE into a <select>, <button>, <a>, or <span>
+
+MATCHING RULES:
+- "first name" → type the value for "First Name" key
+- "last name" → type the value for "Last Name" key  
+- "email" → type the value for "Email" key
+- "phone" → type the value for "Phone" key
+- Match keywords loosely: "name" matches "Full Name", "First Name", etc.
         return prompt
 
     def parse_llm_output(self, llm_response: str, interactive_elements: List[Dict[str, Any]]) -> PlannerResult:
