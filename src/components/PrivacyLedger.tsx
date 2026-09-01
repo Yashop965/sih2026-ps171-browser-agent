@@ -209,17 +209,17 @@ export default function PrivacyLedger() {
         color: '#1f2328',
       }}
     >
-      <header style={{ borderBottom: '1px solid #1E242D', padding: '8px 12px 0' }}>
+      <header style={{ borderBottom: '1px solid #E0E0DC', padding: '8px 12px 0' }}>
         <div style={{ display: 'flex', alignItems: 'baseline' }}>
           <button onClick={() => setView('detections')} style={tab('detections')}>
             Detections{' '}
-            <span style={{ fontFamily: MONO, fontSize: 11, color: '#5B6673' }}>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: '#8A8A8A' }}>
               {dStats.total}
             </span>
           </button>
           <button onClick={() => setView('log')} style={tab('log')}>
             Audit log{' '}
-            <span style={{ fontFamily: MONO, fontSize: 11, color: '#5B6673' }}>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: '#8A8A8A' }}>
               {stats.total}
             </span>
           </button>
@@ -359,13 +359,13 @@ export default function PrivacyLedger() {
                           onClick={(e) => onCopy(e, d.selector)}
                           title="Copy selector"
                           style={{
-                            border: 'none',
-                            background: 'transparent',
-                            color: '#48505C',
-                            cursor: 'pointer',
-                            fontSize: 10,
-                            padding: '0 0 0 6px',
-                          }}
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#8A8A8A',
+                              cursor: 'pointer',
+                              fontSize: 10,
+                              padding: '0 0 0 6px',
+                            }}
                         >
                           copy
                         </button>
