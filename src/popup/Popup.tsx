@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
+import ResourceMonitor from '../components/ResourceMonitor';
 import { PROVIDERS, ProviderKey, getProvider } from '../lib/providerConfig';
 
 function Popup() {
@@ -233,33 +234,31 @@ function Popup() {
         </div>
 
         <div className="provider-section">
-          <label className="input-label">Provider</label>
+          <label className="input-label">LLM Provider</label>
           <div className="provider-row">
             <select
               className="provider-select"
               value={selectedProvider}
               onChange={(e) => setSelectedProvider(e.target.value as ProviderKey)}
             >
-              {Object.values(PROVIDERS).map(p => (
-                <option key={p.name} value={p.name}>{p.label}</option>
+              {Object.values(PROVIDERS).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.label}
+                </option>
               ))}
             </select>
-            <button
-              className="settings-button"
-              onClick={() => setShowSettings(!showSettings)}
-              title="Provider Settings"
-            >⚙</button>
+            <button className="settings-button" onClick={() => setShowSettings(!showSettings)}>
+              ⚙️
+            </button>
           </div>
-
           {showSettings && (
             <div className="provider-settings">
               <input
                 type="password"
                 className="api-key-input"
-                placeholder={getProvider(selectedProvider).url.includes('localhost') ? 'No key needed' : 'API Key'}
+                placeholder="Enter API key..."
                 value={providerKey}
                 onChange={(e) => setProviderKey(e.target.value)}
-                disabled={getProvider(selectedProvider).url.includes('localhost')}
               />
               <button
                 className="save-key-button"
@@ -272,6 +271,9 @@ function Popup() {
               >Save</button>
             </div>
           )}
+        </div>
+
+        <ResourceMonitor />
         </div>
 
         <button
