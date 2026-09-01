@@ -154,6 +154,9 @@ class ActionPlanner:
         # Build key-value map for the LLM
         kv_str = json.dumps(task_kv, indent=2) if task_kv else "None"
 
+        # Filter out already-filled elements for cleaner context
+        available_elements = [el for el in sanitized_elements if not el.get("filled", False)]
+
         prompt = f"""URL: {url}
 PAGE TITLE: {title}
 
@@ -165,16 +168,20 @@ KEY-VALUE PAIRS FROM TASK:
 RECENT ACTION HISTORY (already filled fields):
 {history_str}
 
-AVAILABLE INTERACTIVE ELEMENTS:
+AVAILABLE INTERACTIVE ELEMENTS (NOT yet filled):
+{json.dumps(available_elements, indent=2)}
+
+ALL ELEMENTS (for reference - do NOT use filled ones):
 {json.dumps(sanitized_elements, indent=2)}
 
 CRITICAL INSTRUCTIONS:
 1. Match KEY names from the task to LABEL names on elements
 2. TYPE the matching VALUE into elements that are NOT already filled
-3. Skip elements that are already filled (marked as "filled": true)
+3. SKIP elements marked as "filled": true - they are already done
 4. When all inputs are filled, CLICK the SUBMIT button
 5. Only use SCROLL if there are NO visible input fields
 6. ALWAYS check the "tag" and "type" fields before choosing action
+7. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
