@@ -144,3 +144,17 @@
   color: #64748b;
   text-align: center;
 }
+
+/* Privacy Ledger Section */
+.privacy-ledger-section {
+  margin-top: 16px;
+  border-top: 1px solid #334155;
+  padding-top: 16px;
+}
+
+.privacy-ledger-container {
+  height: 250px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid #334155;
+}

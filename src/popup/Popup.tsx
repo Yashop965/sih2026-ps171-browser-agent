@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Popup.css';
+import PrivacyLedger from '../components/PrivacyLedger';
 
 interface SoMBox {
   id: number;
@@ -108,6 +109,14 @@ function Popup() {
             {logs.map((log, i) => (
               <div key={i} className="log-entry">{log}</div>
             ))}
+          </div>
+        </div>
+
+        {/* Privacy Ledger Panel */}
+        <div className="privacy-ledger-section">
+          <h3 className="log-title">Privacy Ledger</h3>
+          <div className="privacy-ledger-container">
+            <PrivacyLedger />
           </div>
         </div>
       </div>
