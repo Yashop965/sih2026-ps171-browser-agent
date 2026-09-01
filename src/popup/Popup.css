@@ -1,4 +1,4 @@
-/* Luxury Extension Theme - Premium Design System */
+/* Premium Extension Theme - Luxury Design System */
 
 * {
   margin: 0;
@@ -7,23 +7,23 @@
 }
 
 :root {
-  --bg-primary: #F8F7F4;
+  --bg-primary: #F5F4F1;
   --bg-secondary: #FFFFFF;
-  --bg-tertiary: #F0EFEC;
-  --text-primary: #0D0D0D;
+  --bg-tertiary: #EDEBE7;
+  --text-primary: #0A0A0A;
   --text-secondary: #6B6B6B;
   --text-muted: #9A9A9A;
-  --border-light: #E8E6E1;
+  --border-light: #E2E0DB;
   --border-medium: #D0CDC6;
-  --accent: #0D0D0D;
+  --accent: #0A0A0A;
   --success: #2D5A27;
   --warning: #8B6914;
   --error: #8B2E2E;
 }
 
 .popup {
-  width: 420px;
-  min-height: 520px;
+  width: 400px;
+  min-height: 500px;
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
@@ -32,9 +32,9 @@
   border: 1px solid var(--border-light);
 }
 
-/* Header - Premium minimal */
+/* Header - Editorial */
 .popup-header {
-  padding: 20px 24px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--border-light);
   display: flex;
   align-items: center;
@@ -43,26 +43,26 @@
 }
 
 .popup-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .popup-subtitle {
   font-size: 10px;
   color: var(--text-muted);
-  margin-top: 3px;
-  letter-spacing: 0.05em;
+  margin-top: 2px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-/* Status indicator - Subtle elegance */
+/* Status indicator */
 .status-indicator {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.04em;
@@ -90,7 +90,7 @@
   font-family: 'SF Mono', Monaco, monospace;
 }
 
-/* Body */
+/* Body - Organized sections */
 .popup-body {
   flex: 1;
   display: flex;
@@ -98,9 +98,9 @@
   overflow: hidden;
 }
 
-/* Task Input Section - Editorial spacing */
+/* Task Section */
 .task-input-section {
-  padding: 24px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-secondary);
 }
@@ -110,17 +110,17 @@
   font-size: 9px;
   font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .task-textarea {
   width: 100%;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border-light);
   border-radius: 1px;
-  font-size: 13px;
+  font-size: 12px;
   font-family: inherit;
   resize: none;
   background: var(--bg-primary);
@@ -139,115 +139,26 @@
   color: var(--text-muted);
 }
 
-/* Provider Section - Minimal */
-.provider-section {
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border-light);
-  background: var(--bg-tertiary);
-}
-
-.provider-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.provider-select {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--border-medium);
-  border-radius: 1px;
-  font-size: 11px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  cursor: pointer;
-  letter-spacing: 0.02em;
-  transition: all 0.2s;
-}
-
-.provider-select:focus {
-  outline: none;
-  border-color: var(--text-primary);
-}
-
-.settings-button {
-  padding: 8px 12px;
-  border: 1px solid var(--border-medium);
-  border-radius: 1px;
-  background: var(--bg-secondary);
-  font-size: 11px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  transition: all 0.2s;
-}
-
-.settings-button:hover {
-  background: var(--bg-primary);
-  border-color: var(--text-primary);
-  color: var(--text-primary);
-}
-
-.provider-settings {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-light);
-}
-
-.api-key-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--border-light);
-  border-radius: 1px;
-  font-size: 11px;
-  margin-bottom: 8px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.api-key-input:focus {
-  outline: none;
-  border-color: var(--text-primary);
-}
-
-.save-key-button {
-  padding: 8px 16px;
-  border: 1px solid var(--text-primary);
-  border-radius: 1px;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 10px;
-  font-weight: 500;
-  cursor: pointer;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  transition: all 0.2s;
-}
-
-.save-key-button:hover {
-  background: var(--text-primary);
-  color: var(--bg-secondary);
-}
-
-/* Controls - Editorial button */
+/* Controls Section - Compact */
 .controls {
-  padding: 20px 24px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-secondary);
 }
 
 .start-button {
   width: 100%;
-  padding: 14px 20px;
+  padding: 11px 16px;
   border: 1px solid var(--text-primary);
   border-radius: 1px;
   background: var(--text-primary);
   color: var(--bg-secondary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
 .start-button:hover:not(:disabled) {
@@ -263,7 +174,7 @@
 }
 
 .step-indicator {
-  margin-top: 12px;
+  margin-top: 10px;
   font-size: 9px;
   color: var(--text-muted);
   text-align: center;
@@ -271,18 +182,10 @@
   text-transform: uppercase;
 }
 
-.latency-display {
-  margin-top: 4px;
-  font-size: 9px;
-  color: var(--text-muted);
-  text-align: center;
-  font-family: 'SF Mono', Monaco, monospace;
-}
-
-/* Log Section - Archive aesthetic */
+/* Log Section - Archive style */
 .log-section {
   flex: 1;
-  padding: 16px 24px;
+  padding: 14px 20px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -293,7 +196,7 @@
   font-size: 9px;
   font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -308,7 +211,7 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-light);
   border-radius: 1px;
-  padding: 14px;
+  padding: 12px;
 }
 
 .log-entry {
@@ -320,17 +223,9 @@
   border-bottom: none;
 }
 
-/* Ledger Container - Clean separation */
-.ledger-container {
-  border-top: 1px solid var(--border-light);
-  max-height: 280px;
-  overflow: hidden;
-  background: var(--bg-secondary);
-}
-
 /* Footer - Minimal */
 .popup-footer {
-  padding: 14px 24px;
+  padding: 12px 20px;
   border-top: 1px solid var(--border-light);
   font-size: 9px;
   color: var(--text-muted);
@@ -354,7 +249,7 @@
   border-radius: 2px;
 }
 
-/* Utility - Selection color */
+/* Selection */
 ::selection {
   background: var(--text-primary);
   color: var(--bg-secondary);

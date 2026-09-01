@@ -405,9 +405,9 @@ export default function PrivacyLedger() {
               borderRadius: 1,
             }}
           >
-            {/* Simulated form fields */}
-            {visible.slice(0, 15).map((d, i) => {
-              const yPercent = ((i + 1) / Math.max(visible.length, 1)) * 85 + 5;
+            {/* Show all detections in heatmap, not just filtered */}
+            {detections.slice(0, 15).map((d, i) => {
+              const yPercent = ((i + 1) / Math.max(detections.length, 1)) * 85 + 5;
               const xPercent = 20 + ((i % 3) * 25);
               const color = d.verified ? '#8B2E2E' : '#8B6914';
 
@@ -476,7 +476,7 @@ export default function PrivacyLedger() {
             </div>
 
             {/* Empty state */}
-            {visible.length === 0 && (
+            {detections.length === 0 && (
               <div style={{
                 position: 'absolute',
                 top: '50%',
