@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
+import SoMOverlay from '../components/SoMOverlay';
+import { somRenderer } from '../lib/vision/som';
+import type { BoundingBox } from '../types';
 
 interface SoMBox {
   id: number;
@@ -19,6 +22,8 @@ function Popup() {
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
   const [elements, setElements] = useState<SoMBox[]>([]);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [boundingBoxes, setBoundingBoxes] = useState<BoundingBox[]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const addLog = (message: string) => {
@@ -64,10 +69,20 @@ function Popup() {
     }
   };
 
+  const toggleOverlay = () => {
+    setShowOverlay(!showOverlay);
+    if (!showOverlay) {
+      addLog('SoM Overlay enabled');
+    } else {
+      somRenderer.clearMarks();
+      addLog('SoM Overlay disabled');
+    }
+  };
+
   return (
     <div className="popup">
       <header className="popup-header">
-        <h1 className="popup-title">🤖 SIH2026 PS171</h1>
+        <h1 className="popup-title">SIH2026 PS171</h1>
         <p className="popup-subtitle">Browser Agent</p>
       </header>
 
@@ -83,13 +98,23 @@ function Popup() {
           />
         </div>
 
-        <button
-          className={`start-button ${isRunning ? 'running' : ''}`}
-          onClick={handleStart}
-          disabled={isRunning || !task}
-        >
-          {isRunning ? 'Running...' : 'Start Agent'}
-        </button>
+        <div className="button-group">
+          <button
+            className={`start-button ${isRunning ? 'running' : ''}`}
+            onClick={handleStart}
+            disabled={isRunning || !task}
+          >
+            {isRunning ? 'Running...' : 'Start Agent'}
+          </button>
+
+          <button
+            className="overlay-button"
+            onClick={toggleOverlay}
+            disabled={isRunning}
+          >
+            {showOverlay ? 'Hide Overlay' : 'Show Overlay'}
+          </button>
+        </div>
 
         {step > 0 && (
           <div className="step-indicator">
@@ -124,6 +149,17 @@ function Popup() {
       <footer className="popup-footer">
         <span>Privacy-first • On-device inference</span>
       </footer>
+
+      {/* SoM Overlay - renders on top of page when visible */}
+      {showOverlay && (
+        <div ref={overlayRef} className="overlay-container">
+          <SoMOverlay
+            boxes={boundingBoxes}
+            isVisible={showOverlay}
+            onSelectBox={(box) => addLog(`Selected box ${box.id}: ${box.label}`)}
+          />
+        </div>
+      )}
     </div>
   );
 }
