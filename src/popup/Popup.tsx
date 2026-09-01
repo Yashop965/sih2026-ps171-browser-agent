@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
