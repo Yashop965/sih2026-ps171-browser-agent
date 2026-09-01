@@ -390,7 +390,7 @@ export default function PrivacyLedger() {
           </div>
         </>
       ) : view === 'heatmap' ? (
-        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden', minHeight: 200 }}>
+        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden', minHeight: 250 }}>
           {/* Page simulation */}
           <div
             style={{
@@ -403,84 +403,92 @@ export default function PrivacyLedger() {
               border: '1px solid #E8E6E1',
               margin: 12,
               borderRadius: 1,
+              overflow: 'hidden',
             }}
           >
-            {/* Debug: show count */}
-            <div style={{ position: 'absolute', top: 8, right: 8, background: '#F8F7F4', padding: '4px 8px', borderRadius: 1, fontSize: 9, fontFamily: MONO, color: '#9A9A9A', zIndex: 5 }}>
-              {detections.length} fields
-            </div>
-            {/* Show all detections in heatmap, not just filtered */}
-            {detections.slice(0, 15).map((d, i) => {
-              const yPercent = ((i + 1) / Math.max(detections.length, 1)) * 85 + 5;
-              const xPercent = 20 + ((i % 3) * 25);
-              const color = d.verified ? '#8B2E2E' : '#8B6914';
-
-              return (
-                <div
-                  key={`heatmap-${d.selector}-${i}`}
-                  onClick={() => onRowClick(d)}
-                  title={`${d.type}: ${d.selector}`}
-                  style={{
-                    position: 'absolute',
-                    left: `${xPercent}%`,
-                    top: `${yPercent}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: 28,
-                    height: 28,
-                    borderRadius: '50%',
-                    background: `${color}15`,
-                    border: `1.5px solid ${color}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1.15)';
-                    (e.currentTarget as HTMLElement).style.zIndex = '10';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1)';
-                    (e.currentTarget as HTMLElement).style.zIndex = '1';
-                  }}
-                >
-                  {/* Simple dot indicator */}
-                  <div style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: color,
-                  }} />
-                </div>
-              );
-            })}
-
-            {/* Legend */}
-            <div style={{
-              position: 'absolute',
-              bottom: 12,
-              left: 12,
-              background: '#ffffff',
-              border: '1px solid #E8E6E1',
-              borderRadius: 1,
-              padding: '10px 14px',
-              fontSize: 10,
-              fontFamily: MONO,
+            {/* Field count indicator */}
+            <div style={{ 
+              position: 'absolute', 
+              top: 10, 
+              right: 10, 
+              background: detections.length > 0 ? '#0D0D0D' : '#F0EFEC', 
+              color: detections.length > 0 ? '#FFFFFF' : '#9A9A9A',
+              padding: '6px 12px', 
+              borderRadius: 1, 
+              fontSize: 9, 
+              fontFamily: "'SF Mono', Monaco, monospace", 
+              zIndex: 10,
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase'
             }}>
-              <div style={{ marginBottom: 8, color: '#9A9A9A', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 9 }}>Legend</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B2E2E' }} />
-                <span style={{ color: '#0D0D0D' }}>Verified PII</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B6914' }} />
-                <span style={{ color: '#0D0D0D' }}>Pattern match</span>
-              </div>
+              {detections.length} field{detections.length !== 1 ? 's' : ''}
             </div>
 
-            {/* Empty state */}
-            {detections.length === 0 && (
+            {detections.length > 0 ? (
+              detections.slice(0, 20).map((d, i) => {
+                // Position based on element type for better distribution
+                const typePositions: Record<string, { x: number; y: number }> = {
+                  'EMAIL': { x: 30, y: 15 },
+                  'PHONE': { x: 70, y: 25 },
+                  'PASSWORD': { x: 30, y: 40 },
+                  'SSN': { x: 70, y: 50 },
+                  'CREDIT_CARD': { x: 30, y: 65 },
+                  'AADHAAR': { x: 70, y: 75 },
+                  'PAN': { x: 50, y: 85 },
+                };
+                
+                const defaultPos = { 
+                  x: 20 + ((i % 4) * 22), 
+                  y: 10 + Math.floor(i / 4) * 20 
+                };
+                
+                const pos = typePositions[d.type] || defaultPos;
+
+                return (
+                  <div
+                    key={`heatmap-${d.selector}-${i}`}
+                    onClick={() => onRowClick(d)}
+                    title={`${d.type}: ${d.selector} (${Math.round(d.confidence * 100)}%)`}
+                    style={{
+                      position: 'absolute',
+                      left: `${pos.x}%`,
+                      top: `${pos.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: 32,
+                      height: 32,
+                      borderRadius: '50%',
+                      background: d.verified ? 'rgba(139, 46, 46, 0.12)' : 'rgba(139, 105, 20, 0.12)',
+                      border: `2px solid ${d.verified ? '#8B2E2E' : '#8B6914'}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      zIndex: 5,
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1.2)';
+                      (e.currentTarget as HTMLElement).style.zIndex = '20';
+                      (e.currentTarget as HTMLElement).style.boxShadow = `0 0 12px ${d.verified ? '#8B2E2E40' : '#8B691440'}`;
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) scale(1)';
+                      (e.currentTarget as HTMLElement).style.zIndex = '5';
+                      (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+                    }}
+                  >
+                    {/* Inner dot */}
+                    <div style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: d.verified ? '#8B2E2E' : '#8B6914',
+                    }} />
+                  </div>
+                );
+              })
+            ) : (
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -489,12 +497,37 @@ export default function PrivacyLedger() {
                 textAlign: 'center',
                 color: '#9A9A9A',
               }}>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: 0.5 }}>
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: 0.4 }}>
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 8v4l3 3" />
                 </svg>
-                <div style={{ fontFamily: MONO, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>No fields detected</div>
-                <div style={{ fontSize: 10, marginTop: 6, color: '#B0B0B0' }}>PII will appear here when detected</div>
+                <div style={{ fontFamily: "'SF Mono', Monaco, monospace", fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>No fields detected</div>
+                <div style={{ fontSize: 10, color: '#B0B0B0' }}>Visit a page with PII to see detection heatmap</div>
+              </div>
+            )}
+
+            {/* Legend */}
+            {detections.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                bottom: 12,
+                left: 12,
+                background: '#ffffff',
+                border: '1px solid #E8E6E1',
+                borderRadius: 1,
+                padding: '10px 14px',
+                fontSize: 10,
+                fontFamily: "'SF Mono', Monaco, monospace",
+              }}>
+                <div style={{ marginBottom: 8, color: '#9A9A9A', textTransform: 'uppercase', letterSpacing: '0.1em', fontSize: 9, fontWeight: 600 }}>Legend</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B2E2E' }} />
+                  <span style={{ color: '#0D0D0D', fontSize: 9 }}>Verified</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B6914' }} />
+                  <span style={{ color: '#0D0D0D', fontSize: 9 }}>Pattern match</span>
+                </div>
               </div>
             )}
           </div>
