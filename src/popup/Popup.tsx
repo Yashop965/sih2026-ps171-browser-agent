@@ -65,10 +65,10 @@ function Popup() {
     addLog(`Starting task: "${task}"`);
 
     const started = performance.now();
-    const maxSteps = 15;
     let currentStep = 0;
     let consecutiveScrolls = 0;
     let filledIds = new Set<number>(); // Track which element IDs are already filled
+    let maxSteps = 15; // Will be updated after first extraction
 
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -98,8 +98,15 @@ function Popup() {
         // Count input fields vs buttons
         const inputFields = elements.filter((e: any) => e.role === 'textbox' || e.tag === 'input');
         const buttons = elements.filter((e: any) => e.role === 'button' || e.tag === 'button');
+        const selects = elements.filter((e: any) => e.tag === 'select' || e.type === 'select-one');
+        
+        addLog(`Elements: ${elements.length} total (${inputFields.length} inputs, ${selects.length} selects, ${buttons.length} buttons)`);
 
-        addLog(`Elements: ${inputFields.length} inputs, ${buttons.length} buttons`);
+        // Dynamically calculate max steps based on elements found
+        if (currentStep === 0 || maxSteps === 15) {
+          maxSteps = Math.max(10, Math.min(50, (inputFields.length + selects.length) * 3 + buttons.length + 5));
+          addLog(`Calculated max steps: ${maxSteps} (based on ${elements.length} elements)`);
+        }
 
         addLog('Sending sanitized context to planner...');
         // Build history with actually filled element IDs
