@@ -68,17 +68,41 @@ export class PIIManager {
   }
 
   /**
-   * Scan document for PII
+   * Synchronous DOM scan for immediate use (e.g., in content scripts)
    */
   scanDocument(): PIIDetection[] {
     this.detections = [];
-    
-    // Scan DOM
     this.scanDOM();
-    
-    // Scan for faces if FaceDetector available
-    this.detectFaces();
-    
+    // Note: Face detection is async and skipped in sync mode
+    return this.detections;
+  }
+
+  /**
+   * Asynchronous DOM scan including fully awaited face detection
+   */
+  async scanDocumentAsync(): Promise<PIIDetection[]> {
+    this.detections = [];
+    this.scanDOM();
+    await this.detectFaces();
+    return this.detections;
+  }
+
+  /**
+   * Synchronous DOM scan for immediate use (e.g., in content scripts)
+   */
+  scanDocument(): PIIDetection[] {
+    this.detections = [];
+    this.scanDOM();
+    return this.detections;
+  }
+
+  /**
+   * Asynchronous DOM scan including fully awaited face detection
+   */
+  async scanDocumentAsync(): Promise<PIIDetection[]> {
+    this.detections = [];
+    this.scanDOM();
+    await this.detectFaces();
     return this.detections;
   }
 
@@ -225,31 +249,61 @@ export class PIIManager {
   }
 
   private async detectFaces(): Promise<void> {
-    if (!this.faceDetector) return;
-    
     const images = document.querySelectorAll('img');
-    for (const img of images) {
-      try {
-        const faces = await this.faceDetector.detect(img as HTMLImageElement);
-        for (const face of faces) {
-          this.detections.push({
-            type: 'FACE',
-            selector: this.getElementSelector(img),
-            confidence: 0.9,
-            isVerified: true,
-            redacted: true,
-            metadata: {
-              bounds: {
-                x: face.bounds.x,
-                y: face.bounds.y,
-                width: face.bounds.width,
-                height: face.bounds.height,
+
+    // If native FaceDetector is available, use it
+    if (this.faceDetector) {
+      for (const img of images) {
+        try {
+          const faces = await this.faceDetector.detect(img as HTMLImageElement);
+          for (const face of faces) {
+            this.detections.push({
+              type: 'FACE',
+              selector: this.getElementSelector(img),
+              confidence: 0.9,
+              isVerified: true,
+              redacted: true,
+              metadata: {
+                bounds: {
+                  x: face.bounds.x,
+                  y: face.bounds.y,
+                  width: face.bounds.width,
+                  height: face.bounds.height,
+                },
               },
-            },
-          });
+            });
+          }
+        } catch (e) {
+          // Face detection failed, continue
         }
-      } catch (e) {
-        // Face detection failed, continue
+      }
+      return;
+    }
+
+    // Fallback: heuristic detection based on image attributes
+    for (const img of images) {
+      const alt = (img.getAttribute('alt') || '').toLowerCase();
+      const title = (img.getAttribute('title') || '').toLowerCase();
+      const className = (img.getAttribute('class') || '').toLowerCase();
+
+      const faceKeywords = ['avatar', 'profile', 'user-photo', 'face', 'portrait', 'headshot'];
+      const isLikelyFace = faceKeywords.some(kw =>
+        alt.includes(kw) || title.includes(kw) || className.includes(kw)
+      );
+
+      if (isLikelyFace) {
+        this.detections.push({
+          type: 'FACE',
+          selector: this.getElementSelector(img),
+          confidence: 0.65,
+          isVerified: false,
+          redacted: true,
+          metadata: {
+            fallback: true,
+            method: 'attribute_heuristic',
+            note: 'FaceDetector API unsupported on browser. Flagged via fallback heuristic.',
+          },
+        });
       }
     }
   }
