@@ -103,17 +103,6 @@ function Popup() {
 
         addLog(`Elements: ${elements.length} total (${inputFields.length} inputs, ${selects.length} selects, ${buttons.length} buttons)`);
 
-        // Track recent actions to detect loops
-        const recentActions = recentActionHistory.slice(-5);
-        const lastAction = recentActions[recentActions.length - 1];
-        if (lastAction && action.targetId === lastAction.targetId && action.type === lastAction.type) {
-          // Same action repeated twice in a row - skip this element
-          addLog(`⚠️ Skipping repeated action on element #${action.targetId}`);
-          filledIds.add(action.targetId);
-          recentActionHistory.push({ targetId: action.targetId, type: action.type });
-          continue;
-        }
-
         // Dynamically calculate max steps based on elements found
         if (currentStep === 0 || maxSteps === 15) {
           maxSteps = Math.max(10, Math.min(50, (inputFields.length + selects.length) * 3 + buttons.length + 5));
@@ -150,6 +139,17 @@ function Popup() {
         if (!action || action.type === 'DONE') {
           addLog('✅ Task complete (planner signaled DONE)');
           break;
+        }
+
+        // Track recent actions to detect loops - CHECK AFTER action is declared
+        const recentActions = recentActionHistory.slice(-5);
+        const lastAction = recentActions[recentActions.length - 1];
+        if (lastAction && action.targetId === lastAction.targetId && action.type === lastAction.type) {
+          // Same action repeated twice in a row - skip this element
+          addLog(`⚠️ Skipping repeated action on element #${action.targetId}`);
+          filledIds.add(action.targetId);
+          recentActionHistory.push({ targetId: action.targetId, type: action.type });
+          continue;
         }
 
         if (action.type === 'SCROLL') {
