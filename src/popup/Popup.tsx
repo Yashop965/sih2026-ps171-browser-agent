@@ -32,7 +32,8 @@ function Popup() {
   const checkHealth = useCallback(async () => {
     const start = performance.now();
     try {
-      const response = await fetch('http://localhost:8000/health', {
+      const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
+      const response = await fetch(`${serverUrl}/health`, {
         signal: AbortSignal.timeout(3000)
       });
       const latency = Math.round(performance.now() - start);
@@ -82,7 +83,6 @@ function Popup() {
         addLog('Extracting page elements...');
 
         const snapshot: any = await browser.runtime.sendMessage({ type: 'EXTRACT' });
-        console.log('[Popup] EXTRACT response:', snapshot);
 
         if (!snapshot?.ok) {
           addLog(`Failed to extract elements: ${snapshot?.error ?? 'no ok flag'}`);
@@ -114,7 +114,8 @@ function Popup() {
         // Build history with actually filled element IDs
         const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK' }));
 
-        const response = await fetch('http://localhost:8000/plan', {
+        const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
+        const response = await fetch(`${serverUrl}/plan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
