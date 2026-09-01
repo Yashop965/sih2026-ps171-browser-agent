@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { execute, type Action } from '../src/lib/actions';
 
 describe('Loop Detection', () => {
-  it('should track repeated actions', async () => {
+  it('should track repeated actions', () => {
     // Test that we can detect when same action is repeated
     const actionHistory: Array<{targetId: number, type: string}> = [];
     
@@ -19,7 +18,7 @@ describe('Loop Detection', () => {
     expect(lastAction?.type).toBe(secondLastAction?.type);
   });
 
-  it('should detect different actions as not repeated', async () => {
+  it('should detect different actions as not repeated', () => {
     const actionHistory: Array<{targetId: number, type: string}> = [];
     
     actionHistory.push({ targetId: 1, type: 'TYPE' });
@@ -34,11 +33,12 @@ describe('Loop Detection', () => {
 });
 
 describe('Dynamic Max Steps', () => {
-  it('should calculate steps based on element count', () => {
-    const calculateMaxSteps = (inputs: number, selects: number, buttons: number): number => {
-      return Math.max(10, Math.min(50, (inputs + selects) * 3 + buttons + 5));
-    };
+  // Single definition of calculateMaxSteps
+  const calculateMaxSteps = (inputs: number, selects: number, buttons: number): number => {
+    return Math.max(10, Math.min(50, (inputs + selects) * 3 + buttons + 5));
+  };
 
+  it('should calculate steps based on element count', () => {
     // Small form: 3 inputs, 0 selects, 1 button = max(10, min(50, 3*3 + 1 + 5)) = max(10, 15) = 15
     expect(calculateMaxSteps(3, 0, 1)).toBe(15);
 
@@ -50,10 +50,6 @@ describe('Dynamic Max Steps', () => {
   });
 
   it('should handle edge cases', () => {
-    const calculateMaxSteps = (inputs: number, selects: number, buttons: number): number => {
-      return Math.max(10, Math.min(50, (inputs + selects) * 3 + buttons + 5));
-    };
-
     // Empty form
     expect(calculateMaxSteps(0, 0, 0)).toBe(10);
 

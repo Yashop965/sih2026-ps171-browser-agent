@@ -2,12 +2,10 @@
 Tests for loop detection and dynamic maxSteps in the planner.
 """
 import pytest
-from server.planner import ActionPlanner, ActionSchema
 
 
 def test_select_action_for_dropdowns():
     """Test that SELECT action is properly handled for dropdown elements."""
-    planner = ActionPlanner()
     
     # Test that select elements are identified correctly
     elements = [
@@ -24,7 +22,6 @@ def test_select_action_for_dropdowns():
 
 def test_element_type_rules():
     """Test that element type rules are correctly applied."""
-    planner = ActionPlanner()
     
     # Test input types
     text_inputs = [
@@ -53,8 +50,8 @@ def test_max_steps_calculation():
     def calculate_max_steps(inputs: int, selects: int, buttons: int) -> int:
         return max(10, min(50, (inputs + selects) * 3 + buttons + 5))
     
-    # Small form
-    assert calculate_max_steps(3, 0, 1) == 14
+    # Small form: 3 inputs, 0 selects, 1 button = max(10, min(50, 3*3 + 1 + 5)) = max(10, 15) = 15
+    assert calculate_max_steps(3, 0, 1) == 15
     
     # Large form (capped at 50)
     assert calculate_max_steps(13, 2, 3) == 50
