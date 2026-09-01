@@ -16,6 +16,8 @@
     "ollama:pull": "ollama pull qwen2.5:1.5b && ollama pull Florence-2-base-ft"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.10",
+    "@heroicons/react": "^2.2.0",
     "@huggingface/transformers": "^3.5.1",
     "onnxruntime-web": "^1.21.0",
     "react": "^19.0.0",
