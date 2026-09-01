@@ -5,6 +5,10 @@
 // background.ts) because that is where detections and outbound payloads are
 // actually logged. This module is the panel's window onto it: fetch, clear,
 // and produce the signed export judges can inspect.
+//
+// It also fetches live PII detections for the tab currently in front of the
+// user, which is a different thing from the ledger: the ledger is history,
+// detections are what is on screen right now.
 
 import { browser } from 'wxt/browser';
 import type { PrivacyLogEntry } from '../types';
@@ -54,6 +58,105 @@ export async function fetchEntries(): Promise<PrivacyLogEntry[]> {
 export async function clearLedger(): Promise<void> {
     await browser.runtime.sendMessage({ type: 'CLEAR_LEDGER' });
 }
+
+// --- Live detections on the current page ------------------------------------
+
+/**
+ * One PII finding on the page in front of the user.
+ *
+ * Deliberately has no `value` field. The detector returns a partial value
+ * (`input.value.slice(0, 4) + '***'`), which for an Aadhaar number is four
+ * real digits. Showing that in a panel whose whole purpose is to prove PII
+ * doesn't escape would defeat the point, so it is dropped on arrival.
+ */
+export interface Detection {
+    type: string;
+    selector: string;
+    confidence: number;
+    /** True when a checksum confirmed it, not just a pattern match. */
+    verified: boolean;
+    redacted: boolean;
+}
+
+async function activeTabId(): Promise<number> {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) throw new Error('No active tab');
+    return tab.id;
+}
+
+export async function fetchDetections(): Promise<Detection[]> {
+    const tabId = await activeTabId();
+    const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
+
+    const raw = snapshot?.detectedPII;
+    if (!Array.isArray(raw)) return [];
+
+    // Rebuild each record field by field rather than spreading, so a new
+    // field added to the detector can never silently reach the UI.
+    return raw.map((d: any) => ({
+        type: String(d.type ?? 'UNKNOWN'),
+        selector: String(d.selector ?? ''),
+        confidence: Number(d.confidence ?? 0),
+        verified: Boolean(d.isVerified),
+        redacted: Boolean(d.redacted),
+    }));
+}
+
+export interface HighlightResult {
+    ok: boolean;
+    error?: string;
+}
+
+/** Ask the content script to outline the element a detection refers to. */
+export async function highlightElement(selector: string): Promise<HighlightResult> {
+    try {
+        const tabId = await activeTabId();
+        const result: any = await browser.tabs.sendMessage(tabId, {
+            type: 'HIGHLIGHT',
+            selector,
+        });
+        return { ok: Boolean(result?.ok), error: result?.error };
+    } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+}
+
+export interface DetectionStats {
+    total: number;
+    verified: number;
+    byType: Array<{ type: string; count: number; percent: number }>;
+}
+
+export function summariseDetections(list: Detection[]): DetectionStats {
+    const counts: Record<string, number> = {};
+    let verified = 0;
+
+    for (const d of list) {
+        counts[d.type] = (counts[d.type] ?? 0) + 1;
+        if (d.verified) verified++;
+    }
+
+    const byType = Object.entries(counts)
+        .map(([type, count]) => ({
+            type,
+            count,
+            percent: list.length ? Math.round((count / list.length) * 100) : 0,
+        }))
+        .sort((a, b) => b.count - a.count);
+
+    return { total: list.length, verified, byType };
+}
+
+export async function copySelector(selector: string): Promise<boolean> {
+    try {
+        await navigator.clipboard.writeText(selector);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+// --- Ledger summary and export ----------------------------------------------
 
 export interface LedgerSummary {
     total: number;
@@ -127,7 +230,10 @@ function scrub(entry: PrivacyLogEntry) {
  * SHA-256 digest of the record list, so anyone can recompute it and tell
  * whether the file was edited after it was produced.
  */
-export async function buildExport(entries: PrivacyLogEntry[]) {
+export async function buildExport(
+    entries: PrivacyLogEntry[],
+    detections: Detection[] = []
+) {
     // The background prepends, so the array arrives newest-first.
     const ordered = entries.slice().reverse();
     const records = ordered.map((e, i) => ({ seq: i + 1, ...scrub(e) }));
@@ -138,6 +244,10 @@ export async function buildExport(entries: PrivacyLogEntry[]) {
         generatedAt: new Date().toISOString(),
         note: 'Structural metadata only. No detected values, page HTML, or query strings are present in this file.',
         summary: summarise(entries),
+        currentPageDetections: {
+            stats: summariseDetections(detections),
+            items: detections,
+        },
         integrity: {
             algorithm: 'SHA-256',
             digest,
@@ -147,8 +257,11 @@ export async function buildExport(entries: PrivacyLogEntry[]) {
     };
 }
 
-export async function downloadLedger(entries: PrivacyLogEntry[]) {
-    const payload = await buildExport(entries);
+export async function downloadLedger(
+    entries: PrivacyLogEntry[],
+    detections: Detection[] = []
+) {
+    const payload = await buildExport(entries, detections);
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
         type: 'application/json',
     });

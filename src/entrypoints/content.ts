@@ -2,7 +2,6 @@ import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { extract, getPageContext } from '../lib/dom';
 import { executeWithRetry } from '../lib/actions';
-import { PIIManager } from '../lib/pii/detector';
 
 /**
  * Content Script - DOM Capture + PII Redaction + Action Execution
@@ -19,13 +18,18 @@ type AgentRequest =
     | { type: 'EXTRACT' }
     | { type: 'EXECUTE'; action: import('../lib/actions').Action }
     | { type: 'PING' }
-    | { type: 'capturePage' };
+    | { type: 'capturePage' }
+    | { type: 'HIGHLIGHT'; selector: string };
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
     if (typeof msg !== 'object' || msg === null || !('type' in msg)) return false;
     const t = (msg as { type: unknown }).type;
-    return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING' || t === 'capturePage';
+    return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING'
+        || t === 'capturePage' || t === 'HIGHLIGHT';
 }
+
+const HIGHLIGHT_ID = '__agent-highlight';
+const HIGHLIGHT_MS = 2500;
 
 export default defineContentScript({
     matches: ['<all_urls>'],
@@ -33,14 +37,12 @@ export default defineContentScript({
         console.log('[agent] content script loaded on', location.href);
 
         // Initialize PII detector
-        const piiManager = new PIIManager();
         const piiDetector = new PIIDetector();
 
         // Capture DOM snapshot with PII redaction
-        async function captureDOM(): Promise<SanitizedDOMSnapshot> {
-            const a11yTree = buildAccessibilityTree(document.body || document.documentElement);
+        function captureDOM(): SanitizedDOMSnapshot {
+            const a11yTree = buildAccessibilityTree(document.documentElement);
             const interactiveElements = captureInteractiveElements();
-            const detectedPII = await piiManager.scanDocumentAsync();
 
             return {
                 url: window.location.href,
@@ -50,29 +52,50 @@ export default defineContentScript({
                 // Instead send sanitized interactive elements only
                 accessibilityTree: a11yTree,
                 interactiveElements,
-                detectedPII: detectedPII as any,
+                detectedPII: piiDetector.scanDocument(),
             };
         }
 
         // Capture interactive elements for action targeting
-        // Reuses extract() from lib/dom.ts to ensure ID consistency
-        // with the registry used by execute() in actions.ts
         function captureInteractiveElements(): InteractiveElement[] {
-            const extracted = extract();
-            return extracted.map(el => ({
-                id: el.id,
-                tag: el.tag,
-                role: el.role,
-                label: el.label.slice(0, 50),
-                name: '',
-                rect: {
-                    x: el.x,
-                    y: el.y,
-                    width: el.width,
-                    height: el.height,
-                },
-                isPassword: el.type === 'password',
-            }));
+            const selectors = [
+                'button', 'a[href]', 'input', 'select', 'textarea',
+                '[role="button"]', '[role="link"]', '[role="textbox"]',
+                '[tabindex]:not([tabindex="-1"])',
+                'details summary', 'summary'
+            ].join(', ');
+
+            const elements = document.querySelectorAll(selectors) as NodeListOf<HTMLElement>;
+            const result: InteractiveElement[] = [];
+
+            elements.forEach((el, index) => {
+                const rect = el.getBoundingClientRect();
+                // Either dimension being zero means it isn't rendered.
+                if (rect.width === 0 || rect.height === 0) return;
+
+                // Annotate DOM with data-agent-id so background actions can find targets
+                el.setAttribute('data-agent-id', String(index));
+
+                result.push({
+                    id: index,
+                    tag: el.tagName.toLowerCase(),
+                    role: el.getAttribute('role') || el.tagName.toLowerCase(),
+                    label: el.getAttribute('aria-label')
+                        || el.getAttribute('placeholder')
+                        || el.textContent?.trim().slice(0, 50)
+                        || '',
+                    name: el.getAttribute('name') || el.getAttribute('id') || '',
+                    rect: {
+                        x: Math.round(rect.x),
+                        y: Math.round(rect.y),
+                        width: Math.round(rect.width),
+                        height: Math.round(rect.height),
+                    },
+                    isPassword: el.getAttribute('type') === 'password',
+                });
+            });
+
+            return result;
         }
 
         // Build simplified accessibility tree
@@ -91,7 +114,9 @@ export default defineContentScript({
                             expanded: el.getAttribute('aria-expanded') === 'true',
                             checked: el.getAttribute('aria-checked') || undefined,
                             required: el.getAttribute('aria-required') === 'true',
-                            disabled: Boolean((el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true'),
+                            disabled:
+                                ('disabled' in el && (el as HTMLInputElement).disabled) ||
+                                el.getAttribute('aria-disabled') === 'true',
                             depth,
                         });
                     }
@@ -125,7 +150,54 @@ export default defineContentScript({
             return roleMap[tag.toUpperCase()] || '';
         }
 
-        // Listen for messages from background script
+        /**
+         * Outline an element so the person can see where a detection came
+         * from. Called when a row in the detections table is clicked.
+         *
+         * The overlay is a fixed-position div with no href, role or tabindex,
+         * so captureInteractiveElements() and extract() will not pick it up as
+         * a page element. pointer-events: none keeps it from swallowing clicks.
+         */
+        function highlight(selector: string): { ok: boolean; error?: string } {
+            let el: Element | null = null;
+            try {
+                el = document.querySelector(selector);
+            } catch {
+                return { ok: false, error: 'invalid selector' };
+            }
+            if (!el) return { ok: false, error: 'element not on page' };
+
+            el.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+
+            // Read the rect after scrolling, or the box lands where the
+            // element used to be.
+            const rect = el.getBoundingClientRect();
+
+            document.getElementById(HIGHLIGHT_ID)?.remove();
+
+            const box = document.createElement('div');
+            box.id = HIGHLIGHT_ID;
+            box.style.cssText = [
+                'position:fixed',
+                `top:${rect.top - 3}px`,
+                `left:${rect.left - 3}px`,
+                `width:${rect.width + 6}px`,
+                `height:${rect.height + 6}px`,
+                'border:2px solid #C2413B',
+                'border-radius:3px',
+                'background:rgba(194,65,59,0.12)',
+                'pointer-events:none',
+                'z-index:2147483647',
+            ].join(';');
+            document.body.appendChild(box);
+
+            setTimeout(() => box.remove(), HIGHLIGHT_MS);
+            return { ok: true };
+        }
+
+        // Listen for messages from background script and the popup.
+        // 'capturePage' is handled here rather than through a command
+        // registration — WXT's ctx has no addCommand().
         browser.runtime.onMessage.addListener((message: unknown) => {
             if (!isAgentRequest(message)) return;
 
@@ -149,6 +221,10 @@ export default defineContentScript({
                 return Promise.resolve(captureDOM());
             }
 
+            if (message.type === 'HIGHLIGHT') {
+                return Promise.resolve(highlight(message.selector));
+            }
+
             return;
         });
 
@@ -169,6 +245,7 @@ export default defineContentScript({
                 execute: executeWithRetry,
                 context: getPageContext,
                 captureDOM,
+                highlight,
                 piiDetector,
             };
         }
@@ -177,7 +254,9 @@ export default defineContentScript({
 
 // PII Detection Engine
 class PIIDetector {
-    private static readonly PATTERNS: Record<string, RegExp> = {
+    // Instance member, not static: every lookup below goes through `this`,
+    // and `this.PATTERNS` is undefined on a static member.
+    private readonly PATTERNS: Record<string, RegExp> = {
         // Indian PII
         AADHAAR: /^\d{4}\s?\d{4}\s?\d{4}$/u,
         PAN: /^[A-Z]{5}\d{4}[A-Z]{1}$/u,
@@ -202,24 +281,19 @@ class PIIDetector {
             const type = input.getAttribute('type')?.toLowerCase() || 'text';
             const name = input.getAttribute('name') || input.getAttribute('id') || '';
 
-            if (type === 'password' || PIIDetector.PATTERNS.PASSWORD_FIELD.test(name)) {
+            if (type === 'password' || this.PATTERNS.PASSWORD_FIELD.test(name)) {
                 detections.push({
                     type: 'PASSWORD_FIELD',
                     selector: this.getElementSelector(input),
                     confidence: 0.99,
+                    isVerified: true,
                     redacted: true,
                 });
             } else if (input.value) {
-                for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
+                for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
                     if (piiType === 'PASSWORD_FIELD') continue;
                     if (pattern.test(input.value)) {
-                        detections.push({
-                            type: piiType as PIIType,
-                            value: piiType === 'CREDIT_CARD' ? this.maskCard(input.value) : input.value.slice(0, 4) + '***',
-                            selector: this.getElementSelector(input),
-                            confidence: this.getConfidence(piiType, input.value),
-                            redacted: true,
-                        });
+                        detections.push(this.record(piiType, input.value, input));
                     }
                 }
             }
@@ -228,27 +302,59 @@ class PIIDetector {
         // Scan text content for PII — use exec() in a loop for non-anchored matches
         document.querySelectorAll('div, span, p, td, th, label').forEach(el => {
             const text = el.textContent || '';
-            for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
+            for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
                 if (piiType === 'PASSWORD_FIELD') continue;
-                // Use a copy without anchors for text content scanning
-                const scanPattern = new RegExp(pattern.source.replace(/^\^|$/g, ''), pattern.flags.replace('u', 'gu'));
-                let match;
+
+                // Strip the anchors so the pattern can match anywhere in the
+                // text. The trailing anchor needs escaping — a bare `$` in the
+                // search pattern means "end of string", so it never matched the
+                // literal `$` character and the anchor was left in place.
+                const source = pattern.source.replace(/^\^/, '').replace(/\$$/, '');
+                const scanPattern = new RegExp(source, pattern.flags.replace('u', 'gu'));
+
+                let match: RegExpExecArray | null;
                 while ((match = scanPattern.exec(text)) !== null) {
-                    detections.push({
-                        type: piiType as PIIType,
-                        value: piiType === 'CREDIT_CARD' ? this.maskCard(match[0]) : match[0].slice(0, 4) + '***',
-                        selector: this.getElementSelector(el),
-                        confidence: this.getConfidence(piiType, match[0]),
-                        redacted: true,
-                    });
+                    detections.push(this.record(piiType, match[0], el));
+
+                    // A zero-length match would spin forever.
+                    if (match.index === scanPattern.lastIndex) scanPattern.lastIndex++;
                 }
             }
         });
 
-        // Run specialized validators
-        this.validateAndRefine(detections);
-
         return detections;
+    }
+
+    /**
+     * Turn a match into a detection record.
+     *
+     * The raw value is used here and then dropped. It is never stored on the
+     * record, not even truncated — the first four characters of an Aadhaar
+     * number are four real digits, and this record is rendered in the privacy
+     * panel and included in the export.
+     *
+     * The checksum has to run at this point for the same reason: once the
+     * record exists there is no value left to validate. The old code ran it
+     * afterwards on an already-masked string, so `isVerified` was always false.
+     */
+    private record(piiType: string, raw: string, el: Element): DetectedPII {
+        const verified = this.checksumOk(piiType, raw);
+        return {
+            type: piiType as PIIType,
+            selector: this.getElementSelector(el),
+            confidence: this.getConfidence(piiType, verified),
+            isVerified: verified,
+            redacted: true,
+        };
+    }
+
+    /** Run the type's checksum, where one exists. */
+    private checksumOk(type: string, raw: string): boolean {
+        if (type === 'AADHAAR') return this.verhoeffCheck(raw.replace(/[\s-]/g, ''));
+        if (type === 'PAN') return this.validatePAN(raw.trim().toUpperCase());
+        if (type === 'CREDIT_CARD') return this.luhnCheck(raw.replace(/[\s-]/g, ''));
+        // No checksum exists for these — a pattern match is all we have.
+        return false;
     }
 
     scrubHTML(html: string): string {
@@ -272,55 +378,35 @@ class PIIDetector {
         return scrubbed;
     }
 
-    private validateAndRefine(detections: DetectedPII[]): void {
-        // Aadhaar: Verhoeff checksum validation
-        detections.forEach(d => {
-            if (d.type === 'AADHAAR') {
-                const digits = d.value?.replace(/\s/g, '') || '';
-                d.isVerified = this.verhoeffCheck(digits);
-                d.confidence = d.isVerified ? 0.98 : 0.3;
-            }
-            if (d.type === 'PAN') {
-                d.isVerified = this.validatePAN(d.value || '');
-                d.confidence = d.isVerified ? 0.95 : 0.2;
-            }
-            if (d.type === 'CREDIT_CARD') {
-                const digits = d.value?.replace(/[\s-]/g, '') || '';
-                d.isVerified = this.luhnCheck(digits);
-                d.confidence = d.isVerified ? 0.97 : 0.3;
-            }
-        });
-    }
-
     // Verhoeff algorithm for Aadhaar validation
     private verhoeffCheck(digits: string): boolean {
         if (digits.length !== 12) return false;
         if (!/^\d{12}$/.test(digits)) return false;
 
         const d = [
-            [0,1,2,3,4,5,6,7,8,9],
-            [1,2,3,4,0,6,7,8,9,5],
-            [2,3,4,0,1,7,8,9,5,6],
-            [3,4,0,1,2,8,9,5,6,7],
-            [4,0,1,2,3,9,5,6,7,8],
-            [5,9,8,7,6,0,4,3,2,1],
-            [6,5,9,8,7,1,0,4,3,2],
-            [7,6,5,9,8,2,1,0,4,3],
-            [8,7,6,5,9,3,2,1,0,4],
-            [9,8,7,6,5,4,3,2,1,0],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+            [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+            [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+            [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+            [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+            [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+            [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+            [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+            [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
         ];
 
         const p = [
-            [0,1,2,3,4,5,6,7,8,9],
-            [1,2,3,4,0,6,7,8,9,5],
-            [2,3,4,0,1,7,8,9,5,6],
-            [3,4,0,1,2,8,9,5,6,7],
-            [4,0,1,2,3,9,5,6,7,8],
-            [5,0,9,8,7,4,3,2,1,6],
-            [6,0,8,7,5,2,1,3,4,9],
-            [7,0,5,6,8,3,4,2,9,1],
-            [8,0,3,4,5,9,6,1,2,7],
-            [9,0,2,1,3,8,7,4,6,5],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+            [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+            [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+            [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+            [5, 0, 9, 8, 7, 4, 3, 2, 1, 6],
+            [6, 0, 8, 7, 5, 2, 1, 3, 4, 9],
+            [7, 0, 5, 6, 8, 3, 4, 2, 9, 1],
+            [8, 0, 3, 4, 5, 9, 6, 1, 2, 7],
+            [9, 0, 2, 1, 3, 8, 7, 4, 6, 5],
         ];
 
         let checksum = 0;
@@ -367,21 +453,29 @@ class PIIDetector {
         return sum % 10 === 0;
     }
 
-    private maskCard(card: string): string {
-        const digits = card.replace(/\s|-/g, '');
-        return digits.slice(0, 4) + ' **** **** ' + digits.slice(-4);
-    }
+    /**
+     * A pattern match and a checksum-confirmed match are very different levels
+     * of certainty, so the score reflects which one this was.
+     */
+    private getConfidence(type: string, verified: boolean): number {
+        if (verified) {
+            const confirmed: Record<string, number> = {
+                AADHAAR: 0.98,
+                PAN: 0.95,
+                CREDIT_CARD: 0.97,
+            };
+            return confirmed[type] ?? 0.9;
+        }
 
-    private getConfidence(type: string, _value: string): number {
-        const baseConfidence: Record<string, number> = {
-            AADHAAR: 0.85,
-            PAN: 0.90,
-            CREDIT_CARD: 0.85,
+        const patternOnly: Record<string, number> = {
+            AADHAAR: 0.30,
+            PAN: 0.20,
+            CREDIT_CARD: 0.30,
             IFSC: 0.80,
             PHONE: 0.75,
             EMAIL: 0.95,
         };
-        return baseConfidence[type] || 0.7;
+        return patternOnly[type] ?? 0.7;
     }
 
     private getElementSelector(element: Element): string {
@@ -424,9 +518,12 @@ interface InteractiveElement {
     isPassword: boolean;
 }
 
+/**
+ * A PII finding. There is deliberately no `value` field — the detector reads
+ * the raw value to match and checksum it, then discards it.
+ */
 interface DetectedPII {
     type: string;
-    value?: string;
     selector: string;
     confidence: number;
     redacted: boolean;
