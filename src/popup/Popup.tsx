@@ -1,15 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import './Popup.css';
-
-interface SoMBox {
-  id: number;
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  score: number;
-}
+import PrivacyLedger from '../components/PrivacyLedger';
+import SoMOverlay from '../components/SoMOverlay';
+import { somRenderer } from '../lib/vision/som';
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
@@ -17,7 +10,7 @@ function Popup() {
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
-  const [elements, setElements] = useState<SoMBox[]>([]);
+  const [showOverlay, setShowOverlay] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const addLog = (message: string) => {
@@ -32,7 +25,6 @@ function Popup() {
     addLog(`Starting task: "${task}"`);
 
     try {
-      // Step 1 & 2 & 3: Send to background agent for secure capture and planning
       addLog('Sending task to background agent...');
       const plan = await browser.runtime.sendMessage({
         type: 'CAPTURE_AND_SEND',
@@ -45,7 +37,6 @@ function Popup() {
 
       addLog(`Planner returned action: ${plan.action?.type}`);
 
-      // Execute first action
       if (plan.action) {
         addLog(`Executing: ${plan.action.type}`);
         await browser.runtime.sendMessage({
@@ -63,10 +54,20 @@ function Popup() {
     }
   };
 
+  const toggleOverlay = () => {
+    setShowOverlay(!showOverlay);
+    if (!showOverlay) {
+      addLog('SoM Overlay enabled');
+    } else {
+      somRenderer.clearMarks();
+      addLog('SoM Overlay disabled');
+    }
+  };
+
   return (
     <div className="popup">
       <header className="popup-header">
-        <h1 className="popup-title">🤖 SIH2026 PS171</h1>
+        <h1 className="popup-title">SIH2026 PS171</h1>
         <p className="popup-subtitle">Browser Agent</p>
       </header>
 
@@ -82,13 +83,23 @@ function Popup() {
           />
         </div>
 
-        <button
-          className={`start-button ${isRunning ? 'running' : ''}`}
-          onClick={handleStart}
-          disabled={isRunning || !task}
-        >
-          {isRunning ? 'Running...' : 'Start Agent'}
-        </button>
+        <div className="button-group">
+          <button
+            className={`start-button ${isRunning ? 'running' : ''}`}
+            onClick={handleStart}
+            disabled={isRunning || !task}
+          >
+            {isRunning ? 'Running...' : 'Start Agent'}
+          </button>
+
+          <button
+            className="overlay-button"
+            onClick={toggleOverlay}
+            disabled={isRunning}
+          >
+            {showOverlay ? 'Hide Overlay' : 'Show Overlay'}
+          </button>
+        </div>
 
         {step > 0 && (
           <div className="step-indicator">
@@ -110,11 +121,29 @@ function Popup() {
             ))}
           </div>
         </div>
+
+        {/* Privacy Ledger Panel - component renders its own header */}
+        <div className="privacy-ledger-section">
+          <div className="privacy-ledger-container">
+            <PrivacyLedger />
+          </div>
+        </div>
       </div>
 
       <footer className="popup-footer">
         <span>Privacy-first • On-device inference</span>
       </footer>
+
+      {/* SoM Overlay - renders on top of page when visible */}
+      {showOverlay && (
+        <div ref={overlayRef} className="overlay-container">
+          <SoMOverlay
+            boxes={[]}
+            isVisible={showOverlay}
+            onSelectBox={(box) => addLog(`Selected box ${box.id}: ${box.label}`)}
+          />
+        </div>
+      )}
     </div>
   );
 }

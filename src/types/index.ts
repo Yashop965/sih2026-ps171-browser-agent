@@ -23,38 +23,17 @@ export interface ARIAElement {
   depth: number;
 }
 
-export type PIIType =
+export type PIIType = 
   | 'AADHAAR'
   | 'PAN'
   | 'CREDIT_CARD'
-  | 'DEBIT_CARD'
   | 'IFSC'
-  | 'UPI'
   | 'PHONE'
   | 'EMAIL'
   | 'PASSWORD_FIELD'
-  | 'PASSWORD_VALUE'
   | 'API_KEY'
   | 'FACE_DETECTED'
-  | 'TEXT_PASSWORD'
-  | 'SSN';
-
-/**
- * A privacy event recorded by the PII pipeline.
- * Never stores the raw sensitive value.
- */
-export interface PrivacyEvent {
-  id?: string;
-  timestamp?: Date;
-  /** Event category: detected, redacted, blocked, or sent */
-  type: 'detected' | 'redacted' | 'blocked' | 'sent';
-  /** PII category label, e.g. AADHAAR */
-  category: string;
-  /** Human-readable description — must NOT contain the raw value */
-  detail: string;
-  confidence?: number;
-  selector?: string;
-}
+  | 'TEXT_PASSWORD';
 
 export interface DetectedPII {
   type: PIIType;
@@ -154,3 +133,20 @@ export type Stage =
   | 'vision_inference'
   | 'plan_response'
   | 'action_execution';
+
+/**
+ * A privacy event surfaced in the UI.
+ *
+ * `detail` is rendered on screen, so it must describe what was found without
+ * ever containing the value itself — putting a detected Aadhaar number or
+ * password in here would display real PII inside the very panel meant to
+ * prove none escaped.
+ */
+export interface PrivacyEvent {
+  id: string;
+  timestamp: Date;
+  type: 'detected' | 'redacted';
+  category: PIIType;
+  detail: string;
+  confidence: number;
+}  
