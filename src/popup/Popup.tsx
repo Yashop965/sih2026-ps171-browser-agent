@@ -105,9 +105,12 @@ function Popup() {
         addLog(`Elements: ${elements.length} total (${inputFields.length} inputs, ${selects.length} selects, ${buttons.length} buttons)`);
 
         // Dynamically calculate max steps based on elements found
+        // Be generous - need steps for each field + submit
+        const totalFields = inputFields.length + selects.length;
+        const calculatedMax = Math.max(20, totalFields * 3 + buttons.length + 10);
         if (currentStep === 0 || maxSteps === 15) {
-          maxSteps = Math.max(10, Math.min(50, (inputFields.length + selects.length) * 3 + buttons.length + 5));
-          addLog(`Calculated max steps: ${maxSteps} (based on ${elements.length} elements)`);
+          maxSteps = Math.min(100, calculatedMax); // Cap at 100 but be generous
+          addLog(`Calculated max steps: ${maxSteps} (need to fill ${totalFields} fields)`);
         }
 
         addLog('Sending sanitized context to planner...');

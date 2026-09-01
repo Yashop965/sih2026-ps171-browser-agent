@@ -197,10 +197,17 @@ ACTION EXAMPLES:
 - For button: {{"type": "CLICK", "targetId": 4, "reasoning": "clicking submit button"}}
 
 YOUR NEXT ACTION MUST BE:
-- TYPE into a text input field (if any exist) using the matching value from the task
-- SELECT from a dropdown (if any exist) using the matching value from the task
-- CLICK a button (if all inputs are filled)
-- DONE (if no more actions needed)
+- TYPE into an UNFILLED text input field using the matching value from the task
+- SELECT from an unfilled dropdown (if any exist)
+- CLICK the SUBMIT button ONLY when ALL inputs are filled
+- DONE only when all fields are filled OR no more actions needed
+
+SYSTEMATIC APPROACH:
+1. Fill all text input fields first (one per step)
+2. Then fill all dropdown/select fields
+3. Then click any checkboxes/radios if needed
+4. Finally click SUBMIT button
+5. Do NOT skip any unfilled fields
 
 MATCHING RULES:
 - "first name" → type the value for "First Name" key
@@ -209,6 +216,11 @@ MATCHING RULES:
 - "phone" → type the value for "Phone" key
 - Match keywords loosely: "name" matches "Full Name", "First Name", etc.
 - For dropdowns: use sensible values like "Option 1", "Male", "Female", etc.
+- For passwords: use "password123" or "Test@123"
+- For emails: use "test@example.com"
+- For phones: use "9876543210"
+
+IMPORTANT: Fill EVERY unfilled field you see. Do not stop until all inputs are completed.
 
 RETURN ONLY this JSON (no markdown, no explanation):
 {{"type": "TYPE", "targetId": <input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
