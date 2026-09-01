@@ -406,7 +406,7 @@ export default function PrivacyLedger() {
             }}
           >
             {/* Debug: show count */}
-            <div style={{ position: 'absolute', top: 8,[right: 8, background: '#F8F7F4', padding: '4px 8px', borderRadius: 1, fontSize: 9, fontFamily: MONO, color: '#9A9A9A', zIndex: 5 }}>
+            <div style={{ position: 'absolute', top: 8, right: 8, background: '#F8F7F4', padding: '4px 8px', borderRadius: 1, fontSize: 9, fontFamily: MONO, color: '#9A9A9A', zIndex: 5 }}>
               {detections.length} fields
             </div>
             {/* Show all detections in heatmap, not just filtered */}

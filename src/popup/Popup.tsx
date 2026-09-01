@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
+import ResourceMonitor from '../components/ResourceMonitor';
 import { PROVIDERS, ProviderKey, getProvider } from '../lib/providerConfig';
 
 function Popup() {
@@ -292,6 +293,8 @@ function Popup() {
             </div>
           )}
         </div>
+
+        <ResourceMonitor />
 
         <button
           className={`start-button ${isRunning ? 'running' : ''}`}
