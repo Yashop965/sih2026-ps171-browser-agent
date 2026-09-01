@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
@@ -17,14 +17,14 @@ function Popup() {
   const [serverLatency, setServerLatency] = useState<number>(0);
 
   // Load saved provider config from chrome.storage
-  useState(() => {
+  useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.get(['providerKey', 'apiKey'], (result) => {
         if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
         if (result.apiKey) setProviderKey(result.apiKey);
       });
     }
-  });
+  }, []);
 
   // Health check function
   const checkHealth = useCallback(async () => {
@@ -213,8 +213,8 @@ function Popup() {
         <h1 className="popup-title">SIH2026 PS171</h1>
         <p className="popup-subtitle">Browser Agent</p>
         {/* Status Indicator */}
-        <div className="status-indicator" title={healthStatus === 'healthy' ? `Server OK (${serverLatency}ms)` : healthStatus === 'checking' ? 'Checking...' : 'Server Offline'}>
-          <span className={`status-dot ${healthStatus === 'healthy' ? 'healthy' : healthStatus === 'checking' ? 'checking' : 'unhealthy'}`}></span>
+        <div className="status-indicator" title={healthStatus === 'healthy' ? `Server OK (${serverLatency}ms)` : healthStatus === 'checking' ? 'Checking...' : 'Server Offline'} role="status" aria-label={`Server status: ${healthStatus === 'healthy' ? 'Live' : healthStatus === 'checking' ? 'Checking' : 'Dead'}`}>
+          <span className={`status-dot ${healthStatus === 'healthy' ? 'healthy' : healthStatus === 'checking' ? 'checking' : 'unhealthy'}`} aria-hidden="true"></span>
           <span className="status-text">{healthStatus === 'healthy' ? 'Live' : healthStatus === 'checking' ? 'Check...' : 'Dead'}</span>
           {serverLatency > 0 && <span className="status-latency">{serverLatency}ms</span>}
         </div>

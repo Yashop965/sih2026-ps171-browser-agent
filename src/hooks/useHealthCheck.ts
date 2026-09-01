@@ -112,7 +112,7 @@ export function useHealthCheck(): HealthStatus {
 
       const overall = serverOk && domOk ? 'healthy' : 
                       (serverOk || domOk) ? 'degraded' : 'unhealthy';
-      setStatus(s => ({ ...s, overall } as any));
+      setStatus(s => ({ ...s, overall: overall as 'healthy' | 'degraded' | 'unhealthy' }));
     };
 
     runChecks();
