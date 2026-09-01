@@ -1,1 +1,14 @@
-{}
+{
+  "manifest_version": 3,
+  "name": "VisionAgent",
+  "version": "1.0.0",
+  "description": "On-device visual browser agent",
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "VisionAgent"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ]
+}

@@ -1,0 +1,508 @@
+/* =========================================
+   GLOBAL
+========================================= */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  background: #eee7df;
+  color: #171513;
+}
+
+
+/* =========================================
+   MAIN CONTAINER
+========================================= */
+
+.app-container {
+  min-height: 100vh;
+
+  background: #eee7df;
+
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+
+  padding: 28px 20px;
+}
+
+
+/* =========================================
+   PLUGIN POPUP
+========================================= */
+
+.agent-popup {
+  width: 420px;
+  max-width: 100%;
+
+  background: #f8f5f1;
+
+  border: 1px solid #8b857e;
+
+  border-radius: 14px;
+
+  box-shadow:
+    0 18px 45px rgba(23, 21, 19, 0.14),
+    0 4px 12px rgba(23, 21, 19, 0.08);
+
+  overflow: hidden;
+}
+
+
+/* =========================================
+   HEADER
+========================================= */
+
+.popup-header {
+  padding: 20px 22px 17px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 15px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 8px;
+
+  background: #171513;
+  color: #f8f5f1;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  letter-spacing: 0.5px;
+}
+
+.popup-header h1 {
+  margin: 0;
+
+  font-size: 17px;
+  font-weight: 700;
+
+  letter-spacing: -0.2px;
+}
+
+.popup-header p {
+  margin: 3px 0 0;
+
+  color: #77716a;
+
+  font-size: 12px;
+}
+
+
+/* =========================================
+   STATUS
+========================================= */
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  color: #77716a;
+
+  font-size: 11px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+
+  border-radius: 50%;
+
+  background: #4c9a61;
+
+  box-shadow:
+    0 0 0 3px rgba(76, 154, 97, 0.12);
+}
+
+.status-dot.running {
+  background: #d97745;
+
+  box-shadow:
+    0 0 0 3px rgba(217, 119, 69, 0.13);
+}
+
+
+/* =========================================
+   ORANGE ACCENT
+========================================= */
+
+.orange-line {
+  height: 3px;
+
+  background: #d97745;
+}
+
+.orange-marker {
+  width: 7px;
+  height: 7px;
+
+  background: #d97745;
+
+  border-radius: 50%;
+
+  display: inline-block;
+}
+
+
+/* =========================================
+   TASK SECTION
+========================================= */
+
+.task-section {
+  padding: 20px 22px 18px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  margin-bottom: 10px;
+
+  font-size: 12px;
+  font-weight: 700;
+
+  color: #171513;
+}
+
+
+/* =========================================
+   TEXTAREA
+========================================= */
+
+.task-input {
+  width: 100%;
+
+  min-height: 105px;
+
+  resize: vertical;
+
+  padding: 13px 14px;
+
+  border: 1px solid #8b857e;
+
+  border-radius: 9px;
+
+  background: #eee7df;
+
+  color: #171513;
+
+  font-family: inherit;
+  font-size: 13px;
+
+  line-height: 1.5;
+
+  outline: none;
+
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.task-input::placeholder {
+  color: #77716a;
+}
+
+.task-input:focus {
+  border-color: #d97745;
+
+  background: #f8f5f1;
+
+  box-shadow:
+    0 0 0 3px rgba(217, 119, 69, 0.12);
+}
+
+
+/* =========================================
+   START BUTTON
+========================================= */
+
+.start-button {
+  width: 100%;
+
+  margin-top: 12px;
+
+  height: 44px;
+
+  border: none;
+  border-radius: 8px;
+
+  background: #171513;
+  color: #f8f5f1;
+
+  font-family: inherit;
+
+  font-size: 13px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  transition:
+    background 0.2s ease,
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
+}
+
+.start-button:hover {
+  background: #d97745;
+
+  box-shadow:
+    0 5px 15px rgba(217, 119, 69, 0.22);
+}
+
+.start-button:active {
+  transform: translateY(1px);
+}
+
+.button-icon {
+  font-size: 10px;
+}
+
+
+/* =========================================
+   ACTIVITY LOG
+========================================= */
+
+.activity-section {
+  border-top: 1px solid #8b857e;
+
+  padding: 16px 22px 18px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  font-size: 12px;
+  font-weight: 700;
+
+  margin-bottom: 10px;
+}
+
+.live-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+
+  color: #77716a;
+
+  font-size: 9px;
+  letter-spacing: 0.7px;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+
+  border-radius: 50%;
+
+  background: #4c9a61;
+}
+
+
+/* =========================================
+   LOG BOX
+========================================= */
+
+.activity-log {
+  min-height: 95px;
+  max-height: 160px;
+
+  overflow-y: auto;
+
+  background: #eee7df;
+
+  border: 1px solid #8b857e;
+
+  border-radius: 8px;
+
+  padding: 9px;
+}
+
+.empty-log {
+  color: #77716a;
+
+  font-size: 11px;
+
+  text-align: center;
+
+  padding: 30px 10px;
+}
+
+.activity-item {
+  display: flex;
+
+  gap: 9px;
+
+  padding: 7px 5px;
+
+  border-bottom: 1px solid rgba(139, 133, 126, 0.3);
+
+  font-size: 10px;
+}
+
+.activity-item:last-child {
+  border-bottom: none;
+}
+
+.activity-time {
+  color: #d97745;
+
+  font-weight: 600;
+
+  white-space: nowrap;
+}
+
+.activity-text {
+  color: #171513;
+
+  line-height: 1.4;
+}
+
+
+/* =========================================
+   PRIVACY LEDGER
+========================================= */
+
+.privacy-ledger {
+  margin: 0 22px 18px;
+
+  border: 1px solid #8b857e;
+
+  border-radius: 9px;
+
+  background: #f8f5f1;
+
+  overflow: hidden;
+}
+
+
+/* =========================================
+   FOOTER
+========================================= */
+
+.popup-footer {
+  border-top: 1px solid #8b857e;
+
+  padding: 11px 22px;
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  background: #eee7df;
+}
+
+.footer-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  color: #77716a;
+
+  font-size: 10px;
+}
+
+.green-dot {
+  width: 7px;
+  height: 7px;
+
+  border-radius: 50%;
+
+  background: #4c9a61;
+}
+
+.version {
+  color: #77716a;
+
+  font-size: 9px;
+}
+
+
+/* =========================================
+   SCROLLBAR
+========================================= */
+
+.activity-log::-webkit-scrollbar {
+  width: 5px;
+}
+
+.activity-log::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.activity-log::-webkit-scrollbar-thumb {
+  background: #8b857e;
+
+  border-radius: 10px;
+}
+
+
+/* =========================================
+   MOBILE
+========================================= */
+
+@media (max-width: 480px) {
+
+  .app-container {
+    padding: 12px;
+  }
+
+  .agent-popup {
+    width: 100%;
+  }
+
+  .popup-header {
+    padding: 17px;
+  }
+
+  .task-section,
+  .activity-section {
+    padding-left: 17px;
+    padding-right: 17px;
+  }
+
+  .privacy-ledger {
+    margin-left: 17px;
+    margin-right: 17px;
+  }
+
+  .popup-header h1 {
+    font-size: 15px;
+  }
+}

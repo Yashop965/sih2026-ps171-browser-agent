@@ -1,40 +1,23 @@
 {
-  "name": "sih2026-ps171-browser-agent",
-  "version": "1.0.0",
-  "description": "SIH 2026 PS171 — On-device Visual Perception for Light-weight Browser Agents (ISRO)",
+  "name": "browser-agent",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:client": "wxt",
-    "dev:server": "python server/main.py",
-    "build": "wxt build",
-    "prepare": "wxt prepare",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "server:install": "pip install -r server/requirements.txt",
-    "ollama:pull": "ollama pull qwen2.5:1.5b && ollama pull Florence-2-base-ft"
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.5.1",
-    "onnxruntime-web": "^1.21.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@types/chrome": "^0.0.287",
-    "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitest/browser": "^4.1.11",
-    "@wxt-dev/module-react": "^1.2.0",
-    "autoprefixer": "^10.4.0",
-    "concurrently": "^9.1.0",
-    "jsdom": "^30.0.1",
-    "postcss": "^8.4.0",
-    "tailwindcss": "^3.4.0",
-    "typescript": "^5.7.0",
-    "vitest": "^4.1.11",
-    "wxt": "^0.19.0"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "oxlint": "^1.79.0",
+    "vite": "^8.2.2"
   }
 }
