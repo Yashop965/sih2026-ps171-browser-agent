@@ -1,4 +1,4 @@
-/* Clean Extension Theme - Human-designed, not AI-generated */
+/* Professional Extension Theme - Light mode */
 
 * {
   margin: 0;
@@ -7,67 +7,66 @@
 }
 
 .popup {
-  width: 400px;
-  min-height: 480px;
+  width: 420px;
+  min-height: 500px;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #1a1a1a;
-  border: 1px solid #e0e0e0;
+  background: #f8f9fa;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: #24292f;
+  border: 1px solid #d0d7de;
 }
 
-/* Header - Simple, functional */
+/* Header */
 .popup-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 16px 20px;
+  border-bottom: 1px solid #d0d7de;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #fafafa;
+  background: #ffffff;
 }
 
 .popup-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
-  color: #1a1a1a;
-  letter-spacing: -0.01em;
+  color: #24292f;
 }
 
 .popup-subtitle {
   font-size: 12px;
-  color: #666;
+  color: #656d76;
   margin-top: 2px;
 }
 
-/* Status indicator - Subtle */
+/* Status indicator */
 .status-indicator {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: #666;
+  gap: 8px;
+  font-size: 12px;
+  color: #656d76;
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #ccc;
+  background: #d0d7de;
 }
 
-.status-dot.healthy { background: #22c55e; }
-.status-dot.checking { background: #f59e0b; animation: pulse 1.5s infinite; }
-.status-dot.unhealthy { background: #ef4444; }
+.status-dot.healthy { background: #1a7f37; }
+.status-dot.checking { background: #9a6700; animation: pulse 1.5s infinite; }
+.status-dot.unhealthy { background: #cf222e; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
 .status-latency {
-  color: #999;
-  font-size: 10px;
+  color: #656d76;
+  font-size: 11px;
 }
 
 /* Body */
@@ -80,196 +79,198 @@
 
 /* Task Input Section */
 .task-input-section {
-  padding: 16px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 20px;
+  border-bottom: 1px solid #d0d7de;
+  background: #ffffff;
 }
 
 .input-label {
   display: block;
   font-size: 12px;
-  font-weight: 500;
-  color: #555;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-weight: 600;
+  color: #24292f;
+  margin-bottom: 8px;
 }
 
 .task-textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid #d0d7de;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   resize: none;
-  background: #fff;
-  color: #1a1a1a;
+  background: #ffffff;
+  color: #24292f;
   line-height: 1.5;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .task-textarea:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: #0969da;
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.1);
 }
 
 .task-textarea::placeholder {
-  color: #aaa;
+  color: #909da8;
 }
 
 /* Provider Section */
 .provider-section {
-  padding: 12px 16px;
-  border-bottom: 1px solid #e8e8e8;
-  background: #fafafa;
+  padding: 16px 20px;
+  border-bottom: 1px solid #d0d7de;
+  background: #f6f8fa;
 }
 
 .provider-row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 
 .provider-select {
   flex: 1;
   padding: 6px 10px;
-  border: 1px solid #d0d0d0;
-  border-radius: 4px;
-  font-size: 12px;
-  background: #fff;
-  color: #333;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #ffffff;
+  color: #24292f;
   cursor: pointer;
 }
 
 .provider-select:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: #0969da;
 }
 
 .settings-button {
-  padding: 6px 10px;
-  border: 1px solid #d0d0d0;
-  border-radius: 4px;
-  background: #fff;
-  font-size: 12px;
+  padding: 6px 12px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 13px;
   cursor: pointer;
-  color: #555;
+  color: #24292f;
 }
 
 .settings-button:hover {
-  background: #f5f5f5;
+  background: #f6f8fa;
+  border-color: #909da8;
 }
 
 .provider-settings {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #e0e0e0;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #d0d7de;
 }
 
 .api-key-input {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid #d0d0d0;
-  border-radius: 4px;
-  font-size: 12px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font-size: 13px;
   margin-bottom: 8px;
 }
 
 .api-key-input:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: #0969da;
 }
 
 .save-key-button {
-  padding: 6px 12px;
+  padding: 6px 14px;
   border: none;
-  border-radius: 4px;
-  background: #3b82f6;
-  color: #fff;
-  font-size: 12px;
+  border-radius: 6px;
+  background: #2da44e;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
 }
 
 .save-key-button:hover {
-  background: #2563eb;
+  background: #268543;
 }
 
 /* Controls */
 .controls {
-  padding: 16px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 20px;
+  border-bottom: 1px solid #d0d7de;
+  background: #ffffff;
 }
 
 .start-button {
   width: 100%;
   padding: 10px 16px;
-  border: none;
+  border: 1px solid rgba(27, 31, 35, 0.15);
   border-radius: 6px;
-  background: #1a1a1a;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
+  background: #2da44e;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.2s;
 }
 
 .start-button:hover:not(:disabled) {
-  background: #333;
+  background: #268543;
 }
 
 .start-button:disabled {
-  background: #ccc;
+  background: #909da8;
+  border-color: #909da8;
   cursor: not-allowed;
 }
 
 .step-indicator {
-  margin-top: 10px;
-  font-size: 11px;
-  color: #666;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #656d76;
   text-align: center;
 }
 
 .latency-display {
   margin-top: 6px;
-  font-size: 10px;
-  color: #999;
+  font-size: 11px;
+  color: #909da8;
   text-align: center;
 }
 
 /* Log Section */
 .log-section {
   flex: 1;
-  padding: 12px 16px;
+  padding: 16px 20px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: #f6f8fa;
 }
 
 .log-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: #666;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 8px;
+  color: #24292f;
+  margin-bottom: 10px;
 }
 
 .log-container {
   flex: 1;
   overflow-y: auto;
-  font-family: 'SF Mono', Monaco, monospace;
-  font-size: 11px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 12px;
   line-height: 1.6;
-  color: #333;
-  background: #fafafa;
-  border: 1px solid #e8e8e8;
-  border-radius: 4px;
-  padding: 10px;
+  color: #24292f;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 12px;
 }
 
 .log-entry {
-  padding: 2px 0;
+  padding: 3px 0;
   border-bottom: 1px solid #f0f0f0;
 }
 
@@ -279,36 +280,37 @@
 
 /* Ledger Container */
 .ledger-container {
-  border-top: 1px solid #e8e8e8;
-  max-height: 280px;
+  border-top: 1px solid #d0d7de;
+  max-height: 300px;
   overflow: hidden;
-  background: #fff;
+  background: #ffffff;
 }
 
 /* Footer */
 .popup-footer {
-  padding: 10px 16px;
-  border-top: 1px solid #e8e8e8;
-  font-size: 10px;
-  color: #999;
+  padding: 12px 20px;
+  border-top: 1px solid #d0d7de;
+  font-size: 11px;
+  color: #656d76;
   text-align: center;
-  background: #fafafa;
+  background: #f6f8fa;
 }
 
 /* Scrollbar styling */
 .log-container::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .log-container::-webkit-scrollbar-track {
-  background: transparent;
+  background: #f6f8fa;
+  border-radius: 4px;
 }
 
 .log-container::-webkit-scrollbar-thumb {
-  background: #d0d0d0;
-  border-radius: 3px;
+  background: #d0d7de;
+  border-radius: 4px;
 }
 
 .log-container::-webkit-scrollbar-thumb:hover {
-  background: #bbb;
+  background: #909da8;
 }
