@@ -389,11 +389,11 @@ export default function PrivacyLedger() {
                 padding: '20px 12px',
                 fontSize: 12,
                 lineHeight: 1.6,
-                color: '#5B6673',
-              }}
-            >
-              Nothing recorded yet. Every detection, redaction and outbound
-              payload will appear here as it happens.
+                color: '#656d76',
+                }}
+                >
+                Nothing recorded yet. Every detection, redaction and outbound
+                payload will appear here as it happens.
             </p>
           ) : (
             <ol style={{ margin: 0, padding: 0, listStyle: 'none' }}>
