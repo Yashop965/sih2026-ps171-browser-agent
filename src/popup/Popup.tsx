@@ -69,6 +69,7 @@ function Popup() {
     let consecutiveScrolls = 0;
     let filledIds = new Set<number>(); // Track which element IDs are already filled
     let maxSteps = 15; // Will be updated after first extraction
+    let recentActionHistory: Array<{targetId: number, type: string}> = []; // Track recent actions for loop detection
 
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -99,8 +100,19 @@ function Popup() {
         const inputFields = elements.filter((e: any) => e.role === 'textbox' || e.tag === 'input');
         const buttons = elements.filter((e: any) => e.role === 'button' || e.tag === 'button');
         const selects = elements.filter((e: any) => e.tag === 'select' || e.type === 'select-one');
-        
+
         addLog(`Elements: ${elements.length} total (${inputFields.length} inputs, ${selects.length} selects, ${buttons.length} buttons)`);
+
+        // Track recent actions to detect loops
+        const recentActions = recentActionHistory.slice(-5);
+        const lastAction = recentActions[recentActions.length - 1];
+        if (lastAction && action.targetId === lastAction.targetId && action.type === lastAction.type) {
+          // Same action repeated twice in a row - skip this element
+          addLog(`⚠️ Skipping repeated action on element #${action.targetId}`);
+          filledIds.add(action.targetId);
+          recentActionHistory.push({ targetId: action.targetId, type: action.type });
+          continue;
+        }
 
         // Dynamically calculate max steps based on elements found
         if (currentStep === 0 || maxSteps === 15) {
@@ -166,10 +178,12 @@ function Popup() {
             addLog('✅ Typed successfully');
             setStep(currentStep);
             filledIds.add(action.targetId); // Track this ID as filled
+            recentActionHistory.push({ targetId: action.targetId, type: 'TYPE' });
           } else {
             addLog(`❌ Type failed: ${result?.error ?? 'unknown'}`);
             // Still mark as attempted so planner doesn't retry forever
             filledIds.add(action.targetId);
+            recentActionHistory.push({ targetId: action.targetId, type: 'TYPE' });
           }
         } else if (action.type === 'CLICK' && action.targetId) {
           consecutiveScrolls = 0;
