@@ -440,3 +440,4 @@ MIT License — see [LICENSE](./LICENSE) for details.
 ---
 
 *Built for Smart India Hackathon 2026 · Team: B.Tech CSE · All tools free/open-source*
+
