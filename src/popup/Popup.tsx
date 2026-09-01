@@ -1,19 +1,8 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
 import SoMOverlay from '../components/SoMOverlay';
 import { somRenderer } from '../lib/vision/som';
-import type { BoundingBox } from '../types';
-
-interface SoMBox {
-  id: number;
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  score: number;
-}
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
