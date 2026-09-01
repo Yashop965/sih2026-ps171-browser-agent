@@ -144,6 +144,8 @@ function Popup() {
             }
           } else {
             addLog(`❌ Click failed: ${result?.error ?? 'unknown'}`);
+            // Still mark as attempted so planner doesn't retry forever
+            filledIds.add(action.targetId);
           }
         } else {
           addLog(`Unknown action: ${JSON.stringify(action)}`);
