@@ -154,44 +154,48 @@ export default function PrivacyLedger() {
   const disabled = busy || entries.length === 0;
 
   const btn: React.CSSProperties = {
-    border: '1px solid #2A323D',
+    border: '1px solid #D0CDC6',
     background: 'transparent',
-    color: disabled ? '#4A525E' : '#C3CBD6',
-    borderRadius: 4,
+    color: disabled ? '#9A9A9A' : '#6B6B6B',
+    borderRadius: 1,
     padding: '6px 8px',
-    fontSize: 11,
+    fontSize: 10,
     cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
   };
 
   const tab = (v: View): React.CSSProperties => ({
     border: 'none',
     background: 'transparent',
-    color: view === v ? '#D7DDE5' : '#5B6673',
-    borderBottom: `1.5px solid ${view === v ? '#6FBF9B' : 'transparent'}`,
-    padding: '4px 2px',
-    marginRight: 14,
-    fontSize: 12,
+    color: view === v ? '#0D0D0D' : '#9A9A9A',
+    borderBottom: `1px solid ${view === v ? '#0D0D0D' : 'transparent'}`,
+    padding: '6px 2px',
+    marginRight: 16,
+    fontSize: 10,
     cursor: 'pointer',
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
   });
 
   const th: React.CSSProperties = {
     textAlign: 'left',
-    padding: '4px 6px',
+    padding: '6px 8px',
     fontFamily: MONO,
-    fontSize: 10,
+    fontSize: 9,
     textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    color: '#5B6673',
+    letterSpacing: '0.06em',
+    color: '#9A9A9A',
     cursor: 'pointer',
     userSelect: 'none',
-    borderBottom: '1px solid #1E242D',
+    borderBottom: '1px solid #E8E6E1',
   };
 
   const td: React.CSSProperties = {
-    padding: '6px',
+    padding: '6px 8px',
     fontFamily: MONO,
-    fontSize: 11,
-    borderBottom: '1px solid #161B22',
+    fontSize: 10,
+    borderBottom: '1px solid #F0EFEC',
   };
 
   function arrow(key: SortKey) {
@@ -209,11 +213,11 @@ export default function PrivacyLedger() {
         color: '#1f2328',
       }}
     >
-      <header style={{ borderBottom: '1px solid #E0E0DC', padding: '8px 12px 0' }}>
+      <header style={{ borderBottom: '1px solid #E8E6E1', padding: '8px 12px 0' }}>
         <div style={{ display: 'flex', alignItems: 'baseline' }}>
           <button onClick={() => setView('detections')} style={tab('detections')}>
             Detections{' '}
-            <span style={{ fontFamily: MONO, fontSize: 11, color: '#8A8A8A' }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
               {dStats.total}
             </span>
           </button>
@@ -222,7 +226,7 @@ export default function PrivacyLedger() {
           </button>
           <button onClick={() => setView('log')} style={tab('log')}>
             Audit log{' '}
-            <span style={{ fontFamily: MONO, fontSize: 11, color: '#8A8A8A' }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
               {stats.total}
             </span>
           </button>
@@ -235,13 +239,14 @@ export default function PrivacyLedger() {
             style={{
               display: 'flex',
               flexWrap: 'wrap',
-              gap: 5,
-              padding: '8px 12px',
-              borderBottom: '1px solid #1E242D',
+              gap: 6,
+              padding: '10px 12px',
+              borderBottom: '1px solid #E8E6E1',
+              background: '#F8F7F4',
             }}
           >
             {dStats.byType.length === 0 ? (
-              <span style={{ fontFamily: MONO, fontSize: 11, color: '#5B6673' }}>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
                 {dStats.total === 0 ? 'nothing detected' : ''}
               </span>
             ) : (
@@ -249,14 +254,16 @@ export default function PrivacyLedger() {
                 <button
                   onClick={() => setTypeFilter(null)}
                   style={{
-                    border: '1px solid #2A323D',
-                    background: typeFilter === null ? '#1B2129' : 'transparent',
-                    color: typeFilter === null ? '#D7DDE5' : '#7C8695',
-                    borderRadius: 3,
-                    padding: '2px 7px',
+                    border: '1px solid #D0CDC6',
+                    background: typeFilter === null ? '#0D0D0D' : 'transparent',
+                    color: typeFilter === null ? '#FFFFFF' : '#6B6B6B',
+                    borderRadius: 1,
+                    padding: '4px 8px',
                     fontFamily: MONO,
-                    fontSize: 10,
+                    fontSize: 9,
                     cursor: 'pointer',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
                   }}
                 >
                   all {dStats.total}
@@ -269,15 +276,17 @@ export default function PrivacyLedger() {
                     }
                     title={`${t.percent}% of detections on this page`}
                     style={{
-                      border: '1px solid #2A323D',
+                      border: '1px solid #D0CDC6',
                       background:
-                        typeFilter === t.type ? '#1B2129' : 'transparent',
-                      color: typeFilter === t.type ? '#E4837D' : '#7C8695',
-                      borderRadius: 3,
-                      padding: '2px 7px',
+                        typeFilter === t.type ? '#0D0D0D' : 'transparent',
+                      color: typeFilter === t.type ? '#FFFFFF' : '#6B6B6B',
+                      borderRadius: 1,
+                      padding: '4px 8px',
                       fontFamily: MONO,
-                      fontSize: 10,
+                      fontSize: 9,
                       cursor: 'pointer',
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
                     }}
                   >
                     {t.type.toLowerCase()} {t.count}
