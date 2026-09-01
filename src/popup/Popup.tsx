@@ -13,6 +13,8 @@ function Popup() {
   const [selectedProvider, setSelectedProvider] = useState<ProviderKey>('custom');
   const [providerKey, setProviderKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
+  const [serverLatency, setServerLatency] = useState<number>(0);
 
   // Load saved provider config from chrome.storage
   useState(() => {
@@ -23,6 +25,29 @@ function Popup() {
       });
     }
   });
+
+  // Health check function
+  const checkHealth = useCallback(async () => {
+    const start = performance.now();
+    try {
+      const response = await fetch('http://localhost:8000/health', {
+        signal: AbortSignal.timeout(3000)
+      });
+      const latency = Math.round(performance.now() - start);
+      setServerLatency(latency);
+      setHealthStatus(response.ok ? 'healthy' : 'unhealthy');
+    } catch {
+      setServerLatency(0);
+      setHealthStatus('unhealthy');
+    }
+  }, []);
+
+  // Check health on mount and periodically
+  useEffect(() => {
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000); // Check every 10 seconds
+    return () => clearInterval(interval);
+  }, [checkHealth]);
 
   const addLog = (message: string) => {
     setLogs(prev =>
@@ -187,6 +212,12 @@ function Popup() {
       <header className="popup-header">
         <h1 className="popup-title">SIH2026 PS171</h1>
         <p className="popup-subtitle">Browser Agent</p>
+        {/* Status Indicator */}
+        <div className="status-indicator" title={healthStatus === 'healthy' ? `Server OK (${serverLatency}ms)` : healthStatus === 'checking' ? 'Checking...' : 'Server Offline'}>
+          <span className={`status-dot ${healthStatus === 'healthy' ? 'healthy' : healthStatus === 'checking' ? 'checking' : 'unhealthy'}`}></span>
+          <span className="status-text">{healthStatus === 'healthy' ? 'Live' : healthStatus === 'checking' ? 'Check...' : 'Dead'}</span>
+          {serverLatency > 0 && <span className="status-latency">{serverLatency}ms</span>}
+        </div>
       </header>
 
       <div className="popup-body">
