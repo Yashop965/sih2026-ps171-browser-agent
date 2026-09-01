@@ -196,6 +196,9 @@ MATCHING RULES:
 - "email" → type the value for "Email" key
 - "phone" → type the value for "Phone" key
 - Match keywords loosely: "name" matches "Full Name", "First Name", etc.
+
+RETURN ONLY this JSON (no markdown, no explanation):
+{{"type": "TYPE", "targetId": <input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
         return prompt
 
     def parse_llm_output(self, llm_response: str, interactive_elements: List[Dict[str, Any]]) -> PlannerResult:
