@@ -1,127 +1,127 @@
-export interface ScreenPoint {
-  x: number;
-  y: number;
+/**
+ * Set-of-Marks (SoM) Renderer
+ *
+ * Renders numbered bounding boxes on detected UI elements
+ * for vision model grounding and human review
+ */
+
+export interface MarkOptions {
+  fontSize?: number;
+  boxColor?: string;
+  backgroundColor?: string;
+  showLabels?: boolean;
 }
 
-export interface ElementRect {
+export interface Mark {
+  id: number;
   x: number;
   y: number;
   width: number;
   height: number;
+  label: string;
+  type: string;
 }
 
-export interface TransformedPoint {
-  x: number;
-  y: number;
+export class SomRenderer {
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private marks: Mark[] = [];
+  private options: MarkOptions;
+
+  constructor(options: MarkOptions = {}) {
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2147483646;
+      pointer-events: none;
+      opacity: 0.9;
+    `;
+    document.body.appendChild(this.canvas);
+
+    this.ctx = this.canvas.getContext('2d')!;
+    this.options = {
+      fontSize: 14,
+      boxColor: '#00FF00',
+      backgroundColor: 'rgba(0, 255, 0, 0.1)',
+      showLabels: true,
+      ...options,
+    };
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  private resize(): void {
+    this.canvas.width = window.innerWidth;
+    this.canvas.height = window.innerHeight;
+    this.render();
+  }
+
+  setMarks(marks: Mark[]): void {
+    this.marks = marks;
+    this.render();
+  }
+
+  addMark(mark: Mark): void {
+    this.marks.push(mark);
+    this.render();
+  }
+
+  clearMarks(): void {
+    this.marks = [];
+    this.render();
+  }
+
+  private render(): void {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+    this.ctx.font = `${this.options.fontSize}px Arial`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+
+    for (const mark of this.marks) {
+      this.drawMark(mark);
+    }
+  }
+
+  private drawMark(mark: Mark): void {
+    const { x, y, width, height, id, label } = mark;
+
+    // Draw box
+    this.ctx.strokeStyle = this.options.boxColor;
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(x, y, width, height);
+
+    // Fill background
+    this.ctx.fillStyle = this.options.backgroundColor;
+    this.ctx.fillRect(x, y, width, height);
+
+    // Draw label
+    if (this.options.showLabels) {
+      // Label background
+      const textWidth = this.ctx.measureText(`${id}`).width;
+      this.ctx.fillStyle = this.options.boxColor;
+      this.ctx.fillRect(x, y - 20, textWidth + 8, 20);
+
+      // Label text
+      this.ctx.fillStyle = '#000';
+      this.ctx.fillText(`${id}`, x + textWidth / 2 + 4, y - 10);
+
+      // Element label below
+      if (label) {
+        this.ctx.fillStyle = '#FFF';
+        this.ctx.fillText(label, x + width / 2, y + height + 16);
+      }
+    }
+  }
+
+  destroy(): void {
+    this.canvas.remove();
+  }
 }
 
-/**
- * Converts a screen-space coordinate into
- * coordinates relative to an element.
- */
-export function screenToElement(
-  point: ScreenPoint,
-  element: ElementRect
-): TransformedPoint {
-  return {
-    x: point.x - element.x,
-    y: point.y - element.y,
-  };
-}
-
-/**
- * Converts element-space coordinates back
- * into screen-space coordinates.
- */
-export function elementToScreen(
-  point: TransformedPoint,
-  element: ElementRect
-): ScreenPoint {
-  return {
-    x: point.x + element.x,
-    y: point.y + element.y,
-  };
-}
-
-/**
- * Converts a bounding box from screen coordinates
- * into coordinates relative to a container.
- */
-export function screenRectToElement(
-  rect: ElementRect,
-  container: ElementRect
-): ElementRect {
-  return {
-    x: rect.x - container.x,
-    y: rect.y - container.y,
-    width: rect.width,
-    height: rect.height,
-  };
-}
-
-/**
- * Converts normalized coordinates (0-1)
- * into pixel coordinates.
- */
-export function normalizedToPixels(
-  x: number,
-  y: number,
-  width: number,
-  height: number
-): ScreenPoint {
-  return {
-    x: x * width,
-    y: y * height,
-  };
-}
-
-/**
- * Converts pixel coordinates into normalized
- * coordinates (0-1).
- */
-export function pixelsToNormalized(
-  x: number,
-  y: number,
-  width: number,
-  height: number
-): ScreenPoint {
-  return {
-    x: width === 0 ? 0 : x / width,
-    y: height === 0 ? 0 : y / height,
-  };
-}
-
-/**
- * Checks whether a point lies inside a bounding box.
- */
-export function isPointInsideRect(
-  point: ScreenPoint,
-  rect: ElementRect
-): boolean {
-  return (
-    point.x >= rect.x &&
-    point.x <= rect.x + rect.width &&
-    point.y >= rect.y &&
-    point.y <= rect.y + rect.height
-  );
-}
-
-/**
- * Clamp a coordinate to the boundaries of a rectangle.
- */
-export function clampPointToRect(
-  point: ScreenPoint,
-  rect: ElementRect
-): ScreenPoint {
-  return {
-    x: Math.max(
-      rect.x,
-      Math.min(point.x, rect.x + rect.width)
-    ),
-
-    y: Math.max(
-      rect.y,
-      Math.min(point.y, rect.y + rect.height)
-    ),
-  };
-}
+export const somRenderer = new SomRenderer();
