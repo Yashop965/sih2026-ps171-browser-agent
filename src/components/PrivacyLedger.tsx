@@ -390,7 +390,7 @@ export default function PrivacyLedger() {
           </div>
         </>
       ) : view === 'heatmap' ? (
-        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden' }}>
+        <div style={{ flex: 1, position: 'relative', background: '#F8F7F4', overflow: 'hidden', minHeight: 200 }}>
           {/* Page simulation */}
           <div
             style={{
@@ -405,6 +405,10 @@ export default function PrivacyLedger() {
               borderRadius: 1,
             }}
           >
+            {/* Debug: show count */}
+            <div style={{ position: 'absolute', top: 8,[right: 8, background: '#F8F7F4', padding: '4px 8px', borderRadius: 1, fontSize: 9, fontFamily: MONO, color: '#9A9A9A', zIndex: 5 }}>
+              {detections.length} fields
+            </div>
             {/* Show all detections in heatmap, not just filtered */}
             {detections.slice(0, 15).map((d, i) => {
               const yPercent = ((i + 1) / Math.max(detections.length, 1)) * 85 + 5;
