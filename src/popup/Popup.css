@@ -547,6 +547,21 @@
   background: var(--bg-secondary);
 }
 
+/* Privacy Ledger Container */
+.ledger-container {
+  height: 320px;
+  margin-top: var(--space-lg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-card);
+  backdrop-filter: blur(10px);
+}
+
+.ledger-container > div {
+  height: 100%;
+}
+
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 6px;

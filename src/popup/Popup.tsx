@@ -321,15 +321,7 @@ function Popup() {
           </div>
         </div>
 
-        <div
-          style={{
-            height: 300,
-            marginTop: 12,
-            border: '1px solid #1E242D',
-            borderRadius: 6,
-            overflow: 'hidden',
-          }}
-        >
+        <div className="ledger-container">
           <PrivacyLedger />
         </div>
       </div>
