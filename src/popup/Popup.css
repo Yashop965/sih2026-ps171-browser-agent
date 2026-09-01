@@ -185,20 +185,44 @@
 /* Log Section - Archive style */
 .log-section {
   flex: 1;
-  padding: 14px 20px;
+  padding: 0 20px 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
 }
 
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 10px;
+  transition: opacity 0.2s ease;
+}
+
+.log-header:hover {
+  opacity: 0.8;
+}
+
 .log-title {
   font-size: 9px;
   font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.log-toggle {
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+
+.log-section.collapsed .log-toggle {
+  transform: rotate(-90deg);
 }
 
 .log-container {
@@ -212,6 +236,7 @@
   border: 1px solid var(--border-light);
   border-radius: 1px;
   padding: 12px;
+  max-height: 150px;
 }
 
 .log-entry {
@@ -221,6 +246,154 @@
 
 .log-entry:last-child {
   border-bottom: none;
+}
+
+/* Controls Section */
+.controls {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.start-button {
+  width: 100%;
+  padding: 11px 16px;
+  border: 1px solid var(--text-primary);
+  border-radius: 1px;
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+}
+
+.start-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.start-button:disabled {
+  background: var(--border-medium);
+  border-color: var(--border-medium);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.step-indicator {
+  margin-top: 10px;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-align: center;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.latency-display {
+  margin-top: 6px;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-align: center;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+
+/* Provider Section */
+.provider-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.provider-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.provider-select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 1px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.provider-select:hover {
+  border-color: var(--border-medium);
+}
+
+.provider-select:focus {
+  outline: none;
+  border-color: var(--text-primary);
+}
+
+.settings-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-light);
+  border-radius: 1px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.settings-button:hover {
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  border-color: var(--text-primary);
+}
+
+.provider-settings {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.api-key-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 1px;
+  font-size: 11px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.api-key-input:focus {
+  outline: none;
+  border-color: var(--text-primary);
+}
+
+.save-key-button {
+  padding: 8px 16px;
+  border: 1px solid var(--text-primary);
+  border-radius: 1px;
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+}
+
+.save-key-button:hover {
+  background: transparent;
+  color: var(--text-primary);
 }
 
 /* Footer - Minimal */

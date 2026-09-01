@@ -16,6 +16,7 @@ function Popup() {
   const [showSettings, setShowSettings] = useState(false);
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
   const [serverLatency, setServerLatency] = useState<number>(0);
+  const [logsCollapsed, setLogsCollapsed] = useState(false);
 
   // Load saved provider config from chrome.storage
   useEffect(() => {
@@ -243,17 +244,10 @@ function Popup() {
       </header>
 
       <div className="popup-body">
-        <div className="task-input-section">
-          <label className="input-label">Task Description</label>
-          <textarea
-            className="task-textarea"
-            placeholder="e.g., Fill the form with test data and submit..."
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
-            rows={3}
-          />
-        </div>
-
+        {/* Resource Monitor - at top for visibility */}
+        <ResourceMonitor />
+        
+        {/* Provider Selection */}
         <div className="provider-section">
           <label className="input-label">LLM Provider</label>
           <div className="provider-row">
@@ -269,7 +263,10 @@ function Popup() {
               ))}
             </select>
             <button className="settings-button" onClick={() => setShowSettings(!showSettings)}>
-              ⚙️
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
             </button>
           </div>
           {showSettings && (
@@ -294,31 +291,50 @@ function Popup() {
           )}
         </div>
 
-        <ResourceMonitor />
+        {/* Task Input */}
+        <div className="task-input-section">
+          <label className="input-label">Task Description</label>
+          <textarea
+            className="task-textarea"
+            placeholder="e.g., Fill the form with test data and submit..."
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            rows={3}
+          />
+        </div>
 
-        <button
-          className={`start-button ${isRunning ? 'running' : ''}`}
-          onClick={handleStart}
-          disabled={isRunning || !task}
-        >
-          {isRunning ? 'Running...' : 'Start Agent'}
-        </button>
+        {/* Controls */}
+        <div className="controls">
+          <button
+            className={`start-button ${isRunning ? 'running' : ''}`}
+            onClick={handleStart}
+            disabled={isRunning || !task}
+          >
+            {isRunning ? 'Running...' : 'Start Agent'}
+          </button>
+          {step > 0 && (
+            <div className="step-indicator">Step {step} of task execution</div>
+          )}
+          {latency !== null && (
+            <div className="latency-display">Latency: {latency}ms</div>
+          )}
+        </div>
 
-        {step > 0 && (
-          <div className="step-indicator">Step {step} of task execution</div>
-        )}
-
-        {latency !== null && (
-          <div className="latency-display">Latency: {latency}ms</div>
-        )}
-
-        <div className="log-section">
-          <h3 className="log-title">Activity Log</h3>
-          <div className="log-container">
-            {logs.map((log, i) => (
-              <div key={i} className="log-entry">{log}</div>
-            ))}
+        {/* Activity Log - Collapsible */}
+        <div className={`log-section ${logsCollapsed ? 'collapsed' : ''}`}>
+          <div className="log-header" onClick={() => setLogsCollapsed(!logsCollapsed)}>
+            <span className="log-title">Activity Log</span>
+            <svg className="log-toggle" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points={logsCollapsed ? "9 18 15 12 9 6" : "15 18 9 12 15 6"} />
+            </svg>
           </div>
+          {!logsCollapsed && (
+            <div className="log-container">
+              {logs.map((log, i) => (
+                <div key={i} className="log-entry">{log}</div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="ledger-container">
