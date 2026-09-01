@@ -81,7 +81,7 @@ export default defineBackground({
               }
               if (!tabId) { sendResponse({ error: 'No active tab', ok: false }); return; }
               const action = message.action;
-              const result = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
+              const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
               // Log execution to ledger
               privacyLedger.log({
                 timestamp: Date.now(),

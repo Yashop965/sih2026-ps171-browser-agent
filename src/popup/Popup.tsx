@@ -31,16 +31,13 @@ function Popup() {
     let filledIds = new Set<number>(); // Track which element IDs are already filled
 
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) throw new Error('No active tab');
-
       while (currentStep < maxSteps) {
         currentStep++;
         addLog(`--- Step ${currentStep}/${maxSteps} ---`);
         addLog('Extracting page elements...');
 
         const snapshot: any = await browser.runtime.sendMessage({ type: 'EXTRACT' });
-        console.log('[Popup] EXTRACT response:', snapshot);
+        console.log('[Popup] Extracted', snapshot?.elements?.length ?? 0, 'interactive elements');
 
         if (!snapshot?.ok) {
           addLog(`Failed to extract elements: ${snapshot?.error ?? 'no ok flag'}`);
@@ -63,9 +60,10 @@ function Popup() {
 
         addLog('Sending sanitized context to planner...');
         // Build history with actually filled element IDs
-        const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK' }));
+        const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK', action: 'TYPE' }));
 
-        const response = await fetch('http://localhost:8000/plan', {
+        const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
+        const response = await fetch(`${serverUrl}/plan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -100,7 +98,7 @@ function Popup() {
             break;
           }
           addLog(`Scrolling page... (${consecutiveScrolls}/3)`);
-          const scrollResult = await browser.runtime.sendMessage({
+          const scrollResult: any = await browser.runtime.sendMessage({
             type: 'EXECUTE',
             action: { type: 'SCROLL', direction: 'down', amount: 500 }
           });

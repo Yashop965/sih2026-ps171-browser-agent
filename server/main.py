@@ -183,7 +183,9 @@ class HealthResponse(BaseModel):
 
 session_store: Dict[str, Dict[str, Any]] = {}
 start_time = time.time()
-planner = ActionPlanner()
+# Only initialize default if not already set by env config above
+if 'planner' not in locals():
+    planner = ActionPlanner()
 
 
 # ===== Endpoints =====
