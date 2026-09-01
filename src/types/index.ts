@@ -1,0 +1,156 @@
+export interface InteractiveElement {
+  id: number;
+  tag: string;
+  role: string;
+  label: string;
+  name: string;
+  rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  isPassword: boolean;
+}
+
+export interface ARIAElement {
+  role: string;
+  name: string;
+  expanded?: boolean;
+  checked?: string;
+  required?: boolean;
+  disabled?: boolean;
+  depth: number;
+}
+
+export type PIIType =
+  | 'AADHAAR'
+  | 'PAN'
+  | 'CREDIT_CARD'
+  | 'DEBIT_CARD'
+  | 'IFSC'
+  | 'UPI'
+  | 'PHONE'
+  | 'EMAIL'
+  | 'PASSWORD_FIELD'
+  | 'PASSWORD_VALUE'
+  | 'API_KEY'
+  | 'FACE_DETECTED'
+  | 'TEXT_PASSWORD'
+  | 'SSN';
+
+/**
+ * A privacy event recorded by the PII pipeline.
+ * Never stores the raw sensitive value.
+ */
+export interface PrivacyEvent {
+  id?: string;
+  timestamp?: Date;
+  /** Event category: detected, redacted, blocked, or sent */
+  type: 'detected' | 'redacted' | 'blocked' | 'sent';
+  /** PII category label, e.g. AADHAAR */
+  category: string;
+  /** Human-readable description — must NOT contain the raw value */
+  detail: string;
+  confidence?: number;
+  selector?: string;
+}
+
+export interface DetectedPII {
+  type: PIIType;
+  value?: string;
+  selector: string;
+  confidence: number;
+  isVerified?: boolean;
+  redacted: boolean;
+}
+
+export interface SanitizedDOMSnapshot {
+  url: string;
+  title: string;
+  timestamp: number;
+  rawHtml: string;
+  accessibilityTree: ARIAElement[];
+  interactiveElements: InteractiveElement[];
+  detectedPII: DetectedPII[];
+}
+
+export interface SanitizedPayload {
+  url: string;
+  title: string;
+  timestamp: number;
+  interactiveElements: InteractiveElement[];
+  accessibilityTree: ARIAElement[];
+  detectedPII: Omit<DetectedPII, 'value'>[];
+  hasScreenshots: boolean;
+}
+
+export interface AgentAction {
+  type: 'CLICK' | 'TYPE' | 'SCROLL' | 'NAVIGATE' | 'WAIT' | 'COMPLETE';
+  targetId?: number;
+  text?: string;
+  url?: string;
+  direction?: 'up' | 'down';
+  amount?: number;
+  condition?: string;
+}
+
+export interface ServerResponse {
+  success: boolean;
+  action: AgentAction | null;
+  message?: string;
+  error?: string;
+  reasoning?: string;
+}
+
+export interface VisionResult {
+  type: 'OCR' | 'GROUNDING' | 'DESCRIPTION';
+  data: any;
+  boundingBoxes?: BoundingBox[];
+  text?: string;
+}
+
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  score: number;
+}
+
+export interface PrivacyLogEntry {
+  timestamp: number;
+  tabId: number;
+  url: string;
+  type: string;
+  selector: string;
+  confidence: number;
+  verified: boolean;
+  action: 'REDACTED' | 'SENT_TO_SERVER' | 'SERVER_RESPONSE' | 'EXECUTION' | 'SUCCESS' | 'FAILURE';
+  payloadSize?: number;
+  actionType?: string;
+  error?: string;
+}
+
+export interface PerformanceMetrics {
+  dom_extract_ms: number;
+  vision_inference_ms: number;
+  plan_response_ms: number;
+  action_execution_ms: number;
+  total_step_ms: number;
+  memory_mb: number;
+  marks: PerfMark[];
+}
+
+export interface PerfMark {
+  name: Stage;
+  timestamp: number;
+  durationMs: number;
+}
+
+export type Stage =
+  | 'dom_extract'
+  | 'vision_inference'
+  | 'plan_response'
+  | 'action_execution';

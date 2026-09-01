@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aadhaar Enrollment Form - UIDAI Mock Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: white;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #1e3c72;
+            font-size: 24px;
+        }
+
+        .form-container {
+            padding: 40px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            color: #1e3c72;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+            margin-bottom: 25px;
+            margin-top: 30px;
+        }
+
+        .section-title:first-child {
+            margin-top: 0;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .required::after {
+            content: " *";
+            color: #e74c3c;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"],
+        input[type="password"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .error {
+            font-size: 12px;
+            color: #e74c3c;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-top: 2px;
+        }
+
+        .checkbox-group label {
+            font-weight: normal;
+            margin-bottom: 0;
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 40px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-submit:active {
+            transform: translateY(0);
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .alert {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+
+        .info-box p {
+            font-size: 13px;
+            color: #333;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">UIDAI</div>
+            <h1>Aadhaar Enrollment Form</h1>
+            <p>Virtual Identity Identity Authority of India - Demo Portal</p>
+        </div>
+
+        <div class="form-container">
+            <div class="info-box">
+                <p><strong>Note:</strong> This is a mock enrollment form for testing purposes. All data entered here is stored locally and not transmitted to any server. This simulates a real government portal for demonstration of privacy-preserving browser automation.</p>
+            </div>
+
+            <div id="alertBox" class="alert"></div>
+
+            <form id="enrollmentForm" action="#" method="POST">
+                <h2 class="section-title">Personal Information</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="firstName" class="required">First Name</label>
+                        <input type="text" id="firstName" name="firstName" placeholder="Enter first name" required>
+                        <span class="error" id="firstNameError">Please enter your first name</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="lastName" class="required">Last Name</label>
+                        <input type="text" id="lastName" name="lastName" placeholder="Enter last name" required>
+                        <span class="error" id="lastNameError">Please enter your last name</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="fullName">Full Name (as per documents)</label>
+                    <input type="text" id="fullName" name="fullName" placeholder="e.g., Rajesh Kumar Sharma">
+                    <span class="hint">Name should match your official ID proof</span>
+                </div>
+
+                <h2 class="section-title">Identification Details</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="aadhaar" class="required">Aadhaar Number</label>
+                        <input type="text" id="aadhaar" name="aadhaar" placeholder="XXXX XXXX XXXX" maxlength="14" pattern="\d{4}\s?\d{4}\s?\d{4}" required>
+                        <span class="hint">Enter 12-digit Aadhaar number</span>
+                        <span class="error" id="aadhaarError">Please enter a valid 12-digit Aadhaar number</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pan" class="required">PAN Number</label>
+                        <input type="text" id="pan" name="pan" placeholder="ABCDE1234F" maxlength="10" pattern="[A-Z]{5}\d{4}[A-Z]{1}" required>
+                        <span class="hint">Permanent Account Number</span>
+                        <span class="error" id="panError">Please enter a valid PAN number</span>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="mobile" class="required">Mobile Number</label>
+                        <input type="tel" id="mobile" name="mobile" placeholder="+91 9876543210" maxlength="13" required>
+                        <span class="hint">10-digit mobile number with country code</span>
+                        <span class="error" id="mobileError">Please enter a valid mobile number</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" name="email" placeholder="example@email.com">
+                        <span class="hint">Optional - for updates and notifications</span>
+                    </div>
+                </div>
+
+                <h2 class="section-title">Address Details</h2>
+
+                <div class="form-group">
+                    <label for="address" class="required">Permanent Address</label>
+                    <textarea id="address" name="address" placeholder="House No., Street, Locality..." rows="3" required></textarea>
+                    <span class="error" id="addressError">Please enter your address</span>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="city" class="required">City</label>
+                        <input type="text" id="city" name="city" placeholder="e.g., New Delhi" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pincode" class="required">Pin Code</label>
+                        <input type="text" id="pincode" name="pincode" placeholder="XXXXXX" maxlength="6" pattern="\d{6}" required>
+                        <span class="hint">6-digit PIN code</span>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="state">State</label>
+                        <select id="state" name="state">
+                            <option value="">Select State</option>
+                            <option value="Andhra Pradesh">Andhra Pradesh</option>
+                            <option value="Delhi">Delhi</option>
+                            <option value="Karnataka">Karnataka</option>
+                            <option value="Maharashtra">Maharashtra</option>
+                            <option value="Tamil Nadu">Tamil Nadu</option>
+                            <option value="Uttar Pradesh">Uttar Pradesh</option>
+                            <option value="West Bengal">West Bengal</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="country">Country</label>
+                        <select id="country" name="country">
+                            <option value="India" selected>India</option>
+                        </select>
+                    </div>
+                </div>
+
+                <h2 class="section-title">Security Settings</h2>
+
+                <div class="form-group">
+                    <label for="password" class="required">Create Password</label>
+                    <input type="password" id="password" name="password" placeholder="Min 8 characters" minlength="8" required>
+                    <span class="hint">Use letters, numbers and special characters</span>
+                    <span class="error" id="passwordError">Password must be at least 8 characters</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmPassword" class="required">Confirm Password</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" placeholder="Re-enter password" required>
+                    <span class="error" id="confirmPasswordError">Passwords do not match</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="securityQuestion">Security Question</label>
+                    <select id="securityQuestion" name="securityQuestion">
+                        <option value="">Select a security question</option>
+                        <option value="motherMaidenName">What is your mother's maiden name?</option>
+                        <option value="firstPet">What is the name of your first pet?</option>
+                        <option value="birthplace">In which city were you born?</option>
+                        <option value="childSchool">What was the name of your first school?</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="securityAnswer">Security Answer</label>
+                    <input type="text" id="securityAnswer" name="securityAnswer" placeholder="Enter your answer">
+                    <span class="hint">This will be used to verify your identity</span>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="terms" name="terms" required>
+                    <label for="terms">I hereby declare that all the information provided above is correct and genuine. I understand that false information may lead to rejection of my enrollment.</label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="consent" name="consent" required>
+                    <label for="consent">I consent to the collection and processing of my biometric and demographic data as per the Aadhaar Act, 2016.</label>
+                </div>
+
+                <button type="submit" class="btn-submit">Submit Enrollment Form</button>
+            </form>
+        </div>
+
+        <div class="footer">
+            <p>&copy; 2026 Virtual UIDAI Demo Portal | This is a simulation for testing purposes only</p>
+            <p>For demonstration of privacy-preserving browser automation</p>
+        </div>
+    </div>
+
+    <script>
+        // Form validation and handling
+        const form = document.getElementById('enrollmentForm');
+        const alertBox = document.getElementById('alertBox');
+
+        // Auto-format Aadhaar number with spaces
+        document.getElementById('aadhaar').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\s/g, '').replace(/\D/g, '');
+            if (value.length > 4 && value.length <= 8) {
+                value = value.slice(0, 4) + ' ' + value.slice(4);
+            } else if (value.length > 8) {
+                value = value.slice(0, 4) + ' ' + value.slice(4, 8) + ' ' + value.slice(8, 12);
+            }
+            e.target.value = value;
+        });
+
+        // Auto-format mobile number
+        document.getElementById('mobile').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\D/g, '');
+            if (value.length > 0 && !value.startsWith('+91')) {
+                value = '+91 ' + value;
+            }
+            e.target.value = value;
+        });
+
+        // Form submission handler
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Clear previous errors
+            document.querySelectorAll('.error').forEach(el => el.style.display = 'none');
+            
+            // Validate form
+            let isValid = true;
+            
+            // Required fields validation
+            const requiredFields = ['firstName', 'lastName', 'aadhaar', 'pan', 'mobile', 'address', 'city', 'pincode', 'password', 'confirmPassword'];
+            
+            requiredFields.forEach(fieldId => {
+                const field = document.getElementById(fieldId);
+                if (!field.value.trim()) {
+                    document.getElementById(fieldId + 'Error').style.display = 'block';
+                    isValid = false;
+                }
+            });
+
+            // Password match validation
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            if (password !== confirmPassword) {
+                document.getElementById('confirmPasswordError').style.display = 'block';
+                isValid = false;
+            }
+
+            // Aadhaar format validation
+            const aadhaar = document.getElementById('aadhaar').value.replace(/\s/g, '');
+            if (aadhaar.length !== 12 || !/^\d+$/.test(aadhaar)) {
+                document.getElementById('aadhaarError').style.display = 'block';
+                isValid = false;
+            }
+
+            // PAN format validation
+            const pan = document.getElementById('pan').value.toUpperCase();
+            if (!/^[A-Z]{5}\d{4}[A-Z]{1}$/.test(pan)) {
+                document.getElementById('panError').style.display = 'block';
+                isValid = false;
+            }
+
+            // Pincode validation
+            const pincode = document.getElementById('pincode').value;
+            if (pincode.length !== 6 || !/^\d+$/.test(pincode)) {
+                isValid = false;
+            }
+
+            if (isValid) {
+                alertBox.className = 'alert';
+                alertBox.textContent = 'Form submitted successfully! (Demo mode - no data was actually sent)';
+                alertBox.style.display = 'block';
+                
+                // Log form data for debugging
+                const formData = new FormData(form);
+                console.log('Form Data:', Object.fromEntries(formData));
+                
+                // Simulate successful submission
+                setTimeout(() => {
+                    alert('Enrollment form submitted successfully!\n\nReference Number: UIDAI-DEMO-2026-' + Math.random().toString(36).substr(2, 9).toUpperCase());
+                }, 500);
+            } else {
+                alertBox.className = 'alert error';
+                alertBox.textContent = 'Please fill in all required fields correctly.';
+                alertBox.style.display = 'block';
+            }
+        });
+
+        // Real-time validation feedback
+        document.querySelectorAll('input, textarea, select').forEach(field => {
+            field.addEventListener('blur', function() {
+                if (this.hasAttribute('required') && !this.value.trim()) {
+                    const errorId = this.id + 'Error';
+                    const errorEl = document.getElementById(errorId);
+                    if (errorEl) {
+                        errorEl.style.display = 'block';
+                    }
+                }
+            });
+
+            field.addEventListener('input', function() {
+                const errorId = this.id + 'Error';
+                const errorEl = document.getElementById(errorId);
+                if (errorEl) {
+                    errorEl.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
