@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
 import SoMOverlay from '../components/SoMOverlay';
@@ -21,9 +21,7 @@ function Popup() {
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
-  const [elements, setElements] = useState<SoMBox[]>([]);
   const [showOverlay, setShowOverlay] = useState(false);
-  const [boundingBoxes, setBoundingBoxes] = useState<BoundingBox[]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const addLog = (message: string) => {
@@ -38,7 +36,6 @@ function Popup() {
     addLog(`Starting task: "${task}"`);
 
     try {
-      // Step 1 & 2 & 3: Send to background agent for secure capture and planning
       addLog('Sending task to background agent...');
       const plan = await browser.runtime.sendMessage({
         type: 'CAPTURE_AND_SEND',
@@ -51,7 +48,6 @@ function Popup() {
 
       addLog(`Planner returned action: ${plan.action?.type}`);
 
-      // Execute first action
       if (plan.action) {
         addLog(`Executing: ${plan.action.type}`);
         await browser.runtime.sendMessage({
@@ -137,9 +133,8 @@ function Popup() {
           </div>
         </div>
 
-        {/* Privacy Ledger Panel */}
+        {/* Privacy Ledger Panel - component renders its own header */}
         <div className="privacy-ledger-section">
-          <h3 className="log-title">Privacy Ledger</h3>
           <div className="privacy-ledger-container">
             <PrivacyLedger />
           </div>
@@ -154,7 +149,7 @@ function Popup() {
       {showOverlay && (
         <div ref={overlayRef} className="overlay-container">
           <SoMOverlay
-            boxes={boundingBoxes}
+            boxes={[]}
             isVisible={showOverlay}
             onSelectBox={(box) => addLog(`Selected box ${box.id}: ${box.label}`)}
           />
