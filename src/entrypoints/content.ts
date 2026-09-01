@@ -286,19 +286,14 @@ class PIIDetector {
                     type: 'PASSWORD_FIELD',
                     selector: this.getElementSelector(input),
                     confidence: 0.99,
+                    isVerified: true,
                     redacted: true,
                 });
             } else if (input.value) {
                 for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
                     if (piiType === 'PASSWORD_FIELD') continue;
                     if (pattern.test(input.value)) {
-                        detections.push({
-                            type: piiType as PIIType,
-                            value: piiType === 'CREDIT_CARD' ? this.maskCard(input.value) : input.value.slice(0, 4) + '***',
-                            selector: this.getElementSelector(input),
-                            confidence: this.getConfidence(piiType, input.value),
-                            redacted: true,
-                        });
+                        detections.push(this.record(piiType, input.value, input));
                     }
                 }
             }
@@ -319,13 +314,7 @@ class PIIDetector {
 
                 let match: RegExpExecArray | null;
                 while ((match = scanPattern.exec(text)) !== null) {
-                    detections.push({
-                        type: piiType as PIIType,
-                        value: piiType === 'CREDIT_CARD' ? this.maskCard(match[0]) : match[0].slice(0, 4) + '***',
-                        selector: this.getElementSelector(el),
-                        confidence: this.getConfidence(piiType, match[0]),
-                        redacted: true,
-                    });
+                    detections.push(this.record(piiType, match[0], el));
 
                     // A zero-length match would spin forever.
                     if (match.index === scanPattern.lastIndex) scanPattern.lastIndex++;
@@ -333,10 +322,39 @@ class PIIDetector {
             }
         });
 
-        // Run specialized validators
-        this.validateAndRefine(detections);
-
         return detections;
+    }
+
+    /**
+     * Turn a match into a detection record.
+     *
+     * The raw value is used here and then dropped. It is never stored on the
+     * record, not even truncated — the first four characters of an Aadhaar
+     * number are four real digits, and this record is rendered in the privacy
+     * panel and included in the export.
+     *
+     * The checksum has to run at this point for the same reason: once the
+     * record exists there is no value left to validate. The old code ran it
+     * afterwards on an already-masked string, so `isVerified` was always false.
+     */
+    private record(piiType: string, raw: string, el: Element): DetectedPII {
+        const verified = this.checksumOk(piiType, raw);
+        return {
+            type: piiType as PIIType,
+            selector: this.getElementSelector(el),
+            confidence: this.getConfidence(piiType, verified),
+            isVerified: verified,
+            redacted: true,
+        };
+    }
+
+    /** Run the type's checksum, where one exists. */
+    private checksumOk(type: string, raw: string): boolean {
+        if (type === 'AADHAAR') return this.verhoeffCheck(raw.replace(/[\s-]/g, ''));
+        if (type === 'PAN') return this.validatePAN(raw.trim().toUpperCase());
+        if (type === 'CREDIT_CARD') return this.luhnCheck(raw.replace(/[\s-]/g, ''));
+        // No checksum exists for these — a pattern match is all we have.
+        return false;
     }
 
     scrubHTML(html: string): string {
@@ -358,26 +376,6 @@ class PIIDetector {
         );
 
         return scrubbed;
-    }
-
-    private validateAndRefine(detections: DetectedPII[]): void {
-        // Aadhaar: Verhoeff checksum validation
-        detections.forEach(d => {
-            if (d.type === 'AADHAAR') {
-                const digits = d.value?.replace(/\s/g, '') || '';
-                d.isVerified = this.verhoeffCheck(digits);
-                d.confidence = d.isVerified ? 0.98 : 0.3;
-            }
-            if (d.type === 'PAN') {
-                d.isVerified = this.validatePAN(d.value || '');
-                d.confidence = d.isVerified ? 0.95 : 0.2;
-            }
-            if (d.type === 'CREDIT_CARD') {
-                const digits = d.value?.replace(/[\s-]/g, '') || '';
-                d.isVerified = this.luhnCheck(digits);
-                d.confidence = d.isVerified ? 0.97 : 0.3;
-            }
-        });
     }
 
     // Verhoeff algorithm for Aadhaar validation
@@ -455,21 +453,29 @@ class PIIDetector {
         return sum % 10 === 0;
     }
 
-    private maskCard(card: string): string {
-        const digits = card.replace(/\s|-/g, '');
-        return digits.slice(0, 4) + ' **** **** ' + digits.slice(-4);
-    }
+    /**
+     * A pattern match and a checksum-confirmed match are very different levels
+     * of certainty, so the score reflects which one this was.
+     */
+    private getConfidence(type: string, verified: boolean): number {
+        if (verified) {
+            const confirmed: Record<string, number> = {
+                AADHAAR: 0.98,
+                PAN: 0.95,
+                CREDIT_CARD: 0.97,
+            };
+            return confirmed[type] ?? 0.9;
+        }
 
-    private getConfidence(type: string, _value: string): number {
-        const baseConfidence: Record<string, number> = {
-            AADHAAR: 0.85,
-            PAN: 0.90,
-            CREDIT_CARD: 0.85,
+        const patternOnly: Record<string, number> = {
+            AADHAAR: 0.30,
+            PAN: 0.20,
+            CREDIT_CARD: 0.30,
             IFSC: 0.80,
             PHONE: 0.75,
             EMAIL: 0.95,
         };
-        return baseConfidence[type] || 0.7;
+        return patternOnly[type] ?? 0.7;
     }
 
     private getElementSelector(element: Element): string {
@@ -512,9 +518,12 @@ interface InteractiveElement {
     isPassword: boolean;
 }
 
+/**
+ * A PII finding. There is deliberately no `value` field — the detector reads
+ * the raw value to match and checksum it, then discards it.
+ */
 interface DetectedPII {
     type: string;
-    value?: string;
     selector: string;
     confidence: number;
     redacted: boolean;
