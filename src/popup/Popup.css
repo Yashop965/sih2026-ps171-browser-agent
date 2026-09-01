@@ -1,3 +1,151 @@
+.popup {
+  width: 400px;
+  min-height: 500px;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.popup-header {
+  padding: 16px;
+  border-bottom: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.popup-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.popup-subtitle {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 4px 0 0;
+}
+
+.popup-body {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.task-textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 14px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.task-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.start-button {
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.start-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.start-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.start-button.running {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  animation: pulse-button 1.5s infinite;
+}
+
+@keyframes pulse-button {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.step-indicator {
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.latency-display {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  font-family: monospace;
+}
+
+.log-section {
+  flex: 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.log-container {
+  flex: 1;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 12px;
+  color: #e2e8f0;
+  overflow-y: auto;
+  max-height: 250px;
+}
+
+.log-container div {
+  padding: 2px 0;
+  line-height: 1.4;
+}
+
+/* Provider section */
 .provider-section {
   display: flex;
   flex-direction: column;
@@ -66,4 +214,88 @@
 
 .save-key-button:hover {
   background: #2563eb;
+}
+
+/* Status indicator */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-left: auto;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.healthy {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+}
+
+.status-dot.checking {
+  background: #f59e0b;
+  animation: pulse 1s infinite;
+}
+
+.status-dot.unhealthy {
+  background: #ef4444;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-text {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-latency {
+  font-size: 11px;
+  color: #64748b;
+  font-family: monospace;
+}
+
+/* Privacy ledger */
+.ledger-section {
+  margin-top: 16px;
+  border-top: 1px solid #334155;
+  padding-top: 16px;
+}
+
+.ledger-toggle {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ledger-toggle:hover {
+  background: #334155;
+  color: #f8fafc;
+}
+
+/* Footer */
+.popup-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #334155;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
 }
