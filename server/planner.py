@@ -115,8 +115,10 @@ class ActionPlanner:
         for el in interactive_elements[:30]:
             element_id = el.get("id")
             role = el.get("role", el.get("tag", "element"))
+            tag = el.get("tag", "input")  # Get HTML tag
             label = str(el.get("label", "")).lower()[:50]
             is_password = el.get("isPassword", False)
+            el_type = el.get("type", "")  # Get input type (text, select-one, etc.)
 
             if is_password:
                 label = "[redacted password field]"
@@ -131,6 +133,8 @@ class ActionPlanner:
 
             sanitized_elements.append({
                 "targetId": element_id,
+                "tag": tag,  # HTML tag: input, select, button, a, etc.
+                "type": el_type,  # Input type: text, email, select-one, checkbox, etc.
                 "role": role,
                 "label": label,
                 "interactive": el.get("interactive", True),
@@ -170,32 +174,34 @@ CRITICAL INSTRUCTIONS:
 3. Skip elements that are already filled (marked as "filled": true)
 4. When all inputs are filled, CLICK the SUBMIT button
 5. Only use SCROLL if there are NO visible input fields
+6. ALWAYS check the "tag" and "type" fields before choosing action
 
-MATCHING RULES:
-- "first name" → type the value for "First Name" key
-- "last name" → type the value for "Last Name" key  
-- "email" → type the value for "Email" key
-- "phone" → type the value for "Phone" key
-- Match keywords loosely: "name" matches "Full Name", "First Name", etc.
+ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
+- If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
+- If tag == "textarea": → TYPE the value
+- If tag == "select" OR type == "select-one": → SELECT the value (NEVER TYPE into select!)
+- If tag == "button" OR role == "button" OR tag == "a" OR role == "link": → CLICK
+- If type == "checkbox" OR type == "radio": → CLICK to toggle
+- NEVER TYPE into a <select>, <button>, <a>, or <span>
+
+ACTION EXAMPLES:
+- For text input: {{"type": "TYPE", "targetId": 1, "value": "John", "reasoning": "filling first name"}}
+- For dropdown: {{"type": "SELECT", "targetId": 9, "value": "Option A", "reasoning": "selecting from dropdown"}}
+- For button: {{"type": "CLICK", "targetId": 4, "reasoning": "clicking submit button"}}
 
 YOUR NEXT ACTION MUST BE:
-- TYPE into an unfilled input field (if any exist) using the matching value from the task
+- TYPE into a text input field (if any exist) using the matching value from the task
+- SELECT from a dropdown (if any exist) using the matching value from the task
 - CLICK a button (if all inputs are filled)
 - DONE (if no more actions needed)
 
-ELEMENT TYPE RULES (CRITICAL):
-- input[type="text"], input[type="email"], input[type="password"], input[type="number"], textarea → TYPE
-- select → SELECT (use value like "Option 1", not a random string)
-- button, [role="button"], a[href], [role="link"] → CLICK
-- checkbox, radio → CLICK to toggle
-- NEVER TYPE into a <select>, <button>, <a>, or <span>
-
 MATCHING RULES:
 - "first name" → type the value for "First Name" key
 - "last name" → type the value for "Last Name" key  
 - "email" → type the value for "Email" key
 - "phone" → type the value for "Phone" key
 - Match keywords loosely: "name" matches "Full Name", "First Name", etc.
+- For dropdowns: use sensible values like "Option 1", "Male", "Female", etc.
 
 RETURN ONLY this JSON (no markdown, no explanation):
 {{"type": "TYPE", "targetId": <input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
