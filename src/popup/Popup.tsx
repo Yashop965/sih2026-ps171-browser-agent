@@ -18,14 +18,14 @@ function Popup() {
   const [serverLatency, setServerLatency] = useState<number>(0);
 
   // Load saved provider config from chrome.storage
-  useState(() => {
+  useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.get(['providerKey', 'apiKey'], (result) => {
         if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
         if (result.apiKey) setProviderKey(result.apiKey);
       });
     }
-  });
+  }, []);
 
   // Health check function
   const checkHealth = useCallback(async () => {
