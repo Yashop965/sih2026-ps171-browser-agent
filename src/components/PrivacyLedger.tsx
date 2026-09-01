@@ -27,9 +27,9 @@ import {
 // Colour carries meaning, not decoration. Red is something we stopped,
 // green is something we let through, amber is something that needs a look.
 const TONE: Record<LedgerTone, { fg: string; bg: string; bar: string }> = {
-  blocked: { fg: '#E4837D', bg: 'rgba(194,65,59,0.15)', bar: '#C2413B' },
-  clean: { fg: '#6FBF9B', bg: 'rgba(63,143,111,0.15)', bar: '#3F8F6F' },
-  warning: { fg: '#E0B25C', bg: 'rgba(201,146,46,0.15)', bar: '#C9922E' },
+  blocked: { fg: '#820710', bg: 'rgba(130,7,16,0.08)', bar: '#cf222e' },
+  clean: { fg: '#1a7f37', bg: 'rgba(26,127,55,0.08)', bar: '#2da44e' },
+  warning: { fg: '#9a6700', bg: 'rgba(154,103,0,0.08)', bar: '#d0ab00' },
 };
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -380,7 +380,7 @@ export default function PrivacyLedger() {
       ) : (
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto' }}>
           {error ? (
-            <p style={{ padding: '20px 12px', fontSize: 12, color: '#E0B25C' }}>
+            <p style={{ padding: '20px 12px', fontSize: 12, color: '#9a6700' }}>
               {error}
             </p>
           ) : entries.length === 0 ? (
@@ -407,7 +407,7 @@ export default function PrivacyLedger() {
                     style={{
                       display: 'flex',
                       gap: 10,
-                      borderBottom: '1px solid #161B22',
+                      borderBottom: '1px solid #d0d7de',
                       padding: '8px 12px',
                     }}
                   >
@@ -476,7 +476,7 @@ export default function PrivacyLedger() {
                             style={{
                               fontFamily: MONO,
                               fontSize: 10,
-                              color: '#6FBF9B',
+                              color: '#1a7f37',
                             }}
                           >
                             ✓
@@ -488,7 +488,7 @@ export default function PrivacyLedger() {
                             flexShrink: 0,
                             fontFamily: MONO,
                             fontSize: 10,
-                            color: '#48505C',
+                            color: '#656d76',
                           }}
                         >
                           {clockTime(e.timestamp)}
@@ -501,7 +501,7 @@ export default function PrivacyLedger() {
                             margin: '4px 0 0',
                             fontFamily: MONO,
                             fontSize: 11,
-                            color: '#C3CBD6',
+                            color: '#1f2328',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
@@ -517,7 +517,7 @@ export default function PrivacyLedger() {
                             margin: '4px 0 0',
                             fontSize: 11,
                             lineHeight: 1.4,
-                            color: '#E0B25C',
+                            color: '#9a6700',
                           }}
                         >
                           {e.error}
@@ -532,7 +532,7 @@ export default function PrivacyLedger() {
                           marginTop: 4,
                           fontFamily: MONO,
                           fontSize: 10,
-                          color: '#48505C',
+                          color: '#656d76',
                         }}
                       >
                         {e.payloadSize !== undefined && (
