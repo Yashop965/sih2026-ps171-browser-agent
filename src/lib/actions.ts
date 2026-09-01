@@ -29,6 +29,7 @@ function resolve(targetId: number | undefined): Element {
     }
     const el = getElementById(targetId);
     if (!el) {
+        console.warn(`[agent] Element ${targetId} not found in registry`);
         throw new Error(`element ${targetId} not found — page may have changed`);
     }
     // Staleness check: the page may have re-rendered between extract() and
@@ -36,6 +37,7 @@ function resolve(targetId: number | undefined): Element {
     // Acting on it would silently do nothing, so fail loudly instead and let
     // the planner re-extract.
     if (!el.isConnected) {
+        console.warn(`[agent] Element ${targetId} is stale (not connected to DOM)`);
         throw new Error(`element ${targetId} is stale — page changed since extract()`);
     }
     return el;

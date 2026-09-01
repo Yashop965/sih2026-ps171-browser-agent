@@ -32,6 +32,70 @@ export default defineBackground({
         case 'EXECUTE_ACTION':
           return executeAction(message, sender, privacyLedger);
 
+        case 'EXTRACT':
+          // Extract DOM and log PII to ledger
+          (async () => {
+            try {
+              // Popup doesn't have sender.tab, so query for active tab
+              let tabId = sender.tab?.id;
+              if (!tabId) {
+                const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+                tabId = activeTab?.id;
+              }
+              if (!tabId) { sendResponse({ error: 'No active tab', ok: false }); return; }
+              const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
+              if (!snapshot) { sendResponse({ ok: false, error: 'No snapshot' }); return; }
+              // Log PII detections
+              for (const pii of snapshot.detectedPII || []) {
+                privacyLedger.log({
+                  timestamp: Date.now(),
+                  tabId,
+                  url: snapshot.url || '',
+                  type: pii.type || 'PII',
+                  selector: pii.selector || '',
+                  confidence: pii.confidence || 1,
+                  verified: Boolean(pii.isVerified),
+                  action: 'DETECTED',
+                });
+              }
+              sendResponse({ ok: true, elements: snapshot.interactiveElements || [] });
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e) });
+            }
+          })();
+          return true;
+
+        case 'EXECUTE':
+          // Execute action and log to ledger
+          (async () => {
+            try {
+              let tabId = sender.tab?.id;
+              if (!tabId) {
+                const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+                tabId = activeTab?.id;
+              }
+              if (!tabId) { sendResponse({ error: 'No active tab', ok: false }); return; }
+              const action = message.action;
+              const result = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
+              // Log execution to ledger
+              privacyLedger.log({
+                timestamp: Date.now(),
+                tabId,
+                url: '',
+                type: 'EXECUTION',
+                selector: action?.targetId?.toString() || '',
+                confidence: 1,
+                verified: result?.ok === true,
+                action: result?.ok ? 'SUCCESS' : 'FAILURE',
+                error: result?.error,
+              });
+              sendResponse(result);
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e) });
+            }
+          })();
+          return true;
+
         case 'GET_PRIVACY_LEDGER':
           sendResponse(privacyLedger.getEntries());
           return true;
