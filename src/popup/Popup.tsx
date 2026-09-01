@@ -274,7 +274,6 @@ function Popup() {
         </div>
 
         <ResourceMonitor />
-        </div>
 
         <button
           className={`start-button ${isRunning ? 'running' : ''}`}
