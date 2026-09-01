@@ -1,10 +1,9 @@
-"""
-Test module for UACC integration
-"""
+import pytest
 import asyncio
 from server.action_executor import ActionExecutor, ActionResult, ActionType
 
 
+@pytest.mark.asyncio
 async def test_mock_executor():
     """Test executor without UACC connection (mock mode)."""
     executor = ActionExecutor(cdp_port=9999)  # Non-existent port

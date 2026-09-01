@@ -1,13 +1,15 @@
 import { defineBackground } from 'wxt/sandbox';
-import { browser } from 'wxt/browser';
-import { scanOutboundPayload } from '../lib/privacy';
+import { sanitizeSnapshot, redactString, type RawSnapshot } from '../lib/pii/sanitizer';
+import { checkOutboundPayload } from '../lib/pii/firewall';
+import { PrivacyAuditLedger } from '../lib/pii/audit';
 
 /**
  * Background Service Worker
  *
  * Handles:
  * - Message routing between content scripts and server
- * - Privacy ledger management
+ * - Privacy pipeline: sanitize → firewall → transmit
+ * - Privacy ledger management (legacy + new audit ledger)
  * - Action execution
  * - Image capture for vision processing
  */
@@ -16,138 +18,187 @@ export default defineBackground({
     console.log('[PII-Agent] Background service worker started');
 
     const privacyLedger = new PrivacyLedger();
+    const auditLedger = new PrivacyAuditLedger();
     const agentState = new AgentState();
 
     // Listen for messages from content scripts
-    browser.runtime.onMessage.addListener((message: any, sender: any, sendResponse: (res: any) => void): true => {
-      console.log('[PII-Agent] Received message:', message?.type);
-      if (!message || typeof message !== 'object') {
-        sendResponse({ error: 'Invalid message' });
-        return true;
-      }
+    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('[PII-Agent] Received message:', message.type);
 
       switch (message.type) {
         case 'CAPTURE_AND_SEND':
-          handleCaptureAndSend(message as CaptureMessage, sender, privacyLedger, agentState)
-            .then(sendResponse);
-          return true;
+          return handleCaptureAndSend(message, sender, privacyLedger, auditLedger, agentState);
 
         case 'EXECUTE_ACTION':
-          executeAction(message as ActionMessage, sender, privacyLedger)
-            .then(sendResponse);
-          return true;
+          return executeAction(message, sender, privacyLedger);
 
         case 'GET_PRIVACY_LEDGER':
           sendResponse(privacyLedger.getEntries());
           return true;
 
+        case 'GET_AUDIT_LOG':
+          sendResponse(auditLedger.getEntries());
+          return true;
+
         case 'CLEAR_LEDGER':
           privacyLedger.clear();
+          auditLedger.clear();
           sendResponse({ success: true });
           return true;
 
         case 'CAPTURE_SCREENSHOT':
-          captureScreenshot(message as ScreenshotMessage, sender)
-            .then(sendResponse);
-          return true;
+          return captureScreenshot(message, sender);
 
         default:
           sendResponse({ error: `Unknown message type: ${message.type}` });
           return true;
       }
     });
+
+    // Handle actions returned from server
+    browser.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
+      if (message.type === 'ACTION_RESULT') {
+        agentState.lastActionResult = message.result;
+      }
+    });
   },
 });
 
+
 async function handleCaptureAndSend(
-  _message: CaptureMessage,
-  sender: any,
+  message: CaptureMessage,
+  sender: browser.runtime.MessageSender,
   ledger: PrivacyLedger,
-  _state: AgentState
+  auditLedger: PrivacyAuditLedger,
+  state: AgentState
 ): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
 
-  // Get sanitized DOM from content script
-  const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
+  // 1. Capture raw DOM snapshot from content script
+  const snapshot: RawSnapshot | null = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
 
   if (!snapshot) {
     return { error: 'Failed to capture page' };
   }
 
-  // Log PII detections to privacy ledger
+  // 2. Run sanitizer — replaces PII in labels, names, title, URL, a11y tree
+  const sanitized = sanitizeSnapshot(snapshot);
+
+  // 3. Record PII detections in both ledgers
+  for (const match of sanitized.matches) {
+    // Legacy ledger (UI reads this)
+    ledger.log({
+      timestamp: Date.now(),
+      tabId,
+      url: snapshot.url,
+      type: match.type,
+      selector: match.selector,
+      confidence: match.confidence,
+      verified: match.isVerified,
+      action: 'REDACTED',
+    });
+    // New audit ledger
+    if (match.redacted) {
+      auditLedger.redacted(match.type, match.selector, match.confidence);
+    } else {
+      auditLedger.detected(match.type, match.selector, match.confidence, match.isVerified);
+    }
+  }
+
+  // Also log content-script-detected PII (from the detectedPII array)
   for (const pii of snapshot.detectedPII || []) {
     ledger.log({
       timestamp: Date.now(),
       tabId,
-      url: snapshot.url || '',
-      type: pii.type || 'PII',
-      selector: pii.selector || '',
-      confidence: pii.confidence || 1,
-      verified: Boolean(pii.isVerified),
+      url: snapshot.url,
+      type: pii.type,
+      selector: pii.selector,
+      confidence: pii.confidence,
+      verified: pii.isVerified ?? false,
       action: 'REDACTED',
     });
   }
 
-  // Prepare payload for server (sanitized metadata only)
-  const payload: SanitizedPayload = {
-    url: snapshot.url || '',
-    title: snapshot.title || '',
-    timestamp: snapshot.timestamp || Date.now(),
-    interactiveElements: snapshot.interactiveElements || [],
-    accessibilityTree: snapshot.accessibilityTree || [],
-    detectedPII: (snapshot.detectedPII || []).map((pii: any) => ({
-      type: pii.type,
-      selector: pii.selector,
-      confidence: pii.confidence,
-      redacted: true,
-    })),
-    // Intentionally exclude raw HTML and sensitive values
-    hasScreenshots: false,
+  // 4. Sanitize task_description and history
+  let safeTaskDescription = (message as any).task_description ?? null;
+  if (typeof safeTaskDescription === 'string') {
+    const { sanitized, matches } = redactString(safeTaskDescription, 'task_description');
+    safeTaskDescription = sanitized;
+    for (const match of matches) {
+      if (match.redacted) auditLedger.redacted(match.type, match.selector, match.confidence);
+      else auditLedger.detected(match.type, match.selector, match.confidence, match.isVerified);
+    }
+  }
+
+  let safeHistory = (message as any).history ?? null;
+  if (Array.isArray(safeHistory)) {
+    safeHistory = safeHistory.map((item, i) => {
+      if (!item || typeof item !== 'object') return item;
+      const safeItem = { ...item };
+      for (const [key, value] of Object.entries(safeItem)) {
+        if (typeof value === 'string') {
+          const { sanitized, matches } = redactString(value, `history[${i}].${key}`);
+          safeItem[key] = sanitized;
+          for (const match of matches) {
+            if (match.redacted) auditLedger.redacted(match.type, match.selector, match.confidence);
+            else auditLedger.detected(match.type, match.selector, match.confidence, match.isVerified);
+          }
+        }
+      }
+      return safeItem;
+    });
+  }
+
+  // 5. Build the final server payload matching PlanRequest
+  const serverPayload = {
+    payload: sanitized.payload,
+    task_description: safeTaskDescription,
+    history: safeHistory,
   };
 
-  // OUTBOUND PAYLOAD SECURITY SCANNER (Issue #11)
-  const scanResult = scanOutboundPayload(payload);
-  if (!scanResult.safe) {
-    ledger.log({
-      timestamp: Date.now(),
-      tabId,
-      url: snapshot.url || '',
-      type: 'SECURITY_BLOCK',
-      selector: '',
-      confidence: 1,
-      verified: true,
-      action: 'FAILURE',
-      error: scanResult.error,
-    });
+  // 6. Outbound firewall — final check before network transmission on ENTIRE payload
+  const firewallResult = checkOutboundPayload(serverPayload);
+  if (!firewallResult.passed) {
+    auditLedger.blocked(
+      firewallResult.blockedCategory ?? 'UNKNOWN',
+      firewallResult.location ?? 'unknown',
+      firewallResult.reason ?? 'PII detected in outbound payload',
+    );
+    console.error('[PII-Agent] BLOCKED: outbound firewall caught residual PII at',
+      firewallResult.location, '— category:', firewallResult.blockedCategory);
     return {
       success: false,
-      action: null,
-      error: scanResult.error,
+      error: 'Privacy firewall blocked the request — residual PII detected',
     };
   }
 
-  // Log outbound payload
+  // Log outbound (legacy ledger)
   ledger.log({
     timestamp: Date.now(),
     tabId,
-    url: snapshot.url || '',
+    url: snapshot.url,
     type: 'PAYLOAD',
     selector: '',
     confidence: 1,
     verified: true,
     action: 'SENT_TO_SERVER',
-    payloadSize: JSON.stringify(payload).length,
+    payloadSize: JSON.stringify(serverPayload).length,
   });
 
-  // Send to server for action planning
-  const serverResponse = await fetchServerAction(payload);
+  // 7. Send to server
+  const serverResponse = await fetchServerAction(serverPayload);
 
   if (serverResponse.success) {
+    // Audit: SENT
+    auditLedger.sent(
+      sanitized.payload.interactiveElements.length,
+      sanitized.payload.detectedPII.length,
+    );
     ledger.log({
       timestamp: Date.now(),
       tabId,
-      url: snapshot.url || '',
+      url: snapshot.url,
       type: 'ACTION',
       selector: '',
       confidence: 1,
@@ -156,50 +207,50 @@ async function handleCaptureAndSend(
       actionType: serverResponse.action?.type,
     });
   }
-
+  
   return serverResponse;
 }
 
 async function executeAction(
   message: ActionMessage,
-  sender: any,
+  sender: browser.runtime.MessageSender,
   ledger: PrivacyLedger
 ): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
-
+  
   const action = message.action;
   let success = false;
   let error: string | undefined;
-
+  
   try {
     switch (action.type) {
       case 'CLICK':
-        success = await clickElement(tabId, action.targetId ?? 0);
+        success = await clickElement(tabId, action.targetId);
         break;
       case 'TYPE':
-        success = await typeInElement(tabId, action.targetId ?? 0, action.text ?? '');
+        success = await typeInElement(tabId, action.targetId, action.text);
         break;
       case 'SCROLL':
-        success = await scrollPage(tabId, action.direction ?? 'down', action.amount ?? 100);
+        success = await scrollPage(tabId, action.direction, action.amount);
         break;
       case 'NAVIGATE':
-        success = await navigateTo(tabId, action.url ?? '');
+        success = await navigateTo(tabId, action.url);
         break;
       case 'WAIT':
-        success = await waitForCondition(tabId, action.condition ?? '');
+        success = await waitForCondition(tabId, action.condition);
         break;
       default:
-        error = `Unknown action type: ${(action as any).type}`;
+        error = `Unknown action type: ${action.type}`;
     }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
-
+  
   ledger.log({
     timestamp: Date.now(),
     tabId,
-    url: message.url || '',
+    url: message.url,
     type: 'EXECUTION',
     selector: action.targetId?.toString() || '',
     confidence: 1,
@@ -207,13 +258,13 @@ async function executeAction(
     action: success ? 'SUCCESS' : 'FAILURE',
     error,
   });
-
+  
   return { success, error };
 }
 
 async function captureScreenshot(
-  _message: ScreenshotMessage,
-  sender: any
+  message: ScreenshotMessage,
+  sender: browser.runtime.MessageSender
 ): Promise<{ dataUrl?: string; error?: string }> {
   try {
     const dataUrl = await browser.tabs.captureVisibleTab(sender.tab?.windowId);
@@ -223,20 +274,20 @@ async function captureScreenshot(
   }
 }
 
-async function fetchServerAction(payload: SanitizedPayload): Promise<ServerResponse> {
-  const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
-
+async function fetchServerAction(payload: any): Promise<ServerResponse> {
+  const serverUrl = __SERVER_URL__;
+  
   try {
     const response = await fetch(`${serverUrl}/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-
+    
     if (!response.ok) {
       throw new Error(`Server error: ${response.status}`);
     }
-
+    
     return await response.json();
   } catch (e) {
     console.error('[PII-Agent] Server request failed:', e);
@@ -249,19 +300,18 @@ async function fetchServerAction(payload: SanitizedPayload): Promise<ServerRespo
 }
 
 async function clickElement(tabId: number, elementId: number): Promise<boolean> {
-  const result = await (browser.tabs as any).executeScript(tabId, {
+  await browser.tabs.executeScript(tabId, {
     code: `
-      (() => {
-        const el = document.querySelector('[data-agent-id="${elementId}"]');
-        if (el) {
-          el.click();
-          return true;
-        }
-        return false;
-      })()
+      const el = document.querySelector('[data-agent-id="${elementId}"]');
+      if (el) {
+        el.click();
+        true;
+      } else {
+        false;
+      }
     `,
   });
-  return Boolean(result && result[0] === true);
+  return true;
 }
 
 async function typeInElement(
@@ -269,25 +319,22 @@ async function typeInElement(
   elementId: number,
   text: string
 ): Promise<boolean> {
-  // Use JSON to safely embed text — no escaping issues
-  const jsonText = JSON.stringify(text);
-  const result = await (browser.tabs as any).executeScript(tabId, {
+  await browser.tabs.executeScript(tabId, {
     code: `
-      (() => {
-        const el = document.querySelector('[data-agent-id="${elementId}"]');
-        if (el) {
-          el.focus();
-          el.value = '';
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.value = ${jsonText};
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-        return false;
-      })()
+      const el = document.querySelector('[data-agent-id="${elementId}"]');
+      if (el) {
+        el.focus();
+        el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.value = '${text.replace(/'/g, "\\'")}';
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        true;
+      } else {
+        false;
+      }
     `,
   });
-  return Boolean(result && result[0] === true);
+  return true;
 }
 
 async function scrollPage(
@@ -295,12 +342,10 @@ async function scrollPage(
   direction: 'up' | 'down',
   amount: number
 ): Promise<boolean> {
-  await (browser.tabs as any).executeScript(tabId, {
+  await browser.tabs.executeScript(tabId, {
     code: `
-      (() => {
-        window.scrollBy(0, ${direction === 'down' ? amount : -amount});
-        return true;
-      })()
+      window.scrollBy(0, ${direction === 'down' ? amount : -amount});
+      true;
     `,
   });
   return true;
@@ -311,9 +356,13 @@ async function navigateTo(tabId: number, url: string): Promise<boolean> {
   return true;
 }
 
-async function waitForCondition(_tabId: number, _condition: string): Promise<boolean> {
-  // Fixed delay — do it in service worker, not injected script (no await at top level)
-  await new Promise(resolve => setTimeout(resolve, 1000));
+async function waitForCondition(tabId: number, condition: string): Promise<boolean> {
+  await browser.tabs.executeScript(tabId, {
+    code: `
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      true;
+    `,
+  });
   return true;
 }
 
@@ -349,35 +398,35 @@ interface PrivacyLogEntry {
 class PrivacyLedger {
   private entries: PrivacyLogEntry[] = [];
   private readonly MAX_ENTRIES = 1000;
-
+  
   log(entry: Omit<PrivacyLogEntry, 'timestamp'> & Partial<PrivacyLogEntry>): void {
     this.entries.unshift({
       timestamp: Date.now(),
       ...entry,
     });
-
+    
     if (this.entries.length > this.MAX_ENTRIES) {
       this.entries = this.entries.slice(0, this.MAX_ENTRIES);
     }
   }
-
+  
   getEntries(): PrivacyLogEntry[] {
     return this.entries;
   }
-
+  
   clear(): void {
     this.entries = [];
   }
-
+  
   getSummary(): { total: number; byType: Record<string, number>; byAction: Record<string, number> } {
     const byType: Record<string, number> = {};
     const byAction: Record<string, number> = {};
-
+    
     for (const entry of this.entries) {
       byType[entry.type] = (byType[entry.type] || 0) + 1;
       byAction[entry.action] = (byAction[entry.action] || 0) + 1;
     }
-
+    
     return {
       total: this.entries.length,
       byType,
@@ -388,61 +437,6 @@ class PrivacyLedger {
 
 class AgentState {
   currentTask: string | null = null;
-  lastActionResult: { success: boolean; error?: string } | null = null;
+  lastActionResult: any = null;
   stepCount: number = 0;
-}
-
-interface AgentAction {
-  type: 'CLICK' | 'TYPE' | 'SCROLL' | 'NAVIGATE' | 'WAIT';
-  targetId?: number;
-  text?: string;
-  direction?: 'up' | 'down';
-  amount?: number;
-  url?: string;
-  condition?: string;
-}
-
-interface SanitizedPayload {
-  url: string;
-  title: string;
-  timestamp: number;
-  interactiveElements: InteractiveElement[];
-  accessibilityTree: ARIAElement[];
-  detectedPII: DetectedPII[];
-  hasScreenshots: boolean;
-}
-
-interface ServerResponse {
-  success: boolean;
-  action: AgentAction | null;
-  error?: string;
-}
-
-interface ARIAElement {
-  role: string;
-  name: string;
-  expanded?: boolean;
-  checked?: string;
-  required?: boolean;
-  disabled: boolean;
-  depth: number;
-}
-
-interface InteractiveElement {
-  id: number;
-  tag: string;
-  role: string;
-  label: string;
-  name: string;
-  rect: { x: number; y: number; width: number; height: number };
-  isPassword: boolean;
-}
-
-interface DetectedPII {
-  type: string;
-  value?: string;
-  selector: string;
-  confidence: number;
-  redacted: boolean;
-  isVerified?: boolean;
 }

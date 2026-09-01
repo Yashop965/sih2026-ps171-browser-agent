@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { browser } from 'wxt/browser';
+import { useState, useRef } from 'react';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
+import SoMOverlay from '../components/SoMOverlay';
+import { somRenderer } from '../lib/vision/som';
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
@@ -9,11 +10,11 @@ function Popup() {
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const addLog = (message: string) => {
-    setLogs(prev =>
-      [`${new Date().toLocaleTimeString()}: ${message}`, ...prev].slice(0, 50)
-    );
+    setLogs(prev => [`${new Date().toLocaleTimeString()}: ${message}`, ...prev].slice(0, 50));
   };
 
   const handleStart = async () => {
@@ -21,143 +22,45 @@ function Popup() {
     setIsRunning(true);
     setStep(0);
     setLogs([]);
-    setLatency(null);
     addLog(`Starting task: "${task}"`);
 
-    const started = performance.now();
-    const maxSteps = 15;
-    let currentStep = 0;
-    let consecutiveScrolls = 0; // Track scroll spam
-
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) throw new Error('No active tab');
+      addLog('Sending task to background agent...');
+      const plan = await browser.runtime.sendMessage({
+        type: 'CAPTURE_AND_SEND',
+        task_description: task,
+      });
 
-      while (currentStep < maxSteps) {
-        currentStep++;
-        addLog(`--- Step ${currentStep}/${maxSteps} ---`);
-        addLog('Extracting page elements...');
+      if (plan.error) {
+        throw new Error(plan.error);
+      }
 
-        const snapshot: any = await browser.tabs.sendMessage(tab.id, { type: 'EXTRACT' });
+      addLog(`Planner returned action: ${plan.action?.type}`);
 
-        if (!snapshot?.ok) {
-          addLog('Failed to extract elements');
-          break;
-        }
-
-        const elements = snapshot.elements ?? [];
-        addLog(`Found ${elements.length} interactive elements`);
-
-        if (elements.length === 0) {
-          addLog('No interactive elements found');
-          break;
-        }
-
-        // Count input fields vs buttons
-        const inputFields = elements.filter((e: any) => e.role === 'textbox' || e.tag === 'input');
-        const buttons = elements.filter((e: any) => e.role === 'button' || e.tag === 'button');
-
-        addLog(`Elements: ${inputFields.length} inputs, ${buttons.length} buttons`);
-
-        addLog('Sending sanitized context to planner...');
-        const response = await fetch('http://localhost:8000/plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            task,
-            elements,
-            step: currentStep,
-            inputCount: inputFields.length,
-            buttonCount: buttons.length,
-            history: logs.filter(l => l.includes('Executing:')).map(l => ({
-              action: l.replace('Executing: ', '').split(' on ')[0],
-              targetId: parseInt(l.split(' on ')[1]) || null,
-              result: 'OK'
-            }))
-          }),
+      if (plan.action) {
+        addLog(`Executing: ${plan.action.type}`);
+        await browser.runtime.sendMessage({
+          type: 'EXECUTE_ACTION',
+          action: plan.action,
         });
-
-        if (!response.ok) {
-          addLog(`Planner error: ${response.status}`);
-          break;
-        }
-
-        const plan = await response.json();
-        const action = plan.action;
-
-        addLog(`Planner returned: ${action?.type ?? 'NONE'}`);
-
-        if (!action || action.type === 'DONE') {
-          addLog('✅ Task complete (planner signaled DONE)');
-          break;
-        }
-
-        if (action.type === 'SCROLL') {
-          consecutiveScrolls++;
-          if (consecutiveScrolls > 3) {
-            addLog('⚠️ Too many scrolls, stopping to prevent loop');
-            break;
-          }
-          addLog(`Scrolling page... (${consecutiveScrolls}/3)`);
-          const scrollResult = await browser.tabs.sendMessage(tab.id, {
-            type: 'EXECUTE',
-            action: { type: 'SCROLL', direction: 'down', amount: 500 }
-          });
-          if (!scrollResult?.ok) {
-            addLog('Scroll failed');
-          }
-        } else if (action.type === 'TYPE' && action.targetId && action.value) {
-          consecutiveScrolls = 0; // Reset scroll counter on successful action
-          addLog(`Typing: "${action.value}" into element #${action.targetId}`);
-          const result: any = await browser.tabs.sendMessage(tab.id, {
-            type: 'EXECUTE',
-            action,
-          });
-
-          if (result?.ok) {
-            addLog('✅ Typed successfully');
-            setStep(currentStep);
-          } else {
-            addLog(`❌ Type failed: ${result?.error ?? 'unknown'}`);
-          }
-        } else if (action.type === 'CLICK' && action.targetId) {
-          consecutiveScrolls = 0;
-          addLog(`Clicking element #${action.targetId}`);
-          const result: any = await browser.tabs.sendMessage(tab.id, {
-            type: 'EXECUTE',
-            action,
-          });
-
-          if (result?.ok) {
-            addLog('✅ Clicked successfully');
-            setStep(currentStep);
-
-            // If we clicked submit, task might be done
-            if (action.targetId === buttons[buttons.length - 1]?.id) {
-              addLog('🎯 Submit button clicked - task likely complete');
-              break;
-            }
-          } else {
-            addLog(`❌ Click failed: ${result?.error ?? 'unknown'}`);
-          }
-        } else {
-          addLog(`Unknown action: ${JSON.stringify(action)}`);
-          break;
-        }
-
-        await new Promise(r => setTimeout(r, 800));
+        setStep(1);
       }
 
-      if (currentStep >= maxSteps) {
-        addLog(`⚠️ Reached maximum steps (${maxSteps})`);
-      }
-
-      addLog('Task completed');
+      addLog('Task completed successfully!');
     } catch (err) {
       addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setLatency(Math.round(performance.now() - started));
       setIsRunning(false);
+    }
+  };
+
+  const toggleOverlay = () => {
+    setShowOverlay(!showOverlay);
+    if (!showOverlay) {
+      addLog('SoM Overlay enabled');
+    } else {
+      somRenderer.clearMarks();
+      addLog('SoM Overlay disabled');
     }
   };
 
@@ -180,20 +83,34 @@ function Popup() {
           />
         </div>
 
-        <button
-          className={`start-button ${isRunning ? 'running' : ''}`}
-          onClick={handleStart}
-          disabled={isRunning || !task}
-        >
-          {isRunning ? 'Running...' : 'Start Agent'}
-        </button>
+        <div className="button-group">
+          <button
+            className={`start-button ${isRunning ? 'running' : ''}`}
+            onClick={handleStart}
+            disabled={isRunning || !task}
+          >
+            {isRunning ? 'Running...' : 'Start Agent'}
+          </button>
+
+          <button
+            className="overlay-button"
+            onClick={toggleOverlay}
+            disabled={isRunning}
+          >
+            {showOverlay ? 'Hide Overlay' : 'Show Overlay'}
+          </button>
+        </div>
 
         {step > 0 && (
-          <div className="step-indicator">Step {step} of task execution</div>
+          <div className="step-indicator">
+            Step {step} of task execution
+          </div>
         )}
 
         {latency !== null && (
-          <div className="latency-display">Latency: {latency}ms</div>
+          <div className="latency-display">
+            Latency: {latency}ms
+          </div>
         )}
 
         <div className="log-section">
@@ -205,22 +122,28 @@ function Popup() {
           </div>
         </div>
 
-        <div
-          style={{
-            height: 300,
-            marginTop: 12,
-            border: '1px solid #1E242D',
-            borderRadius: 6,
-            overflow: 'hidden',
-          }}
-        >
-          <PrivacyLedger />
+        {/* Privacy Ledger Panel - component renders its own header */}
+        <div className="privacy-ledger-section">
+          <div className="privacy-ledger-container">
+            <PrivacyLedger />
+          </div>
         </div>
       </div>
 
       <footer className="popup-footer">
         <span>Privacy-first • On-device inference</span>
       </footer>
+
+      {/* SoM Overlay - renders on top of page when visible */}
+      {showOverlay && (
+        <div ref={overlayRef} className="overlay-container">
+          <SoMOverlay
+            boxes={[]}
+            isVisible={showOverlay}
+            onSelectBox={(box) => addLog(`Selected box ${box.id}: ${box.label}`)}
+          />
+        </div>
+      )}
     </div>
   );
 }

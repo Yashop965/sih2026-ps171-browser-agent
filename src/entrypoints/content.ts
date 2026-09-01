@@ -2,7 +2,6 @@ import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { extract, getPageContext } from '../lib/dom';
 import { executeWithRetry } from '../lib/actions';
-import { PIIManager } from '../lib/pii/detector';
 
 /**
  * Content Script - DOM Capture + PII Redaction + Action Execution
@@ -33,14 +32,12 @@ export default defineContentScript({
         console.log('[agent] content script loaded on', location.href);
 
         // Initialize PII detector
-        const piiManager = new PIIManager();
         const piiDetector = new PIIDetector();
 
         // Capture DOM snapshot with PII redaction
-        async function captureDOM(): Promise<SanitizedDOMSnapshot> {
-            const a11yTree = buildAccessibilityTree(document.body || document.documentElement);
+        function captureDOM(): SanitizedDOMSnapshot {
+            const a11yTree = buildAccessibilityTree(document.documentElement);
             const interactiveElements = captureInteractiveElements();
-            const detectedPII = await piiManager.scanDocumentAsync();
 
             return {
                 url: window.location.href,
@@ -50,7 +47,7 @@ export default defineContentScript({
                 // Instead send sanitized interactive elements only
                 accessibilityTree: a11yTree,
                 interactiveElements,
-                detectedPII: detectedPII as any,
+                detectedPII: piiDetector.scanDocument(),
             };
         }
 
@@ -68,7 +65,8 @@ export default defineContentScript({
 
             elements.forEach((el, index) => {
                 const rect = el.getBoundingClientRect();
-                if (rect.width === 0 && rect.height === 0) return;
+                // Either dimension being zero means it isn't rendered.
+                if (rect.width === 0 || rect.height === 0) return;
 
                 // Annotate DOM with data-agent-id so background actions can find targets
                 el.setAttribute('data-agent-id', String(index));
@@ -77,7 +75,10 @@ export default defineContentScript({
                     id: index,
                     tag: el.tagName.toLowerCase(),
                     role: el.getAttribute('role') || el.tagName.toLowerCase(),
-                    label: el.textContent?.trim().slice(0, 50) || '',
+                    label: el.getAttribute('aria-label')
+                        || el.getAttribute('placeholder')
+                        || el.textContent?.trim().slice(0, 50)
+                        || '',
                     name: el.getAttribute('name') || el.getAttribute('id') || '',
                     rect: {
                         x: Math.round(rect.x),
@@ -108,7 +109,9 @@ export default defineContentScript({
                             expanded: el.getAttribute('aria-expanded') === 'true',
                             checked: el.getAttribute('aria-checked') || undefined,
                             required: el.getAttribute('aria-required') === 'true',
-                            disabled: Boolean((el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true'),
+                            disabled:
+                                ('disabled' in el && (el as HTMLInputElement).disabled) ||
+                                el.getAttribute('aria-disabled') === 'true',
                             depth,
                         });
                     }
@@ -142,7 +145,9 @@ export default defineContentScript({
             return roleMap[tag.toUpperCase()] || '';
         }
 
-        // Listen for messages from background script
+        // Listen for messages from background script.
+        // 'capturePage' is handled here rather than through a command
+        // registration — WXT's ctx has no addCommand().
         browser.runtime.onMessage.addListener((message: unknown) => {
             if (!isAgentRequest(message)) return;
 
@@ -194,7 +199,9 @@ export default defineContentScript({
 
 // PII Detection Engine
 class PIIDetector {
-    private static readonly PATTERNS: Record<string, RegExp> = {
+    // Instance member, not static: every lookup below goes through `this`,
+    // and `this.PATTERNS` is undefined on a static member.
+    private readonly PATTERNS: Record<string, RegExp> = {
         // Indian PII
         AADHAAR: /^\d{4}\s?\d{4}\s?\d{4}$/u,
         PAN: /^[A-Z]{5}\d{4}[A-Z]{1}$/u,
@@ -219,7 +226,7 @@ class PIIDetector {
             const type = input.getAttribute('type')?.toLowerCase() || 'text';
             const name = input.getAttribute('name') || input.getAttribute('id') || '';
 
-            if (type === 'password' || PIIDetector.PATTERNS.PASSWORD_FIELD.test(name)) {
+            if (type === 'password' || this.PATTERNS.PASSWORD_FIELD.test(name)) {
                 detections.push({
                     type: 'PASSWORD_FIELD',
                     selector: this.getElementSelector(input),
@@ -227,7 +234,7 @@ class PIIDetector {
                     redacted: true,
                 });
             } else if (input.value) {
-                for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
+                for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
                     if (piiType === 'PASSWORD_FIELD') continue;
                     if (pattern.test(input.value)) {
                         detections.push({
@@ -245,11 +252,17 @@ class PIIDetector {
         // Scan text content for PII — use exec() in a loop for non-anchored matches
         document.querySelectorAll('div, span, p, td, th, label').forEach(el => {
             const text = el.textContent || '';
-            for (const [piiType, pattern] of Object.entries(PIIDetector.PATTERNS) as [string, RegExp][]) {
+            for (const [piiType, pattern] of Object.entries(this.PATTERNS)) {
                 if (piiType === 'PASSWORD_FIELD') continue;
-                // Use a copy without anchors for text content scanning
-                const scanPattern = new RegExp(pattern.source.replace(/^\^|$/g, ''), pattern.flags.replace('u', 'gu'));
-                let match;
+
+                // Strip the anchors so the pattern can match anywhere in the
+                // text. The trailing anchor needs escaping — a bare `$` in the
+                // search pattern means "end of string", so it never matched the
+                // literal `$` character and the anchor was left in place.
+                const source = pattern.source.replace(/^\^/, '').replace(/\$$/, '');
+                const scanPattern = new RegExp(source, pattern.flags.replace('u', 'gu'));
+
+                let match: RegExpExecArray | null;
                 while ((match = scanPattern.exec(text)) !== null) {
                     detections.push({
                         type: piiType as PIIType,
@@ -258,6 +271,9 @@ class PIIDetector {
                         confidence: this.getConfidence(piiType, match[0]),
                         redacted: true,
                     });
+
+                    // A zero-length match would spin forever.
+                    if (match.index === scanPattern.lastIndex) scanPattern.lastIndex++;
                 }
             }
         });
@@ -315,29 +331,29 @@ class PIIDetector {
         if (!/^\d{12}$/.test(digits)) return false;
 
         const d = [
-            [0,1,2,3,4,5,6,7,8,9],
-            [1,2,3,4,0,6,7,8,9,5],
-            [2,3,4,0,1,7,8,9,5,6],
-            [3,4,0,1,2,8,9,5,6,7],
-            [4,0,1,2,3,9,5,6,7,8],
-            [5,9,8,7,6,0,4,3,2,1],
-            [6,5,9,8,7,1,0,4,3,2],
-            [7,6,5,9,8,2,1,0,4,3],
-            [8,7,6,5,9,3,2,1,0,4],
-            [9,8,7,6,5,4,3,2,1,0],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+            [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+            [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+            [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+            [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+            [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+            [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+            [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+            [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
         ];
 
         const p = [
-            [0,1,2,3,4,5,6,7,8,9],
-            [1,2,3,4,0,6,7,8,9,5],
-            [2,3,4,0,1,7,8,9,5,6],
-            [3,4,0,1,2,8,9,5,6,7],
-            [4,0,1,2,3,9,5,6,7,8],
-            [5,0,9,8,7,4,3,2,1,6],
-            [6,0,8,7,5,2,1,3,4,9],
-            [7,0,5,6,8,3,4,2,9,1],
-            [8,0,3,4,5,9,6,1,2,7],
-            [9,0,2,1,3,8,7,4,6,5],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+            [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+            [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+            [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+            [5, 0, 9, 8, 7, 4, 3, 2, 1, 6],
+            [6, 0, 8, 7, 5, 2, 1, 3, 4, 9],
+            [7, 0, 5, 6, 8, 3, 4, 2, 9, 1],
+            [8, 0, 3, 4, 5, 9, 6, 1, 2, 7],
+            [9, 0, 2, 1, 3, 8, 7, 4, 6, 5],
         ];
 
         let checksum = 0;

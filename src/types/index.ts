@@ -13,8 +13,6 @@ export interface InteractiveElement {
   isPassword: boolean;
 }
 
-export type SanitizedElement = InteractiveElement;
-
 export interface ARIAElement {
   role: string;
   name: string;
@@ -50,7 +48,7 @@ export interface SanitizedDOMSnapshot {
   url: string;
   title: string;
   timestamp: number;
-  rawHtml?: string;
+  rawHtml: string;
   accessibilityTree: ARIAElement[];
   interactiveElements: InteractiveElement[];
   detectedPII: DetectedPII[];
@@ -76,8 +74,6 @@ export interface AgentAction {
   condition?: string;
 }
 
-export type ActionCommand = AgentAction;
-
 export interface ServerResponse {
   success: boolean;
   action: AgentAction | null;
@@ -94,7 +90,6 @@ export interface VisionResult {
 }
 
 export interface BoundingBox {
-  id?: number;
   x: number;
   y: number;
   width: number;
@@ -114,15 +109,6 @@ export interface PrivacyLogEntry {
   action: 'REDACTED' | 'SENT_TO_SERVER' | 'SERVER_RESPONSE' | 'EXECUTION' | 'SUCCESS' | 'FAILURE';
   payloadSize?: number;
   actionType?: string;
-  error?: string;
-}
-
-export interface TaskState {
-  status: 'idle' | 'running' | 'paused' | 'complete' | 'error';
-  step: number;
-  maxSteps: number;
-  task: string;
-  history: any[];
   error?: string;
 }
 
@@ -163,5 +149,4 @@ export interface PrivacyEvent {
   category: PIIType;
   detail: string;
   confidence: number;
-  selector?: string;
-}
+}  

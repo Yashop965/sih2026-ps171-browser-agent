@@ -144,3 +144,64 @@
   color: #64748b;
   text-align: center;
 }
+
+/* Privacy Ledger Section */
+.privacy-ledger-section {
+  margin-top: 16px;
+  border-top: 1px solid #334155;
+  padding-top: 16px;
+}
+
+.privacy-ledger-container {
+  height: 250px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid #334155;
+}
+
+/* Button Group */
+.button-group {
+  display: flex;
+  gap: 8px;
+}
+
+.overlay-button {
+  flex: 1;
+  padding: 10px 16px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.overlay-button:hover:not(:disabled) {
+  background: #334155;
+  color: #f8fafc;
+  border-color: #6366f1;
+}
+
+.overlay-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.overlay-button.active {
+  background: #6366f1;
+  color: white;
+  border-color: #6366f1;
+}
+
+/* Overlay Container */
+.overlay-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 2147483647;
+}
