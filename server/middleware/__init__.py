@@ -2,7 +2,7 @@
 Middleware package for SIH Browser Agent FastAPI Server
 """
 
-from server.middleware.logging import JSONLoggingMiddleware
-from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimiterMiddleware
+from server.middleware.logging import StructuredLoggingMiddleware
+from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimitingMiddleware
 
-__all__ = ["JSONLoggingMiddleware", "PayloadSizeLimitMiddleware", "RateLimiterMiddleware"]
+__all__ = ["StructuredLoggingMiddleware", "PayloadSizeLimitMiddleware", "RateLimitingMiddleware"]

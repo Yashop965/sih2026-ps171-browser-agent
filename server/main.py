@@ -21,8 +21,8 @@ import os
 env_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(env_path)
 
-from server.middleware.logging import JSONLoggingMiddleware
-from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimiterMiddleware
+from server.middleware.logging import StructuredLoggingMiddleware
+from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimitingMiddleware
 from server.planner import ActionPlanner, ActionSchema, PlannerResult
 import os
 
@@ -52,9 +52,9 @@ app = FastAPI(
 )
 
 # Attach Middlewares (Logging, Rate Limiter, Payload Size Limiter)
-app.add_middleware(JSONLoggingMiddleware)
-app.add_middleware(RateLimiterMiddleware, max_requests=60, window_seconds=60)
-app.add_middleware(PayloadSizeLimitMiddleware, max_bytes=50 * 1024)
+app.add_middleware(StructuredLoggingMiddleware)
+app.add_middleware(RateLimitingMiddleware)
+app.add_middleware(PayloadSizeLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
