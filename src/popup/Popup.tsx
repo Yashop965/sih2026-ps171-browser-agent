@@ -69,9 +69,9 @@ function Popup() {
     const started = performance.now();
     let currentStep = 0;
     let consecutiveScrolls = 0;
-    let filledIds = new Set<number>(); // Track which element IDs are already filled
+    let filledIds = new Set<string>(); // Track stable element IDs (label_x_y)
     let maxSteps = 15; // Will be updated after first extraction
-    let recentActionHistory: Array<{targetId: number, type: string}> = []; // Track recent actions for loop detection
+    let recentActionHistory: Array<{targetId: string, type: string}> = []; // Track recent actions for loop detection
 
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -114,7 +114,7 @@ function Popup() {
         }
 
         addLog('Sending sanitized context to planner...');
-        // Build history with actually filled element IDs
+        // Build history with actually filled element stable IDs
         const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK' }));
 
         const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';

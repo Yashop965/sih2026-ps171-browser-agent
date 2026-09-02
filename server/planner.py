@@ -114,6 +114,8 @@ class ActionPlanner:
         sanitized_elements = []
         for el in interactive_elements[:30]:
             element_id = el.get("id")
+            # Use stableId if available for persistent tracking
+            element_stable_id = el.get("stableId", str(element_id))
             role = el.get("role", el.get("tag", "element"))
             tag = el.get("tag", "input")  # Get HTML tag
             label = str(el.get("label", "")).lower()[:50]
@@ -124,15 +126,19 @@ class ActionPlanner:
                 label = "[redacted password field]"
 
             # Check if this element was already filled in history
+            # Try both numeric ID and stableId for compatibility
             already_filled = False
             if history:
                 for step in history:
-                    if step.get("targetId") == element_id and step.get("result") == "OK":
+                    step_target = step.get("targetId")
+                    # Check if it matches either numeric ID or stableId
+                    if (str(step_target) == str(element_id) or step_target == element_stable_id) and step.get("result") == "OK":
                         already_filled = True
                         break
 
             sanitized_elements.append({
                 "targetId": element_id,
+                "stableId": element_stable_id,
                 "tag": tag,  # HTML tag: input, select, button, a, etc.
                 "type": el_type,  # Input type: text, email, select-one, checkbox, etc.
                 "role": role,

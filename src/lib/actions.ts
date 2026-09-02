@@ -5,7 +5,8 @@ import { getElementById } from './dom';
 
 export interface Action {
     type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'DONE';
-    targetId?: number;
+    // Can be either numeric ID or stableId string
+    targetId?: number | string;
     value?: string;
     scrollDirection?: 'up' | 'down' | 'left' | 'right';
     scrollAmount?: number;
@@ -23,11 +24,17 @@ const ACTION_TIMEOUT_MS = 5000;
 
 // Returns Element, not HTMLElement. The registry legitimately holds SVG icon
 // buttons, so every caller below checks before using HTMLElement-only methods.
-function resolve(targetId: number | undefined): Element {
+function resolve(targetId: number | string | undefined): Element {
     if (targetId === undefined) {
         throw new Error('targetId missing');
     }
-    const el = getElementById(targetId);
+    let el: Element | undefined;
+    // Support both numeric IDs and stableId strings
+    if (typeof targetId === 'number') {
+        el = getElementById(targetId);
+    } else {
+        el = getElementByStableId(targetId as string);
+    }
     if (!el) {
         console.warn(`[agent] Element ${targetId} not found in registry`);
         throw new Error(`element ${targetId} not found — page may have changed`);

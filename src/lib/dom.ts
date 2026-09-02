@@ -33,15 +33,16 @@ const SELECTORS = [
 
 // Map of id -> real DOM node. The executor (#9) uses this to act on elements.
 // Rebuilt on every extract() call.
-//
-// Note: this is Element, not HTMLElement. Selectors like [role="button"] and
-// [onclick] legitimately match SVG icon buttons, which are SVGElement. Those
-// are real, clickable UI, so we keep them — actions.ts guards the calls that
-// only exist on HTMLElement instead of dropping them here.
 const registry = new Map<number, Element>();
+// Map of stableId -> real DOM node for persistent element tracking
+const stableIdRegistry = new Map<string, Element>();
 
 export function getElementById(id: number): Element | undefined {
     return registry.get(id);
+}
+
+export function getElementByStableId(stableId: string): Element | undefined {
+    return stableIdRegistry.get(stableId);
 }
 
 function isVisible(el: Element, rect: DOMRect): boolean {
@@ -188,6 +189,7 @@ function isDisabled(el: Element): boolean {
 export function extract(): ExtractedElement[] {
     const started = performance.now();
     registry.clear();
+    stableIdRegistry.clear();
 
     const nodes = Array.from(document.querySelectorAll(SELECTORS));
     const results: ExtractedElement[] = [];
@@ -198,11 +200,11 @@ export function extract(): ExtractedElement[] {
         if (!isVisible(el, rect)) continue;
 
         const id = nextId++;
-        registry.set(id, el);
-
-        // Create stable ID from position and label - doesn't change when DOM re-renders
         const label = getLabel(el);
         const stableId = `${label}_${rect.left.toFixed(0)}_${rect.top.toFixed(0)}`;
+
+        registry.set(id, el);
+        stableIdRegistry.set(stableId, el);
 
         results.push({
             id,
