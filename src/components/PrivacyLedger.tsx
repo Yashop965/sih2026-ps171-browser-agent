@@ -396,114 +396,126 @@ export default function PrivacyLedger() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '8px 16px',
+            padding: '10px 16px',
             borderBottom: '1px solid #E8E6E1',
             background: '#ffffff',
-            fontSize: 10,
+            fontSize: 11,
             fontFamily: MONO,
             color: '#6B6B6B',
           }}>
             <span>
-              <strong style={{ color: '#0D0D0D' }}>{detections.length}</strong> total fields
+              <strong style={{ color: '#0D0D0D', fontSize: 13 }}>{detections.length}</strong>
+              <span style={{ marginLeft: 8, color: '#6B6B6B' }}>total detections</span>
               {dStats.verified > 0 && (
-                <span style={{ marginLeft: 12 }}>
-                  <span style={{ color: '#8B2E2E' }}>{dStats.verified}</span> verified
+                <span style={{ marginLeft: 12, color: '#8B2E2E', fontWeight: 600 }}>
+                  {dStats.verified} verified
                 </span>
               )}
             </span>
-            <span style={{ color: '#9A9A9A' }}>
-              {dStats.byType.slice(0, 3).map(t => `${t.type}: ${t.count}`).join(' · ')}
+            <span style={{ color: '#9A9A9A', fontSize: 10 }}>
+              {dStats.byType.slice(0, 4).map(t => (
+                <span key={t.type} style={{ marginRight: 8 }}>
+                  <span style={{ color: t.type === 'Aadhaar' ? '#8B2E2E' : t.type === 'PAN' ? '#2D5A27' : '#6B6B6B' }}>●</span>
+                  {t.type}: {t.count}
+                </span>
+              ))}
             </span>
           </div>
 
-          {/* Heatmap canvas */}
-          <div
-            style={{
-              flex: 1,
-              position: 'relative',
-              background: '#ffffff',
-              overflow: 'hidden',
-            }}
-          >
-            {/* Grid pattern background */}
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              backgroundImage: 'linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px)',
-              backgroundSize: '40px 40px',
-            }} />
-
+          {/* Heatmap area */}
+          <div style={{ flex: 1, position: 'relative', background: '#fafafa' }}>
             {detections.length > 0 ? (
               <>
-                {/* Render all detections as a scatter plot */}
-                {detections.map((d, i) => {
-                  // Distribute across canvas using golden ratio spiral for even distribution
-                  const angle = i * 2.399963; // Golden angle
-                  const radius = Math.sqrt(i / detections.length) * 0.42;
-                  const x = 50 + radius * Math.cos(angle) * 95;
-                  const y = 50 + radius * Math.sin(angle) * 95;
-
-                  // Size based on confidence - make them more visible
-                  const size = d.verified ? 10 : 8;
-                  const color = d.verified ? '#8B2E2E' : '#8B6914';
-                  const opacity = d.verified ? 0.9 : 0.75;
+                {/* Group detections by type */}
+                {dStats.byType.map((typeStat) => {
+                  const typeDetections = detections.filter(d => d.type === typeStat.type);
+                  const isVerified = typeDetections.some(d => d.verified);
+                  const color = isVerified ? '#8B2E2E' : '#8B6914';
+                  const bgColor = isVerified ? 'rgba(139,46,46,0.06)' : 'rgba(139,105,20,0.06)';
 
                   return (
-                    <div
-                      key={`heatmap-${d.selector}-${i}`}
-                      onClick={() => onRowClick(d)}
-                      title={`${d.type}: ${d.selector} (${Math.round(d.confidence * 100)}%)`}
-                      style={{
-                        position: 'absolute',
-                        left: `${x}%`,
-                        top: `${y}%`,
-                        transform: `translate(-50%, -50%)`,
-                        width: size,
-                        height: size,
-                        borderRadius: '50%',
-                        background: color,
-                        opacity: opacity,
-                        border: `1px solid ${color}`,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        zIndex: 5,
-                        boxShadow: `0 0 4px ${color}40`,
-                      }}
-                      onMouseEnter={(e) => {
-                        const el = e.currentTarget as HTMLElement;
-                        el.style.transform = 'translate(-50%, -50%) scale(2)';
-                        el.style.zIndex = '20';
-                        el.style.opacity = '1';
-                        el.style.boxShadow = `0 0 12px ${color}80`;
-                      }}
-                      onMouseLeave={(e) => {
-                        const el = e.currentTarget as HTMLElement;
-                        el.style.transform = 'translate(-50%, -50%) scale(1)';
-                        el.style.zIndex = '5';
-                        el.style.opacity = String(opacity);
-                        el.style.boxShadow = `0 0 4px ${color}40`;
-                      }}
-                    />
+                    <div key={typeStat.type} style={{ marginBottom: 12 }}>
+                      {/* Type header */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 16px',
+                        background: bgColor,
+                        borderBottom: `2px solid ${color}`,
+                      }}>
+                        <span style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: color,
+                        }} />
+                        <span style={{
+                          fontWeight: 600,
+                          fontSize: 11,
+                          color: '#0D0D0D',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                        }}>
+                          {typeStat.type}
+                        </span>
+                        <span style={{
+                          marginLeft: 'auto',
+                          fontSize: 10,
+                          color: '#6B6B6B',
+                          fontFamily: MONO,
+                        }}>
+                          {typeStat.count} detections
+                          {typeStat.percent > 0 && ` (${typeStat.percent}%)`}
+                        </span>
+                      </div>
+
+                      {/* Detections row */}
+                      <div style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 6,
+                        padding: '10px 16px',
+                        minHeight: 40,
+                      }}>
+                        {typeDetections.map((d, i) => {
+                          const size = d.verified ? 14 : 10;
+                          const opacity = d.confidence;
+                          return (
+                            <div
+                              key={`${d.selector}-${i}`}
+                              onClick={() => onRowClick(d)}
+                              title={`${d.type}: ${d.selector} (${Math.round(d.confidence * 100)}%)`}
+                              style={{
+                                width: size,
+                                height: size,
+                                borderRadius: '50%',
+                                background: d.verified ? '#8B2E2E' : '#8B6914',
+                                opacity: 0.5 + opacity * 0.5,
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                boxShadow: `0 0 ${d.verified ? 8 : 4}px ${d.verified ? '#8B2E2E' : '#8B6914'}40`,
+                                border: `1px solid ${d.verified ? '#8B2E2E' : '#8B6914'}`,
+                              }}
+                              onMouseEnter={(e) => {
+                                const el = e.currentTarget as HTMLElement;
+                                el.style.transform = 'scale(1.5)';
+                                el.style.zIndex = '10';
+                                el.style.opacity = '1';
+                              }}
+                              onMouseLeave={(e) => {
+                                const el = e.currentTarget as HTMLElement;
+                                el.style.transform = 'scale(1)';
+                                el.style.zIndex = '1';
+                                el.style.opacity = String(0.5 + d.confidence * 0.5);
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
-
-                {/* Cluster indicator for large datasets */}
-                {detections.length > 50 && (
-                  <div style={{
-                    position: 'absolute',
-                    bottom: 12,
-                    right: 12,
-                    background: '#0D0D0D',
-                    color: '#FFFFFF',
-                    padding: '6px 10px',
-                    borderRadius: 1,
-                    fontSize: 9,
-                    fontFamily: MONO,
-                    zIndex: 10,
-                  }}>
-                    {detections.length} fields
-                  </div>
-                )}
               </>
             ) : (
               <div style={{
@@ -514,12 +526,12 @@ export default function PrivacyLedger() {
                 textAlign: 'center',
                 color: '#9A9A9A',
               }}>
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: 0.4 }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: 0.3 }}>
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 8v4l3 3" />
                 </svg>
-                <div style={{ fontFamily: MONO, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>No fields detected</div>
-                <div style={{ fontSize: 10, color: '#B0B0B0' }}>Visit a page with PII to see detection heatmap</div>
+                <div style={{ fontFamily: MONO, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6, color: '#6B6B6B' }}>No detections yet</div>
+                <div style={{ fontSize: 10, color: '#9A9A9A' }}>Visit a page with PII to see detection heatmap</div>
               </div>
             )}
 
@@ -527,24 +539,31 @@ export default function PrivacyLedger() {
             {detections.length > 0 && (
               <div style={{
                 position: 'absolute',
-                top: 12,
-                left: 12,
+                bottom: 12,
+                right: 12,
                 background: '#ffffff',
                 border: '1px solid #E8E6E1',
-                borderRadius: 1,
+                borderRadius: 4,
                 padding: '10px 14px',
                 fontSize: 10,
                 fontFamily: MONO,
                 zIndex: 10,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
               }}>
                 <div style={{ marginBottom: 8, color: '#9A9A9A', textTransform: 'uppercase', letterSpacing: '0.1em', fontSize: 9, fontWeight: 600 }}>Legend</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B2E2E' }} />
-                  <span style={{ color: '#0D0D0D', fontSize: 9 }}>Verified</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B6914' }} />
-                  <span style={{ color: '#0D0D0D', fontSize: 9 }}>Pattern match</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B2E2E', boxShadow: '0 0 6px #8B2E2E60' }} />
+                    <span style={{ color: '#0D0D0D', fontSize: 9 }}>Verified (checksum)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B6914' }} />
+                    <span style={{ color: '#0D0D0D', fontSize: 9 }}>Pattern match</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#8B6914', opacity: 0.5 }} />
+                    <span style={{ color: '#0D0D0D', fontSize: 9 }}>Low confidence</span>
+                  </div>
                 </div>
               </div>
             )}
