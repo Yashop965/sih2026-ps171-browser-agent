@@ -4,6 +4,8 @@
 
 export interface ExtractedElement {
     id: number;
+    // Stable identifier based on position and label - doesn't change when DOM re-renders
+    stableId: string;
     tag: string;
     type: string | null;
     role: string;
@@ -198,12 +200,17 @@ export function extract(): ExtractedElement[] {
         const id = nextId++;
         registry.set(id, el);
 
+        // Create stable ID from position and label - doesn't change when DOM re-renders
+        const label = getLabel(el);
+        const stableId = `${label}_${rect.left.toFixed(0)}_${rect.top.toFixed(0)}`;
+
         results.push({
             id,
+            stableId,
             tag: el.tagName.toLowerCase(),
             type: el.getAttribute('type'),
             role: getRole(el),
-            label: getLabel(el),
+            label,
             x: Math.round(rect.left),
             y: Math.round(rect.top),
             width: Math.round(rect.width),
