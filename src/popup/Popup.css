@@ -578,3 +578,10 @@
   background: var(--text-primary);
   color: var(--bg-secondary);
 }
+
+/* Ledger Container - takes remaining space */
+.ledger-container {
+  flex: 1;
+  min-height: 200px;
+  border-top: 1px solid var(--border-light);
+}
