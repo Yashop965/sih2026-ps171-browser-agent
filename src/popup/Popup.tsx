@@ -164,7 +164,7 @@ function Popup() {
             break;
           }
           addLog(`Scrolling page... (${consecutiveScrolls}/3)`);
-          const scrollResult = await browser.runtime.sendMessage({
+          const scrollResult: any = await browser.runtime.sendMessage({
             type: 'EXECUTE',
             action: { type: 'SCROLL', direction: 'down', amount: 500 }
           });
