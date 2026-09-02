@@ -10,17 +10,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     
-    strategy:
-      matrix:
-        node-version: [20.x]
-    
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup Node.js ${{ matrix.node-version }}
+    - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: '20'
         cache: 'npm'
     
     - name: Install dependencies
@@ -31,10 +27,8 @@ jobs:
       env:
         NODE_ENV: production
     
-    - name: Run frontend tests
+    - name: Run tests (non-blocking)
       run: npm run test -- --run || true
-      env:
-        NODE_ENV: test
     
     - name: Run Python tests
       run: |
@@ -51,7 +45,8 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20.x
+        node-version: '20'
+    
     - name: Install dependencies
       run: npm install
     
@@ -72,12 +67,13 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20.x
+        node-version: '20'
+    
     - name: Install dependencies
       run: npm install
     
-    - name: Run npm audit (informational only)
-      run: npm audit --production --audit-level=error || true
+    - name: Run npm audit
+      run: npm audit --production || true
     
     - name: Run Python security check
       run: |
