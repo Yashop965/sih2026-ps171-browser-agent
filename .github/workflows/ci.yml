@@ -16,7 +16,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20.18.0'
+        node-version: 20
         cache: 'npm'
     
     - name: Install dependencies
@@ -27,10 +27,10 @@ jobs:
       env:
         NODE_ENV: production
     
-    - name: Run tests
-      run: npm run test -- --run || echo "Tests skipped (non-blocking)"
+    - name: Run tests (non-blocking)
+      run: npm run test -- --run || echo "Tests skipped"
     
-    - name: Run Python tests
+    - name: Run Python tests (non-blocking)
       run: |
         pip install -r server/requirements.txt
         python -m pytest tests/test_main.py tests/test_fastapi_planner.py tests/test_middleware.py tests/test_loop_detection.py -v || echo "Python tests skipped"
@@ -45,15 +45,15 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20.18.0'
+        node-version: 20
     
     - name: Install dependencies
       run: npm install
     
-    - name: Run TypeScript check
-      run: npx tsc --noEmit || echo "TypeScript checks skipped (warnings only)"
+    - name: Run TypeScript check (non-blocking)
+      run: npx tsc --noEmit || echo "TypeScript checks skipped"
     
-    - name: Run Python linting
+    - name: Run Python linting (non-blocking)
       run: |
         pip install flake8
         flake8 server/ --max-line-length=120 || echo "Linting skipped"
@@ -67,15 +67,15 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20.18.0'
+        node-version: 20
     
     - name: Install dependencies
       run: npm install
     
-    - name: Run npm audit
-      run: npm audit --production || echo "Audit skipped (warnings only)"
+    - name: Run npm audit (non-blocking)
+      run: npm audit --production || echo "Audit skipped"
     
-    - name: Run Python security check
+    - name: Run Python security check (non-blocking)
       run: |
         pip install safety
         safety check -r server/requirements.txt || echo "Security check skipped"
