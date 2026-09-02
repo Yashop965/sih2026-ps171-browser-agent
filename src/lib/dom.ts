@@ -29,6 +29,7 @@ const SELECTORS = [
     '[role="tab"]',
     '[onclick]',
     '[contenteditable="true"]',
+    // Note: labels are intentionally excluded - they're not interactive form controls
 ].join(',');
 
 // Map of id -> real DOM node. The executor (#9) uses this to act on elements.
