@@ -71,22 +71,30 @@ class Florence2Pipeline {
     if (this.initialized) return;
     if (this.loadPromise) return this.loadPromise;
 
+    // Suppress ALL console output during initialization
+    const silencedConsole = {
+      log: console.log,
+      warn: console.warn,
+      error: console.error,
+      time: console.time,
+      timeEnd: console.timeEnd,
+      timeStamp: console.timeStamp,
+    };
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    console.time = () => {};
+    console.timeEnd = () => {};
+    console.timeStamp = () => {};
+
     this.loadPromise = (async () => {
       try {
         const { pipeline, env } = await import('@huggingface/transformers');
 
-        // Configure environment - suppress ALL logging
+        // Configure environment
         env.allowLocalModels = false;
         env.useBrowserCache = true;
-        env.logLevel = 'error'; // Only show errors
-
-        // Suppress console output from ONNX Runtime during initialization
-        const originalLog = console.log;
-        const originalWarn = console.warn;
-        const originalError = console.error;
-        console.log = () => {};
-        console.warn = () => {};
-        console.error = () => {};
+        env.logLevel = 'error';
 
         try {
           this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
@@ -97,9 +105,12 @@ class Florence2Pipeline {
           this.initialized = true;
         } finally {
           // Restore console methods
-          console.log = originalLog;
-          console.warn = originalWarn;
-          console.error = originalError;
+          console.log = silencedConsole.log;
+          console.warn = silencedConsole.warn;
+          console.error = silencedConsole.error;
+          console.time = silencedConsole.time;
+          console.timeEnd = silencedConsole.timeEnd;
+          console.timeStamp = silencedConsole.timeStamp;
         }
       } catch (error) {
         console.error('[Vision] Failed to initialize:', error);
