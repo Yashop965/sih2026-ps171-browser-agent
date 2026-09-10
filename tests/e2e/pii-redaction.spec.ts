@@ -4,13 +4,17 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('PII Detection and Redaction Verification', () => {
-  const baseURL = 'http://localhost:3000';
+  const baseURL = 'http://localhost:3000/e2e-test-page.html';
 
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
+    await page.waitForLoadState('networkidle');
   });
 
   test('should detect and redact all PII elements', async ({ page }) => {
+    await page.evaluate(() => window.switchTab('pii'));
+    await page.waitForTimeout(300);
+
     // Verify PII elements are visible before redaction
     await expect(page.locator('#pii-name')).toBeVisible();
     await expect(page.locator('#pii-aadhaar')).toContainText('1234 5678 9012');
@@ -38,18 +42,17 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should clear redactions and restore original content', async ({ page }) => {
+    await page.evaluate(() => window.switchTab('pii'));
+    await page.waitForTimeout(300);
+
     // Apply redaction
     await page.click('#redactBtn');
     await page.waitForTimeout(300);
-
-    // Verify redacted state
     await expect(page.locator('#pii-name')).toHaveClass('redacted');
 
     // Clear redaction
     await page.click('#clearRedactBtn');
     await page.waitForTimeout(300);
-
-    // Verify restoration
     await expect(page.locator('#pii-name')).not.toHaveClass('redacted');
     await expect(page.locator('#pii-name')).toContainText('Rajesh Kumar Sharma');
 
@@ -57,74 +60,67 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should preserve original data for re-redaction', async ({ page }) => {
+    await page.evaluate(() => window.switchTab('pii'));
+    await page.waitForTimeout(300);
+
     // First redaction
     await page.click('#redactBtn');
     await page.waitForTimeout(300);
-
     // Clear and re-apply
     await page.click('#clearRedactBtn');
     await page.waitForTimeout(300);
     await page.click('#redactBtn');
     await page.waitForTimeout(300);
 
-    // Verify still redacted after re-application
     await expect(page.locator('#pii-aadhaar')).toHaveClass('redacted');
     await expect(page.locator('#pii-aadhaar')).toContainText('***REDACTED***');
-
     console.log('[E2E PII] ✅ Re-redaction works correctly');
   });
 
   test('should detect face in image element', async ({ page }) => {
-    // Wait for face detection to run
+    await page.evaluate(() => window.switchTab('pii'));
     await page.waitForTimeout(1500);
-
-    // Check face detection result
     const faceResult = await page.locator('#faceDetected').textContent();
     expect(faceResult).toContain('Face detected');
-
     console.log('[E2E PII] ✅ Face detection triggered');
   });
 
   test('should verify PII selectors are valid', async ({ page }) => {
-    // Get all PII element selectors
+    await page.evaluate(() => window.switchTab('pii'));
+    await page.waitForTimeout(300);
     const selectors = ['#pii-name', '#pii-aadhaar', '#pii-pan', '#pii-email', '#pii-phone'];
-
     for (const selector of selectors) {
-      const element = page.locator(selector);
-      await expect(element).toBeAttached();
-      await expect(element).toBeVisible();
+      await expect(page.locator(selector)).toBeAttached();
+      await expect(page.locator(selector)).toBeVisible();
     }
-
     console.log('[E2E PII] ✅ All PII selectors valid');
   });
 
   test('should handle redaction on dynamic content', async ({ page }) => {
-    // Add new PII dynamically
+    await page.evaluate(() => window.switchTab('pii'));
+    await page.waitForTimeout(300);
     await page.evaluate(() => {
       const container = document.getElementById('pii-sample-1');
-      const newElement = document.createElement('span');
-      newElement.id = 'pii-dynamic';
-      newElement.textContent = 'DYNAMIC-AADHAAR-12345';
-      container.appendChild(newElement);
+      if (container) {
+        const newElement = document.createElement('span');
+        newElement.id = 'pii-dynamic';
+        newElement.textContent = 'DYNAMIC-AADHAAR-12345';
+        container.appendChild(newElement);
+      }
     });
-
-    // Verify new element exists
     await expect(page.locator('#pii-dynamic')).toBeVisible();
-
     console.log('[E2E PII] ✅ Dynamic PII element handled');
   });
 
   test('should verify redaction CSS classes applied correctly', async ({ page }) => {
-    // Apply redaction
+    await page.evaluate(() => window.switchTab('pii'));
+    await page.waitForTimeout(300);
     await page.click('#redactBtn');
     await page.waitForTimeout(300);
-
-    // Check each redacted element has the correct class
     const elements = ['#pii-name', '#pii-aadhaar', '#pii-pan', '#pii-email', '#pii-phone'];
     for (const el of elements) {
       await expect(page.locator(el)).toHaveClass(/redacted/);
     }
-
     console.log('[E2E PII] ✅ Redaction CSS classes verified');
   });
 });

@@ -1,6 +1,6 @@
 import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
-import { extract, getPageContext } from '../lib/dom';
+import { extract, getPageContext, maskLabel } from '../lib/dom';
 import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/actions';
 import { visionPipeline } from '../lib/vision/florence2';
 
