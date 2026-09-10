@@ -1,294 +1,323 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,初0.1">
-    <title>E2E Test - Multi-Scenario Page</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; margin-bottom: 20px; }
-        h2 { color: #555; margin: 20px 0 10px; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
-        input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-        input:focus, select:focus, textarea:focus { outline: none; border-color: #667eea; }
-        button { background: #667eea; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #5a67d8; }
-        .pii-sample { background: #fff3cd; padding: 15px; border-radius: 4px; margin: 10px 0; }
-        .redacted { background: #000; color: transparent; user-select: none; }
-        .face-overlay { position: fixed; backdrop-filter: blur(20px); background: rgba(0,0,0,0.2); z-index: 9999; }
-        #status { padding: 10px; margin: 10px 0; border-radius: 4px; }
-        #status.success { background: #d4edda; color: #155724; }
-        #status.error { background: #f8d7da; color: #721c24; }
-        .tab-content { display: none; padding: 20px; }
-        .tab-content.active { display: block; }
-        #screenshotCanvas { border: 1px solid #ccc; max-width: 100%; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E2E Test Page - Browser Agent</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 30px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 10px;
+    }
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #ddd;
+    }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      border: 1px solid #ddd;
+      border-bottom: none;
+      border-radius: 4px 4px 0 0;
+      background: #f8f9fa;
+    }
+    .tab.active {
+      background: white;
+      border-bottom: 1px solid white;
+      margin-bottom: -1px;
+    }
+    .tab-content {
+      display: none;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 0 0 4px 4px;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #007bff;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    #status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 4px;
+      display: none;
+    }
+    #status.success {
+      background: #d4edda;
+      color: #155724;
+      display: block;
+    }
+    #status.error {
+      background: #f8d7da;
+      color: #721c24;
+      display: block;
+    }
+    .pii-sample {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+    .error-btn {
+      background: #dc3545;
+      margin-right: 10px;
+    }
+    .error-btn:hover {
+      background: #c82333;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🧪 E2E Test Page</h1>
-        
-        <!-- Tabs -->
-        <div>
-            <button onclick="switchTab('form')" id="tab-form">Form Test</button>
-            <button onclick="switchTab('pii')" id="tab-pii">PII Redaction</button>
-            <button onclick="switchTab('vision')" id="tab-vision">Vision Pipeline</button>
-            <button onclick="switchTab('error')" id="tab-error">Error Handling</button>
-        </div>
-        <hr>
-        
-        <!-- Form Tab -->
-        <div id="tab-form" class="tab-content active">
-            <h2>User Registration Form</h2>
-            <form id="registrationForm">
-                <div class="form-group">
-                    <label for="name">Full Name:</label>
-                    <input type="text" id="name" name="name" placeholder="John Doe">
-                </div>
-                <div class="form-group">
-                    <label for="email">Email:</label>
-                    <input type="email" id="email" name="email" placeholder="john@example.com">
-                </div>
-                <div class="form-group">
-                    <label for="phone">Phone:</label>
-                    <input type="tel" id="phone" name="phone" placeholder="+91 9876543210">
-                </div>
-                <div class="form-group">
-                    <label for="aadhaar">Aadhaar Number:</label>
-                    <input type="text" id="aadhaar" name="aadhaar" placeholder="XXXX XXXX XXXX">
-                </div>
-                <div class="form-group">
-                    <label for="pan">PAN Number:</label>
-                    <input type="text" id="pan" name="pan" placeholder="ABCDE1234F">
-                </div>
-                <div class="form-group">
-                    <label for="password">Password:</label>
-                    <input type="password" id="password" name="password" placeholder="SecurePass123!">
-                </div>
-                <div class="form-group">
-                    <label for="country">Country:</label>
-                    <select id="country" name="country">
-                        <option value="">Select Country</option>
-                        <option value="in">India</option>
-                        <option value="us">United States</option>
-                        <option value="uk">United Kingdom</option>
-                    </select>
-                </div>
-                <button type="submit">Submit Form</button>
-            </form>
-            <div id="formStatus"></div>
-        </div>
-        
-        <!-- PII Tab -->
-        <div id="tab-pii" class="tab-content">
-            <h2>PII Redaction Test</h2>
-            <div class="pii-sample" id="pii-sample-1">
-                <strong>Sample Data with PII:</strong><br>
-                Name: <span id="pii-name">Rajesh Kumar Sharma</span><br>
-                Aadhaar: <span id="pii-aadhaar">1234 5678 9012</span><br>
-                PAN: <span id="pii-pan">ABCDE1234F</span><br>
-                Email: <span id="pii-email">rajesh@example.com</span><br>
-                Phone: <span id="pii-phone">+91 9876543210</span>
-            </div>
-            <button id="redactBtn" onclick="runRedaction()">Redact All PII</button>
-            <button id="clearRedactBtn" onclick="clearRedaction()" style="margin-left: 10px;">Clear Redaction</button>
-            <div id="piiStatus"></div>
-            
-            <h3>Face Detection Demo</h3>
-            <img id="testFace" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%23ddd'/%3E%3Ccircle cx='35' cy='40' r='5' fill='%23333'/%3E%3Ccircle cx='65' cy='40' r='5' fill='%23333'/%3E%3Cpath d='M 30 60 Q 50 75 70 60' stroke='%23333' fill='none' stroke-width='3'/%3E%3C/svg%3E" alt="user profile avatar">
-            <p id="faceDetected"></p>
-        </div>
-        
-        <!-- Vision Tab -->
-        <div id="tab-vision" class="tab-content">
-            <h2>Vision Pipeline Test</h2>
-            <div>
-                <button id="captureBtn" onclick="captureScreenshot()">Capture Screenshot</button>
-                <button id="processBtn" onclick="processVision()" style="margin-left: 10px;">Process Vision</button>
-                <button id="resetBtn" onclick="resetVision()" style="margin-left: 10px;">Reset</button>
-            </div>
-            <canvas id="screenshotCanvas" width="400" height="300" style="display: none;"></canvas>
-            <div id="visionResults"></div>
-            <div id="visionPipelineLog" style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto;"></div>
-        </div>
-        
-        <!-- Error Tab -->
-        <div id="tab-error" class="tab-content">
-            <h2>Error Handling Test</h2>
-            <button id="throwErrorBtn" onclick="throwTestError()">Throw Test Error</button>
-            <button id="networkErrorBtn" onclick="simulateNetworkError()" style="margin-left: 10px;">Simulate Network Error</button>
-            <button id="emptyResponseBtn" onclick="simulateEmptyResponse()" style="margin-left: 10px;">Simulate Empty Response</button>
-            <button id="timeoutBtn" onclick="simulateTimeout()" style="margin-left: 10px;">Simulate Timeout</button>
-            <div id="errorLog" style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; font-family: monospace; font-size: 13px;"></div>
-            <div id="recoveryStatus" style="margin-top: 15px;"></div>
-        </div>
+  <div class="container">
+    <h1>Browser Agent E2E Test Page</h1>
+    <p>Use this page to test the browser agent's form filling, PII detection, and error handling capabilities.</p>
+
+    <div class="tabs">
+      <div class="tab active" id="tab-form" onclick="switchTab('form')">Form Filling</div>
+      <div class="tab" id="tab-pii" onclick="switchTab('pii')">PII Detection</div>
+      <div class="tab" id="tab-error" onclick="switchTab('error')">Error Handling</div>
     </div>
-    
-    <script>
-        // Tab switching
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('button').forEach(el => el.style.fontWeight = 'normal');
-            document.getElementById('tab-' + tabId).classList.add('active');
-            document.getElementById('tab-' + tabId).fontWight = 'bold';
+
+    <!-- Form Filling Tab -->
+    <div class="tab-content active" id="content-form">
+      <h2>Registration Form</h2>
+      <form id="testForm" onsubmit="handleSubmit(event)">
+        <div class="form-group">
+          <label for="name">Full Name</label>
+          <input type="text" id="name" name="name" placeholder="Enter your full name" />
+        </div>
+        <div class="form-group">
+          <label for="email">Email Address</label>
+          <input type="email" id="email" name="email" placeholder="Enter email" />
+        </div>
+        <div class="form-group">
+          <label for="phone">Phone Number</label>
+          <input type="tel" id="phone" name="phone" placeholder="Enter phone" />
+        </div>
+        <div class="form-group">
+          <label for="aadhaar">Aadhaar Number</label>
+          <input type="text" id="aadhaar" name="aadhaar" placeholder="Enter 12-digit Aadhaar" />
+        </div>
+        <div class="form-group">
+          <label for="pan">PAN Number</label>
+          <input type="text" id="pan" name="pan" placeholder="Enter PAN number" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="Create password" />
+        </div>
+        <button type="submit">Submit Form</button>
+      </form>
+      <div id="formStatus"></div>
+    </div>
+
+    <!-- PII Detection Tab -->
+    <div class="tab-content" id="content-pii">
+      <h2>PII Detection Test</h2>
+      <p>This page contains various PII elements for testing detection.</p>
+
+      <div class="pii-sample">
+        <strong>Sample Aadhaar:</strong> 400315978506<br>
+        <strong>Sample PAN:</strong> AABCA1234D<br>
+        <strong>Sample Card:</strong> 4111111111111111<br>
+        <strong>Sample Email:</strong> test@example.com<br>
+        <strong>Sample Phone:</strong> 9876543210
+      </div>
+
+      <div class="form-group">
+        <label>Enter PII to test detection:</label>
+        <input type="text" id="piiInput" placeholder="Type any PII (Aadhaar, PAN, etc.)" />
+      </div>
+
+      <button onclick="detectPII()">Detect PII</button>
+      <button id="redactBtn" onclick="applyRedaction()" style="margin-left: 10px; background: #28a745;">Apply Redaction</button>
+      <button onclick="clearRedaction()" style="margin-left: 10px; background: #6c757d;">Clear Redaction</button>
+
+      <div id="piiResult" style="margin-top: 20px;"></div>
+    </div>
+
+    <!-- Error Handling Tab -->
+    <div class="tab-content" id="content-error">
+      <h2>Error Handling Tests</h2>
+      <p>Test how the agent handles various error scenarios.</p>
+
+      <button class="error-btn" onclick="throwError()">Throw JavaScript Error</button>
+      <button class="error-btn" onclick="simulateNetworkError()" style="margin-left: 10px;">Simulate Network Error</button>
+      <button class="error-btn" onclick="simulateTimeout()" style="margin-left: 10px;">Simulate Timeout</button>
+
+      <div id="errorLog" style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; max-height: 300px; overflow-y: auto;"></div>
+    </div>
+  </div>
+
+  <script>
+    // Global state
+    window.visitCount = 0;
+    window.sessionStart = Date.now();
+    window.errorLog = [];
+
+    // Increment visit count
+    window.visitCount++;
+
+    // Tab switching
+    function switchTab(tabName) {
+      // Hide all content
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+      // Show selected
+      document.getElementById(`content-${tabName}`).classList.add('active');
+      document.getElementById(`tab-${tabName}`).classList.add('active');
+    }
+
+    // Form submission
+    function handleSubmit(event) {
+      event.preventDefault();
+      const status = document.getElementById('formStatus');
+      status.className = 'success';
+      status.textContent = 'Form submitted successfully!';
+      status.style.display = 'block';
+    }
+
+    // PII Detection
+    function detectPII() {
+      const input = document.getElementById('piiInput').value;
+      const result = document.getElementById('piiResult');
+
+      if (!input) {
+        result.innerHTML = '<p style="color: red;">Please enter some text to analyze</p>';
+        return;
+      }
+
+      const piiPatterns = {
+        'Aadhaar': /\d{12}/,
+        'PAN': /[A-Z]{5}\d{4}[A-Z]{1}/,
+        'Email': /[^@\s]+@[^@\s]+\.[^@\s]+/,
+        'Phone': /\+?[1-9]\d{10}/,
+        'Credit Card': /\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}/,
+      };
+
+      let detected = [];
+      for (const [type, regex] of Object.entries(piiPatterns)) {
+        if (regex.test(input)) {
+          detected.push(type);
         }
-        
-        // Form handling
-        document.getElementById('registrationForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const status = document.getElementById('formStatus');
-            status.textContent = 'Form submitted successfully!';
-            status.className = 'success';
-            console.log('Form data captured:', Object.fromEntries(new FormData(this)));
-        });
-        
-        // PII Redaction
-        function runRedaction() {
-            const elements = ['pii-name', 'pii-aadhaar', 'pii-pan', 'pii-email', 'pii-phone'];
-            let redactedCount = 0;
-            elements.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) {
-                    el.classList.add('redacted');
-                    el.setAttribute('data-original', el.textContent);
-                    el.textContent = '***REDACTED***';
-                    redactedCount++;
-                }
-            });
-            document.getElementById('piiStatus').innerHTML = `<div class="success">✅ Redacted ${redactedCount} PII elements</div>`;
-            console.log('[PII] Redaction applied:', redactedCount, 'elements');
-        }
-        
-        function clearRedaction() {
-            document.querySelectorAll('.redacted').forEach(el => {
-                const original = el.getAttribute('data-original');
-                if (original) {
-                    el.textContent = original;
-                    el.classList.remove('redacted');
-                }
-            });
-            document.getElementById('piiStatus').innerHTML = '<div>🗑️ Redactions cleared</div>';
-        }
-        
-        // Face detection simulation
-        function detectFaces() {
-            const img = document.getElementById('testFace');
-            const result = document.getElementById('faceDetected');
-            if (img && result) {
-                result.textContent = '🔍 Face detection running...';
-                setTimeout(() => {
-                    result.textContent = '✅ Face detected in image (simulated)';
-                    console.log('[PII] Face detected in testImage');
-                }, 500);
-            }
-        }
-        
-        // Vision pipeline
-        let pipelineActive = false;
-        function captureScreenshot() {
-            const canvas = document.getElementById('screenshotCanvas');
-            const ctx = canvas.getContext('2d');
-            if (canvas && ctx) {
-                ctx.fillStyle = '#f0f0f0';
-                ctx.fillRect(0, 0, 400, 300);
-                ctx.fillStyle = '#333';
-                ctx.font = '16px Arial';
-                ctx.fillText('Screenshot Content', 50, 50);
-                ctx.fillText('Simulated Page Capture', 50, 80);
-                document.getElementById('visionResults').innerHTML = '<div class="success">✅ Screenshot captured (400x300)</div>';
-                console.log('[VISION] Screenshot captured');
-            }
-        }
-        
-        function processVision() {
-            if (pipelineActive) return;
-            pipelineActive = true;
-            const log = document.getElementById('visionPipelineLog');
-            log.innerHTML = '';
-            const steps = [
-                '[VISION] Initializing pipeline...',
-                '[VISION] Loading model weights...',
-                '[VISION] Running inference...',
-                '[VISION] Processing bounding boxes...',
-                '[VISION] Applying non-max suppression...',
-                '[VISION] Pipeline complete: 3 objects detected'
-            ];
-            let i = 0;
-            const interval = setInterval(() => {
-                if (i < steps.length) {
-                    log.innerHTML += steps[i] + '<br>';
-                    log.scrollTop = log.scrollHeight;
-                    i++;
-                } else {
-                    clearInterval(interval);
-                    pipelineActive = false;
-                    document.getElementById('visionResults').innerHTML = '<div class="success">✅ Vision pipeline processed: 3 objects detected</div>';
-                }
-            }, 300);
-        }
-        
-        function resetVision() {
-            pipelineActive = false;
-            document.getElementById('visionResults').innerHTML = '';
-            document.getElementById('visionPipelineLog').innerHTML = '';
-            const canvas = document.getElementById('screenshotCanvas');
-            canvas.style.display = 'none';
-        }
-        
-        // Error handling
-        function throwTestError() {
-            const log = document.getElementById('errorLog');
-            try {
-                throw new Error('Test error: Simulated exception');
-            } catch (e) {
-                log.innerHTML = `<div style="color: red;">❌ ${e.message}</div>`;
-                console.error('[ERROR]', e.message);
-            }
-        }
-        
-        function simulateNetworkError() {
-            const log = document.getElementById('errorLog');
-            log.innerHTML = '<div style="color: orange;">🌐 Simulating network error...</div>';
-            setTimeout(() => {
-                log.innerHTML += '<div style="color: red;">❌ Network Error: ECONNRESET - Connection refused</div>';
-                log.innerHTML += '<div style="color: green;">🔄 Recovery: Retrying with exponential backoff...</div>';
-                log.innerHTML += '<div style="color: green;">✅ Recovery: Request succeeded on retry #2</div>';
-                document.getElementById('recoveryStatus').textContent = 'Recovery successful after 2 retries';
-            }, 500);
-        }
-        
-        function simulateEmptyResponse() {
-            const log = document.getElementById('errorLog');
-            log.innerHTML = '<div style="color: orange;">📡 Simulating empty response...</div>';
-            setTimeout(() => {
-                log.innerHTML += '<div style="color: red;">❌ Empty response from server (null body)</div>';
-                log.innerHTML += '<div style="color: green;">🔄 Recovery: Using cached fallback data...</div>';
-                log.innerHTML += '<div style="color: green;">✅ Recovery: Fallback data loaded successfully</div>';
-                document.getElementById('recoveryStatus').textContent = 'Recovery: Used cached fallback';
-            }, 500);
-        }
-        
-        function simulateTimeout() {
-            const log = document.getElementById('errorLog');
-            log.innerHTML = '<div style="color: orange;">⏱️ Simulating timeout...</div>';
-            setTimeout(() => {
-                log.innerHTML += '<div style="color: red;">❌ Timeout Error: Request exceeded 30s limit</div>';
-                log.innerHTML += '<div style="color: green;">🔄 Recovery: Exponential backoff retry (1s → 2s → 4s)...</div>';
-                log.innerHTML += '<div style="color: green;">✅ Recovery: Request succeeded on 3rd attempt</div>';
-                document.getElementById('recoveryStatus').textContent = 'Recovery successful after 3 retries with backoff';
-            }, 500);
-        }
-        
-        // Initialize face detection
-        setTimeout(detectFaces, 1000);
-        
-        // Track page visits for session management
-        window.visitCount = (window.visitCount || 0) + 1;
-        window.sessionStart = Date.now();
-        console.log(`[SESSION] Page visited ${window.visitCount} times, started at ${new Date().toISOString()}`);
-    </script>
+      }
+
+      if (detected.length > 0) {
+        result.innerHTML = `<p style="color: green;">✅ Detected PII types: ${detected.join(', ')}</p>`;
+      } else {
+        result.innerHTML = '<p style="color: orange;">⚠️ No PII detected in the input</p>';
+      }
+    }
+
+    // Redaction
+    function applyRedaction() {
+      const piiInput = document.getElementById('piiInput');
+      const originalValue = piiInput.value;
+
+      // Store original for potential restoration
+      piiInput.dataset.original = originalValue;
+
+      // Apply redaction (mask with asterisks)
+      piiInput.value = '•'.repeat(originalValue.length);
+
+      const result = document.getElementById('piiResult');
+      result.innerHTML = '<p style="color: blue;">🔒 PII redacted (masked with asterisks)</p>';
+    }
+
+    function clearRedaction() {
+      const piiInput = document.getElementById('piiInput');
+      if (piiInput.dataset.original) {
+        piiInput.value = piiInput.dataset.original;
+        delete piiInput.dataset.original;
+      }
+      document.getElementById('piiResult').innerHTML = '';
+    }
+
+    // Error simulation
+    function throwError() {
+      logError('⚠️ Throwing JavaScript error...');
+      setTimeout(() => {
+        throw new Error('Simulated JavaScript error for testing');
+      }, 100);
+    }
+
+    function simulateNetworkError() {
+      logError('🌐 Simulating network error...');
+      // In a real test, this would intercept fetch/XMLHttpRequest
+      setTimeout(() => {
+        logError('❌ Network error: Failed to fetch resource');
+      }, 500);
+    }
+
+    function simulateTimeout() {
+      logError('⏱️ Simulating timeout...');
+      setTimeout(() => {
+        logError('⏰ Request timed out after 30 seconds');
+      }, 30000);
+    }
+
+    function logError(message) {
+      const log = document.getElementById('errorLog');
+      const timestamp = new Date().toLocaleTimeString();
+      const entry = `[${timestamp}] ${message}<br>`;
+      log.innerHTML += entry;
+      log.scrollTop = log.scrollHeight;
+      window.errorLog.push({ timestamp, message });
+    }
+
+    // Track page interactions
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('[E2E Test Page] Loaded - Visit #' + window.visitCount);
+    });
+  </script>
 </body>
 </html>
