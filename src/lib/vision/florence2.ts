@@ -75,30 +75,29 @@ class Florence2Pipeline {
       try {
         const { pipeline, env } = await import('@huggingface/transformers');
 
-        // Configure environment
+        // Configure environment - suppress ALL logging
         env.allowLocalModels = false;
         env.useBrowserCache = true;
-        env.logLevel = 'error'; // Suppress verbose logging
+        env.logLevel = 'error'; // Only show errors
 
-        // Set dtype based on config
-        const dtypeMap = { 'fp32': 'fp32', 'fp16': 'fp16', 'q4': 'q4' } as const;
-        const selectedDtype = dtypeMap[config.dtype];
+        // Suppress console output from ONNX Runtime
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        console.log = () => {};
+        console.warn = () => {};
 
-        // Detect WebGPU support
-        const webgpuSupported = Florence2Pipeline.isWebGPUSupported();
-        const backend = config.backend === 'webgpu' && webgpuSupported
-          ? 'webgpu'
-          : 'wasm';
+        try {
+          this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
+            device: backend === 'webgpu' ? 'webgpu' : 'wasm',
+            dtype: selectedDtype,
+          });
 
-        this.usingWebGPU = backend === 'webgpu';
-        // Suppress verbose logging - only show errors
-
-        this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
-          device: backend === 'webgpu' ? 'webgpu' : 'wasm',
-          dtype: selectedDtype,
-        });
-
-        this.initialized = true;
+          this.initialized = true;
+        } finally {
+          // Restore console methods
+          console.log = originalLog;
+          console.warn = originalWarn;
+        }
       } catch (error) {
         console.error('[Vision] Failed to initialize:', error);
         throw error;
