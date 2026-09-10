@@ -36,9 +36,7 @@ describe('ProfileManager', () => {
       email: 'test@example.com',
       phone: '+919****3210',
       preferences: { theme: 'dark' },
-      consentGiven: true,
-      consentedAt: Date.now(),
-    });
+    }, true); // explicitConsent = true
 
     const profile = await pm.getProfile();
     expect(profile).toBeTruthy();
@@ -51,7 +49,7 @@ describe('ProfileManager', () => {
     const pm = ProfileManager.getInstance();
 
     // Save without consent
-    mockStorage.set('userProfile', {
+    mockStorage.set('profile', {
       name: 'Test',
       consentGiven: false,
       consentedAt: null,
@@ -65,7 +63,7 @@ describe('ProfileManager', () => {
     const { ProfileManager } = await import('../src/lib/context');
     const pm = ProfileManager.getInstance();
 
-    mockStorage.set('userProfile', {
+    mockStorage.set('profile', {
       name: 'Test',
       consentGiven: true,
       consentedAt: Date.now(),
@@ -113,8 +111,9 @@ describe('AutofillManager', () => {
       confidence: 0.8,
     });
 
-    const patterns = await am.getPatternsForSite('https://example.com/forms');
-    expect(patterns.length).toBeGreaterThanOrEqual(1);
+    // Test getting all patterns
+    const patterns = await am.getPatterns();
+    expect(patterns.length).toBeGreaterThanOrEqual(2);
   });
 });
 
