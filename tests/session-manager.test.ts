@@ -7,7 +7,10 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('wxt/browser', () => ({
   browser: {
     tabs: {
-      onUpdated: { addListener: vi.fn() },
+      onUpdated: {
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+      },
       onRemoved: { addListener: vi.fn() },
       query: vi.fn(),
       get: vi.fn(),

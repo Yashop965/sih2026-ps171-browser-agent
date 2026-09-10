@@ -46,8 +46,12 @@ export default defineContentScript({
             const a11yTree = buildAccessibilityTree(document.documentElement);
             const interactiveElements = captureInteractiveElements();
 
+            // Sanitize URL to remove query params that may contain PII
+            const url = new URL(window.location.href);
+            url.search = '';
+
             return {
-                url: window.location.href,
+                url: url.toString(),
                 title: document.title,
                 timestamp: Date.now(),
                 // SECURITY: Never send raw HTML — it contains user input (passwords, Aadhaar, PAN)

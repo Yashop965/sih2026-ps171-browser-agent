@@ -53,6 +53,8 @@ export interface SessionContext {
 export class SessionManager {
   private sessions = new Map<string, SessionState>();
   private contextMap = new Map<string, SessionContext>();
+  // Track tab listeners to enable cleanup on session completion
+  private tabListeners = new Map<number, (tabId: number, changeInfo: any) => void>();
   private readonly MAX_SESSIONS = 50;
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -99,12 +101,14 @@ export class SessionManager {
     this.sessions.set(sessionId, session);
     this.contextMap.set(sessionId, context);
 
-    // Listen for tab updates
-    browser.tabs.onUpdated.addListener((updatedTabId) => {
+    // Listen for tab updates - store reference for cleanup
+    const tabListener = (updatedTabId: number, changeInfo: any) => {
       if (updatedTabId === tabId) {
         this.handleTabUpdate(sessionId, updatedTabId);
       }
-    });
+    };
+    browser.tabs.onUpdated.addListener(tabListener);
+    this.tabListeners.set(tabId, tabListener);
 
     console.log(`[SessionManager] Started session ${sessionId} for tab ${tabId}`);
     return sessionId;
@@ -183,6 +187,9 @@ export class SessionManager {
       session.history.push({ url: '[completed]', timestamp: Date.now(), action: summary });
     }
 
+    // Clean up tab listener to prevent memory leak
+    this.removeTabListener(session.tabId);
+
     console.log(`[SessionManager] Completed session ${sessionId}`);
   }
 
@@ -195,6 +202,7 @@ export class SessionManager {
 
     session.status = 'failed';
     session.lastActivity = Date.now();
+    this.removeTabListener(session.tabId);
 
     if (reason) {
       session.history.push({ url: '[failed]', timestamp: Date.now(), action: reason });
@@ -303,16 +311,20 @@ export class SessionManager {
     for (const id of stale) {
       this.sessions.delete(id);
       this.contextMap.delete(id);
+      this.tabListeners.delete(id);
       console.log(`[SessionManager] Pruned stale session ${id}`);
     }
   }
 
   /**
-   * Unregister tab listener for a session (call on complete/fail)
+   * Remove tab listener for a session to prevent memory leak
    */
-  unregisterTabListener(tabId: number): void {
-    // Note: browser.tabs.onUpdated doesn't support removeListener in WXT
-    // The listener closure will be garbage collected when session is pruned
+  private removeTabListener(tabId: number): void {
+    const listener = this.tabListeners.get(tabId);
+    if (listener) {
+      browser.tabs.onUpdated.removeListener(listener);
+      this.tabListeners.delete(tabId);
+    }
   }
 
   /**
