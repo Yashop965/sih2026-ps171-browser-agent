@@ -150,25 +150,33 @@ export class PIIManager {
     const numericMatches = text.match(/\d+/g);
     if (numericMatches && numericMatches.length > 2) {
       const numericRatio = numericMatches.join('').length / text.length;
-      if (numericRatio > 0.5 && text.length < 50) {
+      if (numericRatio > 0.7 && text.length < 50) {
         // Skip text that's mostly numbers and short (likely prices/codes)
         return;
       }
     }
 
-    // Skip if in a table cell without context
+    // Skip if in a table cell without context (but allow if it has labels)
     const tagName = element.tagName.toLowerCase();
-    if (tagName === 'td' || tagName === 'th') {
-      // Only scan table cells if they contain email addresses (most common PII in tables)
-      const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-      if (!emailPattern.test(text)) {
-        return;
+    if ((tagName === 'td' || tagName === 'th') && element.parentElement) {
+      const parent = element.parentElement;
+      const parentTag = parent.tagName.toLowerCase();
+      // Only skip if parent is a plain table (not a form or specific context)
+      if (parentTag === 'table' && !parent.getAttribute('data-pii-context')) {
+        // Check if cell has any text that looks like PII context
+        const cellText = element.textContent?.toLowerCase() || '';
+        const hasPIIContext = /phone|mobile|number|contact|email|address/i.test(cellText);
+        if (!hasPIIContext) {
+          return;
+        }
       }
     }
 
     const patterns: [RegExp, PIIType, number][] = [
       [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
       [/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
+      [/(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})/g, 'CREDIT_CARD', 0.7],
+      [/([+]?[1-9][\d]{10,12})/g, 'PHONE', 0.6],
     ];
 
     for (const pattern of patterns) {
