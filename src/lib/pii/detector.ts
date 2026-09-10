@@ -119,8 +119,8 @@ export class PIIManager {
     });
 
     // 2. Text content scanning - ONLY in specific contexts
-    // Scan labels, headings, and paragraphs but NOT table cells by default
-    document.querySelectorAll('label, h1, h2, h3, h4, h5, h6, p, strong, b, em').forEach(el => {
+    // Scan labels, headings, paragraphs, spans, and divs but NOT table cells by default
+    document.querySelectorAll('label, h1, h2, h3, h4, h5, h6, p, strong, b, em, span, div').forEach(el => {
       const text = el.textContent || '';
       if (text.length > 10 && text.length < 500) { // Only scan reasonable length text
         this.scanTextContent(el, text);
