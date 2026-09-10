@@ -118,10 +118,13 @@ export class PIIManager {
       }
     });
 
-    // 2. Text content scanning
-    document.querySelectorAll('div, span, p, td, th, label, strong, b').forEach(el => {
+    // 2. Text content scanning - ONLY in specific contexts
+    // Scan labels, headings, and paragraphs but NOT table cells by default
+    document.querySelectorAll('label, h1, h2, h3, h4, h5, h6, p, strong, b, em').forEach(el => {
       const text = el.textContent || '';
-      this.scanTextContent(el, text);
+      if (text.length > 10 && text.length < 500) { // Only scan reasonable length text
+        this.scanTextContent(el, text);
+      }
     });
 
     // Only scan actual input/select/textarea elements, not text content
@@ -143,14 +146,29 @@ export class PIIManager {
   }
 
   private scanTextContent(element: Element, text: string): void {
+    // Skip if text is mostly numeric (likely prices, codes, etc.)
+    const numericMatches = text.match(/\d+/g);
+    if (numericMatches && numericMatches.length > 2) {
+      const numericRatio = numericMatches.join('').length / text.length;
+      if (numericRatio > 0.5 && text.length < 50) {
+        // Skip text that's mostly numbers and short (likely prices/codes)
+        return;
+      }
+    }
+
+    // Skip if in a table cell without context
+    const tagName = element.tagName.toLowerCase();
+    if (tagName === 'td' || tagName === 'th') {
+      // Only scan table cells if they contain email addresses (most common PII in tables)
+      const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+      if (!emailPattern.test(text)) {
+        return;
+      }
+    }
+
     const patterns: [RegExp, PIIType, number][] = [
-      [/(\d{4}\s?\d{4}\s?\d{4})/g, 'AADHAAR', 0.7],
       [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
-      [/(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})/g, 'CREDIT_CARD', 0.7],
-      [/^([A-Z]{4}0[A-Z0-9]{7})$/, 'IFSC', 0.85],
-      [/([+]?[\d\s-]{10,13})/g, 'PHONE', 0.6],
       [/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
-      [/(api[_-]?key|apikey|access[_-]?token)\s*[:=]\s*([^\s,;]+)/gi, 'API_KEY', 0.8],
     ];
 
     for (const pattern of patterns) {
