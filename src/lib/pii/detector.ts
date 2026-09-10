@@ -201,7 +201,8 @@ export class PIIManager {
         };
         
         this.detections.push(detection);
-        this.verifyPII(detection, match[1]);
+        // Pass full value for verification (regex doesn't use capture groups)
+        this.verifyPII(detection, value);
       }
     }
   }
