@@ -124,9 +124,10 @@ export class PIIManager {
       this.scanTextContent(el, text);
     });
 
-    // 3. Input values (non-password)
-    document.querySelectorAll('input:not([type="password"])').forEach(el => {
-      const input = el as HTMLInputElement;
+    // Only scan actual input/select/textarea elements, not text content
+    const interactiveElements = document.querySelectorAll('input:not([type="hidden"]), select, textarea');
+    interactiveElements.forEach(el => {
+      const input = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
       if (input.value) {
         this.scanValue(input, input.value);
       }
@@ -179,6 +180,16 @@ export class PIIManager {
   }
 
   private scanValue(element: Element, value: string): void {
+    // Skip if in price/cost context
+    const selector = this.getElementSelector(element).toLowerCase();
+    const parentLabels = this.getParentLabels(element).toLowerCase();
+
+    // Don't flag if field name suggests it's not PII
+    const nonPIIPatterns = ['price', 'cost', 'amount', 'fee', 'charge', 'rate', 'discount', 'coupon', 'pincode', 'zipcode', 'postal'];
+    if (nonPIIPatterns.some(pattern => selector.includes(pattern) || parentLabels.includes(pattern))) {
+      return;
+    }
+
     const checks: Array<[RegExp, PIIType, number]> = [
       [/^\d{12}$/, 'AADHAAR', 0.7],
       [/^[A-Z]{5}\d{4}[A-Z]{1}$/, 'PAN', 0.8],
@@ -321,18 +332,50 @@ export class PIIManager {
     return hasSpecial && strength >= 2 && value.length >= 8;
   }
 
+  /**
+   * Get parent labels/context to determine if element is in a non-PII area
+   */
+  private getParentLabels(element: Element): string {
+    let parent = element.parentElement;
+    let labels = '';
+    let depth = 0;
+    while (parent && depth < 3) {
+      labels += (parent.textContent || '').toLowerCase() + ' ';
+      labels += (parent.getAttribute('aria-label') || '').toLowerCase() + ' ';
+      labels += (parent.getAttribute('data-testid') || '').toLowerCase() + ' ';
+      parent = parent.parentElement;
+      depth++;
+    }
+    return labels;
+  }
+
   private getElementSelector(element: Element): string {
     if (element.id) return `#${element.id}`;
-    
+
+    // Check for form-associated elements first
+    const tagName = element.tagName.toLowerCase();
+    const name = element.getAttribute('name');
+    const type = element.getAttribute('type');
+
+    if (tagName === 'input' && name) {
+      return `input[name="${name}"]`;
+    }
+    if (tagName === 'input' && element.id) {
+      return `#${element.id}`;
+    }
+    if ((tagName === 'select' || tagName === 'textarea') && name) {
+      return `${tagName}[name="${name}"]`;
+    }
+
     const classes = element.className;
     if (classes && typeof classes === 'string') {
       const classList = classes.trim().split(/\s+/).slice(0, 2);
       if (classList.length > 0) {
-        return `${element.tagName.toLowerCase()}.${classList.join('.')}`;
+        return `${tagName}.${classList.join('.')}`;
       }
     }
-    
-    // Use XPath as fallback
+
+    // Use XPath as fallback - but prefer specific selectors
     let xpath = '';
     let sibling = element;
     while (sibling.parentNode) {
