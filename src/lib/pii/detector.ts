@@ -146,32 +146,6 @@ export class PIIManager {
   }
 
   private scanTextContent(element: Element, text: string): void {
-    // Skip if text is mostly numeric (likely prices, codes, etc.)
-    const numericMatches = text.match(/\d+/g);
-    if (numericMatches && numericMatches.length > 2) {
-      const numericRatio = numericMatches.join('').length / text.length;
-      if (numericRatio > 0.7 && text.length < 50) {
-        // Skip text that's mostly numbers and short (likely prices/codes)
-        return;
-      }
-    }
-
-    // Skip if in a table cell without context (but allow if it has labels)
-    const tagName = element.tagName.toLowerCase();
-    if ((tagName === 'td' || tagName === 'th') && element.parentElement) {
-      const parent = element.parentElement;
-      const parentTag = parent.tagName.toLowerCase();
-      // Only skip if parent is a plain table (not a form or specific context)
-      if (parentTag === 'table' && !parent.getAttribute('data-pii-context')) {
-        // Check if cell has any text that looks like PII context
-        const cellText = element.textContent?.toLowerCase() || '';
-        const hasPIIContext = /phone|mobile|number|contact|email|address/i.test(cellText);
-        if (!hasPIIContext) {
-          return;
-        }
-      }
-    }
-
     const patterns: [RegExp, PIIType, number][] = [
       [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
       [/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
@@ -193,12 +167,10 @@ export class PIIManager {
             selector: this.getElementSelector(element),
             confidence: baseConfidence,
             isVerified: false,
-            redacted: false, // Will be set after verification
+            redacted: false,
           };
 
           this.detections.push(detection);
-
-          // Verify with checksum
           this.verifyPII(detection, match);
         }
       }
