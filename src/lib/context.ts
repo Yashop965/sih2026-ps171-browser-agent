@@ -13,6 +13,8 @@
  * server unless the user explicitly triggers an action that touches the data.
  */
 
+import { browser } from 'wxt/browser';
+
 // ─── Public Types ────────────────────────────────────────────────────────────
 
 export interface UserProfile {

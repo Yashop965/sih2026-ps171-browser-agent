@@ -1,7 +1,7 @@
 import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { extract, getPageContext } from '../lib/dom';
-import { executeWithRetry } from '../lib/actions';
+import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/actions';
 import { visionPipeline } from '../lib/vision/florence2';
 
 /**
@@ -271,7 +271,7 @@ export default defineContentScript({
         // Listen for messages from background script and the popup.
         // 'capturePage' is handled here rather than through a command
         // registration — WXT's ctx has no addCommand().
-        browser.runtime.onMessage.addListener((message: unknown) => {
+        browser.runtime.onMessage.addListener(async (message: unknown) => {
             if (!isAgentRequest(message)) return;
 
             if (message.type === 'EXTRACT') {
@@ -283,7 +283,14 @@ export default defineContentScript({
             }
 
             if (message.type === 'EXECUTE') {
-                return executeWithRetry(message.action);
+                // Use resilient execution with circuit breaker
+                const result = await executeWithResilience(message.action);
+                if (!result.ok && message.action.targetId !== undefined) {
+                    circuitBreaker.recordFailure(message.action.targetId);
+                } else if (result.ok && message.action.targetId !== undefined) {
+                    circuitBreaker.recordSuccess(message.action.targetId);
+                }
+                return result;
             }
 
             if (message.type === 'PING') {
