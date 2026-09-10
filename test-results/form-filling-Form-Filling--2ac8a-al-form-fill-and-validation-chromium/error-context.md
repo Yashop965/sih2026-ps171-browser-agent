@@ -7,7 +7,7 @@
 # Test info
 
 - Name: form-filling.spec.ts >> Form Filling Scenario >> should handle partial form fill and validation
-- Location: tests\e2e\form-filling.spec.ts:48:3
+- Location: tests\e2e\form-filling.spec.ts:53:3
 
 # Error details
 
@@ -16,9 +16,9 @@ Test timeout of 30000ms exceeded.
 ```
 
 ```
-Error: page.fill: Test timeout of 30000ms exceeded.
+Error: page.click: Test timeout of 30000ms exceeded.
 Call log:
-  - waiting for locator('#name')
+  - waiting for locator('#tab-form')
 
 ```
 
@@ -42,72 +42,89 @@ Call log:
   9  |   test.beforeEach(async ({ page }) => {
   10 |     await page.goto(baseURL);
   11 |     await page.waitForLoadState('networkidle');
-  12 |   });
-  13 | 
-  14 |   test('should fill and submit a registration form completely', async ({ page }) => {
-  15 |     // Fill all form fields
-  16 |     await page.fill('#name', 'Rajesh Kumar Sharma');
-  17 |     await expect(page.locator('#name')).toHaveValue('Rajesh Kumar Sharma');
-  18 | 
-  19 |     await page.fill('#email', 'rajesh.sharma@example.com');
-  20 |     await expect(page.locator('#email')).toHaveValue('rajesh.sharma@example.com');
-  21 | 
-  22 |     await page.fill('#phone', '+91 9876543210');
-  23 |     await expect(page.locator('#phone')).toHaveValue('+91 9876543210');
-  24 | 
-  25 |     await page.fill('#aadhaar', '1234 5678 9012');
-  26 |     await expect(page.locator('#aadhaar')).toHaveValue('1234 5678 9012');
-  27 | 
-  28 |     await page.fill('#pan', 'ABCDE1234F');
-  29 |     await expect(page.locator('#pan')).toHaveValue('ABCDE1234F');
-  30 | 
-  31 |     await page.fill('#password', 'SecurePass@123');
-  32 |     await expect(page.locator('#password')).toHaveAttribute('type', 'password');
-  33 | 
-  34 |     // Select dropdown
-  35 |     await page.selectOption('#country', 'in');
-  36 |     await expect(page.locator('#country')).toHaveValue('in');
-  37 | 
-  38 |     // Submit form
-  39 |     await page.click('button[type="submit"]');
-  40 | 
-  41 |     // Verify success message
-  42 |     await expect(page.locator('#formStatus')).toBeVisible();
-  43 |     await expect(page.locator('#formStatus')).toContainText('submitted successfully');
-  44 | 
-  45 |     console.log('[E2E FORM] ✅ Form filling scenario passed');
-  46 |   });
-  47 | 
-  48 |   test('should handle partial form fill and validation', async ({ page }) => {
-> 49 |     await page.fill('#name', 'Test User');
-     |                ^ Error: page.fill: Test timeout of 30000ms exceeded.
-  50 |     await page.fill('#email', 'test@example.com');
-  51 |     await page.click('button[type="submit"]');
-  52 |     await expect(page.locator('#formStatus')).toBeVisible();
-  53 |     console.log('[E2E FORM] ✅ Partial form validation passed');
-  54 |   });
-  55 | 
-  56 |   test('should preserve password field type during interaction', async ({ page }) => {
-  57 |     const passwordInput = page.locator('#password');
-  58 |     await expect(passwordInput).toHaveAttribute('type', 'password');
-  59 |     await passwordInput.fill('NewPassword123!');
-  60 |     await expect(passwordInput).toHaveAttribute('type', 'password');
-  61 |     console.log('[E2E FORM] ✅ Password field security preserved');
+  12 |     await page.waitForTimeout(500); // Extra wait for JS to execute
+  13 |   });
+  14 | 
+  15 |   test('should fill and submit a registration form completely', async ({ page }) => {
+  16 |     // Click form tab button
+  17 |     await page.click('#tab-form');
+  18 |     await page.waitForTimeout(300);
+  19 | 
+  20 |     // Fill all form fields
+  21 |     await page.fill('#name', 'Rajesh Kumar Sharma');
+  22 |     await expect(page.locator('#name')).toHaveValue('Rajesh Kumar Sharma');
+  23 | 
+  24 |     await page.fill('#email', 'rajesh.sharma@example.com');
+  25 |     await expect(page.locator('#email')).toHaveValue('rajesh.sharma@example.com');
+  26 | 
+  27 |     await page.fill('#phone', '+91 9876543210');
+  28 |     await expect(page.locator('#phone')).toHaveValue('+91 9876543210');
+  29 | 
+  30 |     await page.fill('#aadhaar', '1234 5678 9012');
+  31 |     await expect(page.locator('#aadhaar')).toHaveValue('1234 5678 9012');
+  32 | 
+  33 |     await page.fill('#pan', 'ABCDE1234F');
+  34 |     await expect(page.locator('#pan')).toHaveValue('ABCDE1234F');
+  35 | 
+  36 |     await page.fill('#password', 'SecurePass@123');
+  37 |     await expect(page.locator('#password')).toHaveAttribute('type', 'password');
+  38 | 
+  39 |     // Select dropdown
+  40 |     await page.selectOption('#country', 'in');
+  41 |     await expect(page.locator('#country')).toHaveValue('in');
+  42 | 
+  43 |     // Submit form
+  44 |     await page.click('button[type="submit"]');
+  45 | 
+  46 |     // Verify success message
+  47 |     await expect(page.locator('#formStatus')).toBeVisible();
+  48 |     await expect(page.locator('#formStatus')).toContainText('submitted successfully');
+  49 | 
+  50 |     console.log('[E2E FORM] ✅ Form filling scenario passed');
+  51 |   });
+  52 | 
+  53 |   test('should handle partial form fill and validation', async ({ page }) => {
+> 54 |     await page.click('#tab-form');
+     |                ^ Error: page.click: Test timeout of 30000ms exceeded.
+  55 |     await page.waitForTimeout(300);
+  56 | 
+  57 |     await page.fill('#name', 'Test User');
+  58 |     await page.fill('#email', 'test@example.com');
+  59 |     await page.click('button[type="submit"]');
+  60 |     await expect(page.locator('#formStatus')).toBeVisible();
+  61 |     console.log('[E2E FORM] ✅ Partial form validation passed');
   62 |   });
   63 | 
-  64 |   test('should handle special characters in form inputs', async ({ page }) => {
-  65 |     await page.fill('#name', "José García-O'Brien");
-  66 |     await page.fill('#email', 'jose.garcia+test@example.co.uk');
-  67 |     await expect(page.locator('#name')).toHaveValue("José García-O'Brien");
-  68 |     await expect(page.locator('#email')).toHaveValue('jose.garcia+test@example.co.uk');
-  69 |     console.log('[E2E FORM] ✅ Special characters handled correctly');
-  70 |   });
-  71 | 
-  72 |   test('should validate empty form submission', async ({ page }) => {
-  73 |     await page.click('button[type="submit"]');
-  74 |     await expect(page.locator('#formStatus')).toBeVisible();
-  75 |     console.log('[E2E FORM] ✅ Empty form submission handled');
-  76 |   });
-  77 | });
+  64 |   test('should preserve password field type during interaction', async ({ page }) => {
+  65 |     await page.click('#tab-form');
+  66 |     await page.waitForTimeout(300);
+  67 | 
+  68 |     const passwordInput = page.locator('#password');
+  69 |     await expect(passwordInput).toHaveAttribute('type', 'password');
+  70 |     await passwordInput.fill('NewPassword123!');
+  71 |     await expect(passwordInput).toHaveAttribute('type', 'password');
+  72 |     console.log('[E2E FORM] ✅ Password field security preserved');
+  73 |   });
+  74 | 
+  75 |   test('should handle special characters in form inputs', async ({ page }) => {
+  76 |     await page.click('#tab-form');
+  77 |     await page.waitForTimeout(300);
   78 | 
+  79 |     await page.fill('#name', "José García-O'Brien");
+  80 |     await page.fill('#email', 'jose.garcia+test@example.co.uk');
+  81 |     await expect(page.locator('#name')).toHaveValue("José García-O'Brien");
+  82 |     await expect(page.locator('#email')).toHaveValue('jose.garcia+test@example.co.uk');
+  83 |     console.log('[E2E FORM] ✅ Special characters handled correctly');
+  84 |   });
+  85 | 
+  86 |   test('should validate empty form submission', async ({ page }) => {
+  87 |     await page.click('#tab-form');
+  88 |     await page.waitForTimeout(300);
+  89 | 
+  90 |     await page.click('button[type="submit"]');
+  91 |     await expect(page.locator('#formStatus')).toBeVisible();
+  92 |     console.log('[E2E FORM] ✅ Empty form submission handled');
+  93 |   });
+  94 | });
+  95 | 
 ```

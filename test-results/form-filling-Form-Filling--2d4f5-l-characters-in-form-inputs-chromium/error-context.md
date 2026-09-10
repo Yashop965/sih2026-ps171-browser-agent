@@ -6,8 +6,8 @@
 
 # Test info
 
-- Name: form-filling.spec.ts >> Form Filling Scenario >> should preserve password field type during interaction
-- Location: tests\e2e\form-filling.spec.ts:64:3
+- Name: form-filling.spec.ts >> Form Filling Scenario >> should handle special characters in form inputs
+- Location: tests\e2e\form-filling.spec.ts:75:3
 
 # Error details
 
@@ -95,8 +95,7 @@ Call log:
   62 |   });
   63 | 
   64 |   test('should preserve password field type during interaction', async ({ page }) => {
-> 65 |     await page.click('#tab-form');
-     |                ^ Error: page.click: Test timeout of 30000ms exceeded.
+  65 |     await page.click('#tab-form');
   66 |     await page.waitForTimeout(300);
   67 | 
   68 |     const passwordInput = page.locator('#password');
@@ -107,7 +106,8 @@ Call log:
   73 |   });
   74 | 
   75 |   test('should handle special characters in form inputs', async ({ page }) => {
-  76 |     await page.click('#tab-form');
+> 76 |     await page.click('#tab-form');
+     |                ^ Error: page.click: Test timeout of 30000ms exceeded.
   77 |     await page.waitForTimeout(300);
   78 | 
   79 |     await page.fill('#name', "José García-O'Brien");

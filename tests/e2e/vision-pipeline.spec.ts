@@ -1,6 +1,5 @@
 /**
  * E2E Test 3: Vision Pipeline Trigger
- * Uses evaluate to bypass visibility constraints for testing
  */
 import { test, expect } from '@playwright/test';
 
@@ -10,11 +9,11 @@ test.describe('Vision Pipeline Trigger', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
   });
 
   test('should capture screenshot to canvas', async ({ page }) => {
-    // Navigate to vision tab via JS
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
 
     const canvas = page.locator('#screenshotCanvas');
@@ -30,7 +29,7 @@ test.describe('Vision Pipeline Trigger', () => {
   });
 
   test('should process vision pipeline and show results', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
     await page.click('#processBtn');
     await page.waitForTimeout(2500);
@@ -43,7 +42,7 @@ test.describe('Vision Pipeline Trigger', () => {
   });
 
   test('should prevent duplicate pipeline processing', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
     await page.click('#processBtn');
     await page.click('#processBtn');
@@ -57,7 +56,7 @@ test.describe('Vision Pipeline Trigger', () => {
   });
 
   test('should reset vision pipeline state', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
     await page.click('#captureBtn');
     await page.click('#processBtn');
@@ -75,7 +74,7 @@ test.describe('Vision Pipeline Trigger', () => {
   });
 
   test('should display pipeline log in monospace format', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
     await page.click('#processBtn');
     await page.waitForTimeout(2000);
@@ -88,7 +87,7 @@ test.describe('Vision Pipeline Trigger', () => {
   });
 
   test('should handle rapid button clicks gracefully', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
     await page.click('#captureBtn');
     await page.click('#processBtn');
@@ -103,7 +102,7 @@ test.describe('Vision Pipeline Trigger', () => {
   });
 
   test('should show canvas dimensions after capture', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(300);
     await page.click('#captureBtn');
     await page.waitForTimeout(300);

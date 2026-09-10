@@ -130,13 +130,13 @@
     </div>
     
     <script>
-        // Tab switching
-        function switchTab(tabId) {
+        // Tab switching - expose to window for Playwright
+        window.switchTab = function(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.btn-group button').forEach(el => el.style.fontWeight = 'normal');
             document.getElementById('tab-' + tabId).classList.add('active');
             document.getElementById('tab-' + tabId).style.fontWeight = 'bold';
-        }
+        };
         
         // Form handling
         document.getElementById('registrationForm').addEventListener('submit', function(e) {

@@ -9,25 +9,25 @@ test.describe('Session Management Across Tabs', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
   });
 
   test('should track session across multiple tab switches', async ({ page }) => {
     await expect(page.locator('h1')).toContainText('E2E Test Page');
 
-    // Use JS to switch tabs since CSS hides content
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await page.waitForTimeout(200);
     await expect(page.locator('#registrationForm')).toBeVisible();
 
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(200);
     await expect(page.locator('#pii-sample-1')).toBeVisible();
 
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.waitForTimeout(200);
     await expect(page.locator('#captureBtn')).toBeVisible();
 
-    await page.evaluate(() => window.switchTab('error'));
+    await page.click('#tab-error');
     await page.waitForTimeout(200);
     await expect(page.locator('#throwErrorBtn')).toBeVisible();
 
@@ -37,6 +37,7 @@ test.describe('Session Management Across Tabs', () => {
   test('should create new session on page reload', async ({ page }) => {
     await page.reload();
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
 
     await expect(page.locator('h1')).toContainText('E2E Test Page');
     await expect(page.locator('#registrationForm')).toBeVisible();
@@ -44,13 +45,13 @@ test.describe('Session Management Across Tabs', () => {
   });
 
   test('should maintain session state during navigation', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await page.fill('#name', 'Test User');
     await page.fill('#email', 'test@example.com');
 
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(200);
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await page.waitForTimeout(200);
 
     await expect(page.locator('#name')).toHaveValue('Test User');
@@ -59,16 +60,16 @@ test.describe('Session Management Across Tabs', () => {
   });
 
   test('should handle concurrent operations in different tabs', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await page.fill('#name', 'Concurrent User');
-    await page.evaluate(() => window.switchTab('vision'));
+    await page.click('#tab-vision');
     await page.click('#captureBtn');
     await page.waitForTimeout(500);
 
     const visionResult = await page.locator('#visionResults').textContent();
     expect(visionResult).toContain('Screenshot captured');
 
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await expect(page.locator('#name')).toHaveValue('Concurrent User');
     console.log('[E2E SESSION] ✅ Concurrent operations handled');
   });
@@ -77,14 +78,16 @@ test.describe('Session Management Across Tabs', () => {
     const page1 = await context.newPage();
     await page1.goto(baseURL);
     await page1.waitForLoadState('networkidle');
+    await page1.waitForTimeout(500);
 
     const page2 = await context.newPage();
     await page2.goto(baseURL);
     await page2.waitForLoadState('networkidle');
+    await page2.waitForTimeout(500);
 
-    await page1.evaluate(() => window.switchTab('form'));
+    await page1.click('#tab-form');
     await page1.fill('#name', 'Page 1 User');
-    await page2.evaluate(() => window.switchTab('form'));
+    await page2.click('#tab-form');
     await page2.fill('#name', 'Page 2 User');
 
     await expect(page1.locator('#name')).toHaveValue('Page 1 User');
@@ -97,7 +100,7 @@ test.describe('Session Management Across Tabs', () => {
 
   test('should update session timestamp on interaction', async ({ page }) => {
     const startTime = Date.now();
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await page.fill('#name', 'Active User');
     const interactionTime = Date.now();
     expect(interactionTime).toBeGreaterThan(startTime);

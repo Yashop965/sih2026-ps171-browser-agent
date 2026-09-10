@@ -9,6 +9,7 @@ test.describe('Error Resilience Testing', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
   });
 
   test('should handle thrown JavaScript errors gracefully', async ({ page }) => {
@@ -17,8 +18,8 @@ test.describe('Error Resilience Testing', () => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
     });
 
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     await page.click('#throwErrorBtn');
     await page.waitForTimeout(500);
 
@@ -30,8 +31,8 @@ test.describe('Error Resilience Testing', () => {
   });
 
   test('should simulate and recover from network errors', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     await page.click('#networkErrorBtn');
     await page.waitForTimeout(1000);
 
@@ -44,8 +45,8 @@ test.describe('Error Resilience Testing', () => {
   });
 
   test('should handle empty server responses', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     await page.click('#emptyResponseBtn');
     await page.waitForTimeout(1000);
 
@@ -57,8 +58,8 @@ test.describe('Error Resilience Testing', () => {
   });
 
   test('should handle request timeouts with exponential backoff', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     await page.click('#timeoutBtn');
     await page.waitForTimeout(1000);
 
@@ -70,8 +71,8 @@ test.describe('Error Resilience Testing', () => {
   });
 
   test('should maintain UI functionality after multiple errors', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     await page.click('#throwErrorBtn');
     await page.waitForTimeout(300);
     await page.click('#networkErrorBtn');
@@ -81,14 +82,14 @@ test.describe('Error Resilience Testing', () => {
 
     await expect(page.locator('#tab-error')).toBeVisible();
     await expect(page.locator('#errorLog')).toBeVisible();
-    await page.evaluate(() => window.switchTab('form'));
+    await page.click('#tab-form');
     await expect(page.locator('#tab-form')).toBeVisible();
     console.log('[E2E ERROR] ✅ UI remains functional after multiple errors');
   });
 
   test('should recover from async operation failures', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('vision'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-vision');
+    await page.waitForTimeout(300);
     await page.click('#processBtn');
     await page.waitForTimeout(2500);
 
@@ -98,8 +99,8 @@ test.describe('Error Resilience Testing', () => {
   });
 
   test('should handle rapid error injection', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     for (let i = 0; i < 5; i++) {
       await page.click('#throwErrorBtn');
       await page.waitForTimeout(100);
@@ -110,8 +111,8 @@ test.describe('Error Resilience Testing', () => {
   });
 
   test('should log all error events with timestamps', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('error'));
-    await page.waitForTimeout(200);
+    await page.click('#tab-error');
+    await page.waitForTimeout(300);
     await page.click('#networkErrorBtn');
     await page.waitForTimeout(1000);
 

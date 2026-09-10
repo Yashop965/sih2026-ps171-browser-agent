@@ -9,10 +9,11 @@ test.describe('PII Detection and Redaction Verification', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
   });
 
   test('should detect and redact all PII elements', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(300);
 
     // Verify PII elements are visible before redaction
@@ -42,7 +43,7 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should clear redactions and restore original content', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(300);
 
     // Apply redaction
@@ -60,7 +61,7 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should preserve original data for re-redaction', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(300);
 
     // First redaction
@@ -78,7 +79,7 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should detect face in image element', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(1500);
     const faceResult = await page.locator('#faceDetected').textContent();
     expect(faceResult).toContain('Face detected');
@@ -86,7 +87,7 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should verify PII selectors are valid', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(300);
     const selectors = ['#pii-name', '#pii-aadhaar', '#pii-pan', '#pii-email', '#pii-phone'];
     for (const selector of selectors) {
@@ -97,7 +98,7 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should handle redaction on dynamic content', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(300);
     await page.evaluate(() => {
       const container = document.getElementById('pii-sample-1');
@@ -113,7 +114,7 @@ test.describe('PII Detection and Redaction Verification', () => {
   });
 
   test('should verify redaction CSS classes applied correctly', async ({ page }) => {
-    await page.evaluate(() => window.switchTab('pii'));
+    await page.click('#tab-pii');
     await page.waitForTimeout(300);
     await page.click('#redactBtn');
     await page.waitForTimeout(300);

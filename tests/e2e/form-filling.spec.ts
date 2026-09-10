@@ -9,9 +9,14 @@ test.describe('Form Filling Scenario', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500); // Extra wait for JS to execute
   });
 
   test('should fill and submit a registration form completely', async ({ page }) => {
+    // Click form tab button
+    await page.click('#tab-form');
+    await page.waitForTimeout(300);
+
     // Fill all form fields
     await page.fill('#name', 'Rajesh Kumar Sharma');
     await expect(page.locator('#name')).toHaveValue('Rajesh Kumar Sharma');
@@ -46,6 +51,9 @@ test.describe('Form Filling Scenario', () => {
   });
 
   test('should handle partial form fill and validation', async ({ page }) => {
+    await page.click('#tab-form');
+    await page.waitForTimeout(300);
+
     await page.fill('#name', 'Test User');
     await page.fill('#email', 'test@example.com');
     await page.click('button[type="submit"]');
@@ -54,6 +62,9 @@ test.describe('Form Filling Scenario', () => {
   });
 
   test('should preserve password field type during interaction', async ({ page }) => {
+    await page.click('#tab-form');
+    await page.waitForTimeout(300);
+
     const passwordInput = page.locator('#password');
     await expect(passwordInput).toHaveAttribute('type', 'password');
     await passwordInput.fill('NewPassword123!');
@@ -62,6 +73,9 @@ test.describe('Form Filling Scenario', () => {
   });
 
   test('should handle special characters in form inputs', async ({ page }) => {
+    await page.click('#tab-form');
+    await page.waitForTimeout(300);
+
     await page.fill('#name', "José García-O'Brien");
     await page.fill('#email', 'jose.garcia+test@example.co.uk');
     await expect(page.locator('#name')).toHaveValue("José García-O'Brien");
@@ -70,6 +84,9 @@ test.describe('Form Filling Scenario', () => {
   });
 
   test('should validate empty form submission', async ({ page }) => {
+    await page.click('#tab-form');
+    await page.waitForTimeout(300);
+
     await page.click('button[type="submit"]');
     await expect(page.locator('#formStatus')).toBeVisible();
     console.log('[E2E FORM] ✅ Empty form submission handled');

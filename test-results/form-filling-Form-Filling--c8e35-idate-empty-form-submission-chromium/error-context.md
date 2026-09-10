@@ -6,8 +6,8 @@
 
 # Test info
 
-- Name: form-filling.spec.ts >> Form Filling Scenario >> should preserve password field type during interaction
-- Location: tests\e2e\form-filling.spec.ts:64:3
+- Name: form-filling.spec.ts >> Form Filling Scenario >> should validate empty form submission
+- Location: tests\e2e\form-filling.spec.ts:86:3
 
 # Error details
 
@@ -95,8 +95,7 @@ Call log:
   62 |   });
   63 | 
   64 |   test('should preserve password field type during interaction', async ({ page }) => {
-> 65 |     await page.click('#tab-form');
-     |                ^ Error: page.click: Test timeout of 30000ms exceeded.
+  65 |     await page.click('#tab-form');
   66 |     await page.waitForTimeout(300);
   67 | 
   68 |     const passwordInput = page.locator('#password');
@@ -118,7 +117,8 @@ Call log:
   84 |   });
   85 | 
   86 |   test('should validate empty form submission', async ({ page }) => {
-  87 |     await page.click('#tab-form');
+> 87 |     await page.click('#tab-form');
+     |                ^ Error: page.click: Test timeout of 30000ms exceeded.
   88 |     await page.waitForTimeout(300);
   89 | 
   90 |     await page.click('button[type="submit"]');

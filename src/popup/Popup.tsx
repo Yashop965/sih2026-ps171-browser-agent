@@ -18,13 +18,21 @@ function Popup() {
   const [serverLatency, setServerLatency] = useState<number>(0);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
 
-  // Load saved provider config from browser.storage (compatible with Chrome & Firefox)
+  // Load saved state from browser.storage
   useEffect(() => {
-    browser.storage.local.get(['providerKey', 'apiKey']).then((result) => {
+    browser.storage.local.get(['task', 'providerKey', 'apiKey']).then((result) => {
+      if (result.task) setTask(result.task);
       if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
       if (result.apiKey) setProviderKey(result.apiKey);
     });
   }, []);
+
+  // Save task to browser.storage whenever it changes
+  useEffect(() => {
+    if (task) {
+      browser.storage.local.set({ task });
+    }
+  }, [task]);
 
   // Health check function
   const checkHealth = useCallback(async () => {
