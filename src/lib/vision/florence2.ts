@@ -80,11 +80,13 @@ class Florence2Pipeline {
         env.useBrowserCache = true;
         env.logLevel = 'error'; // Only show errors
 
-        // Suppress console output from ONNX Runtime
+        // Suppress console output from ONNX Runtime during initialization
         const originalLog = console.log;
         const originalWarn = console.warn;
+        const originalError = console.error;
         console.log = () => {};
         console.warn = () => {};
+        console.error = () => {};
 
         try {
           this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
@@ -97,6 +99,7 @@ class Florence2Pipeline {
           // Restore console methods
           console.log = originalLog;
           console.warn = originalWarn;
+          console.error = originalError;
         }
       } catch (error) {
         console.error('[Vision] Failed to initialize:', error);
