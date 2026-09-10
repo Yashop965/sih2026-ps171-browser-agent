@@ -42,7 +42,7 @@ export type PIIType =
 export class PIIManager {
   private static instance: PIIManager;
   private detections: PIIDetection[] = [];
-  private faceDetector: FaceDetector | null = null;
+  private faceDetector: any = null; // Use any for FaceDetector API
 
   static getInstance(): PIIManager {
     if (!PIIManager.instance) {
@@ -125,7 +125,8 @@ export class PIIManager {
     });
 
     // 3. Input values (non-password)
-    document.querySelectorAll('input:not([type="password"])').forEach(input => {
+    document.querySelectorAll('input:not([type="password"])').forEach(el => {
+      const input = el as HTMLInputElement;
       if (input.value) {
         this.scanValue(input, input.value);
       }
@@ -159,7 +160,6 @@ export class PIIManager {
       const matches = text.match(regex);
       if (matches) {
         for (const match of matches) {
-          const isExact = typeof pattern[3] === 'undefined' || pattern[3];
           const detection: PIIDetection = {
             type: piiType,
             value: piiType === 'CREDIT_CARD' ? this.maskCard(match) : match.slice(0, 4) + '***',
@@ -168,9 +168,9 @@ export class PIIManager {
             isVerified: false,
             redacted: false, // Will be set after verification
           };
-          
+
           this.detections.push(detection);
-          
+
           // Verify with checksum
           this.verifyPII(detection, match);
         }
@@ -180,11 +180,11 @@ export class PIIManager {
 
   private scanValue(element: Element, value: string): void {
     const checks: Array<[RegExp, PIIType, number]> = [
-      [/^(\d{12})$/, 'AADHAAR', 0.7],
-      /^([A-Z]{5}\d{4}[A-Z]{1})$/, 'PAN', 0.8,
-      [/^(\d{16})$/, 'CREDIT_CARD', 0.7],
-      /^([A-Z]{4}0[A-Z0-9]{7})$/, 'IFSC', 0.85,
-      [/^(\+?[1-9]\d{10})$/, 'PHONE', 0.6],
+      [/^\d{12}$/, 'AADHAAR', 0.7],
+      [/^[A-Z]{5}\d{4}[A-Z]{1}$/, 'PAN', 0.8],
+      [/^\d{16}$/, 'CREDIT_CARD', 0.7],
+      [/^[A-Z]{4}0[A-Z0-9]{7}$/, 'IFSC', 0.85],
+      [/^\+?[1-9]\d{10}$/, 'PHONE', 0.6],
       [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'EMAIL', 0.95],
     ];
 
@@ -230,7 +230,7 @@ export class PIIManager {
   }
 
   private async detectFaces(): Promise<void> {
-    const images = document.querySelectorAll('img');
+    const images = Array.from(document.querySelectorAll('img'));
 
     // If native FaceDetector is available, use it
     if (this.faceDetector) {
