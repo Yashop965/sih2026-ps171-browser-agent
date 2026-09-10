@@ -78,6 +78,7 @@ class Florence2Pipeline {
         // Configure environment
         env.allowLocalModels = false;
         env.useBrowserCache = true;
+        env.logLevel = 'error'; // Suppress verbose logging
 
         // Set dtype based on config
         const dtypeMap = { 'fp32': 'fp32', 'fp16': 'fp16', 'q4': 'q4' } as const;
