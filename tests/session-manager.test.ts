@@ -274,4 +274,56 @@ describe('SessionManager', () => {
       expect(manager.isTaskViable(sessionId)).toBe(false);
     });
   });
+
+  describe('pauseSession/resumeSession', () => {
+    it('should pause and resume a session', async () => {
+      const { browser } = await import('wxt/browser');
+      (browser.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+        url: 'https://example.com',
+        title: 'Example',
+      });
+
+      const sessionId = await manager.startSession(1, 10, 'https://example.com', 'Test', 10);
+      const session = manager.getSession(sessionId);
+      expect(session?.status).toBe('active');
+
+      manager.pauseSession(sessionId);
+      expect(manager.getSession(sessionId)?.status).toBe('paused');
+
+      manager.resumeSession(sessionId);
+      expect(manager.getSession(sessionId)?.status).toBe('active');
+    });
+
+    it('should not resume inactive session', async () => {
+      const { browser } = await import('wxt/browser');
+      (browser.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+        url: 'https://example.com',
+        title: 'Example',
+      });
+
+      const sessionId = await manager.startSession(1, 10, 'https://example.com', 'Test', 10);
+      manager.completeSession(sessionId);
+      manager.resumeSession(sessionId); // should be no-op
+      expect(manager.getSession(sessionId)?.status).toBe('completed');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle updateSession for non-existent session', async () => {
+      await expect(manager.updateSession('non-existent', 'https://example.com'))
+        .resolves.toBeUndefined();
+    });
+
+    it('should handle getActiveSessions with no sessions', () => {
+      expect(manager.getActiveSessions()).toEqual([]);
+    });
+
+    it('should handle getContext for non-existent session', () => {
+      expect(manager.getContext('non-existent')).toBeNull();
+    });
+
+    it('should handle shouldSkipElement for non-existent session', () => {
+      expect(manager.shouldSkipElement('non-existent', 'element-1')).toBe(false);
+    });
+  });
 });
