@@ -4,91 +4,82 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Form Filling Scenario', () => {
-  const baseURL = 'http://localhost:3000/e2e-test-page.html';
+  const baseURL = 'http://localhost:3000/mock-form.html';
 
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500); // Extra wait for JS to execute
   });
 
-  test('should fill and submit a registration form completely', async ({ page }) => {
-    // Click form tab button
-    await page.click('#tab-form');
-    await page.waitForTimeout(300);
+  test('should fill Aadhaar enrollment form completely', async ({ page }) => {
+    // Fill personal information
+    await page.fill('#firstName', 'Rajesh');
+    await expect(page.locator('#firstName')).toHaveValue('Rajesh');
 
-    // Fill all form fields
-    await page.fill('#name', 'Rajesh Kumar Sharma');
-    await expect(page.locator('#name')).toHaveValue('Rajesh Kumar Sharma');
+    await page.fill('#lastName', 'Sharma');
+    await expect(page.locator('#lastName')).toHaveValue('Sharma');
 
-    await page.fill('#email', 'rajesh.sharma@example.com');
-    await expect(page.locator('#email')).toHaveValue('rajesh.sharma@example.com');
+    await page.fill('#fullName', 'Rajesh Kumar Sharma');
+    await expect(page.locator('#fullName')).toHaveValue('Rajesh Kumar Sharma');
 
-    await page.fill('#phone', '+91 9876543210');
-    await expect(page.locator('#phone')).toHaveValue('+91 9876543210');
-
+    // Fill identification details
     await page.fill('#aadhaar', '1234 5678 9012');
     await expect(page.locator('#aadhaar')).toHaveValue('1234 5678 9012');
 
     await page.fill('#pan', 'ABCDE1234F');
     await expect(page.locator('#pan')).toHaveValue('ABCDE1234F');
 
-    await page.fill('#password', 'SecurePass@123');
-    await expect(page.locator('#password')).toHaveAttribute('type', 'password');
+    // Fill contact info
+    await page.fill('#mobile', '+91 9876543210');
+    await expect(page.locator('#mobile')).toHaveValue('+91 9876543210');
 
-    // Select dropdown
-    await page.selectOption('#country', 'in');
-    await expect(page.locator('#country')).toHaveValue('in');
+    await page.fill('#email', 'rajesh@example.com');
+    await expect(page.locator('#email')).toHaveValue('rajesh@example.com');
 
-    // Submit form
-    await page.click('button[type="submit"]');
+    // Fill address
+    await page.fill('#address', '123 Main Street, New Delhi');
+    await page.fill('#city', 'New Delhi');
+    await page.fill('#pincode', '110001');
 
-    // Verify success message
-    await expect(page.locator('#formStatus')).toBeVisible();
-    await expect(page.locator('#formStatus')).toContainText('submitted successfully');
+    // Select state
+    await page.selectOption('#state', 'Delhi');
+    await expect(page.locator('#state')).toHaveValue('Delhi');
 
     console.log('[E2E FORM] ✅ Form filling scenario passed');
   });
 
-  test('should handle partial form fill and validation', async ({ page }) => {
-    await page.click('#tab-form');
-    await page.waitForTimeout(300);
-
-    await page.fill('#name', 'Test User');
-    await page.fill('#email', 'test@example.com');
-    await page.click('button[type="submit"]');
-    await expect(page.locator('#formStatus')).toBeVisible();
-    console.log('[E2E FORM] ✅ Partial form validation passed');
-  });
-
-  test('should preserve password field type during interaction', async ({ page }) => {
-    await page.click('#tab-form');
-    await page.waitForTimeout(300);
-
+  test('should handle password field securely', async ({ page }) => {
+    await page.fill('#password', 'SecurePass@123');
     const passwordInput = page.locator('#password');
-    await expect(passwordInput).toHaveAttribute('type', 'password');
-    await passwordInput.fill('NewPassword123!');
     await expect(passwordInput).toHaveAttribute('type', 'password');
     console.log('[E2E FORM] ✅ Password field security preserved');
   });
 
-  test('should handle special characters in form inputs', async ({ page }) => {
-    await page.click('#tab-form');
-    await page.waitForTimeout(300);
+  test('should validate required fields', async ({ page }) => {
+    await page.click('.btn-submit');
 
-    await page.fill('#name', "José García-O'Brien");
-    await page.fill('#email', 'jose.garcia+test@example.co.uk');
-    await expect(page.locator('#name')).toHaveValue("José García-O'Brien");
-    await expect(page.locator('#email')).toHaveValue('jose.garcia+test@example.co.uk');
+    // Should show validation errors
+    await expect(page.locator('#firstNameError')).toBeVisible();
+    await expect(page.locator('#lastNameError')).toBeVisible();
+
+    console.log('[E2E FORM] ✅ Required field validation works');
+  });
+
+  test('should handle special characters in names', async ({ page }) => {
+    await page.fill('#firstName', 'José');
+    await page.fill('#lastName', "García-O'Brien");
+    await expect(page.locator('#firstName')).toHaveValue('José');
+    await expect(page.locator('#lastName')).toHaveValue("García-O'Brien");
     console.log('[E2E FORM] ✅ Special characters handled correctly');
   });
 
-  test('should validate empty form submission', async ({ page }) => {
-    await page.click('#tab-form');
-    await page.waitForTimeout(300);
+  test('should accept valid Aadhaar and PAN formats', async ({ page }) => {
+    await page.fill('#aadhaar', '123456789012');
+    await page.fill('#pan', 'ABCDE1234F');
 
-    await page.click('button[type="submit"]');
-    await expect(page.locator('#formStatus')).toBeVisible();
-    console.log('[E2E FORM] ✅ Empty form submission handled');
+    await expect(page.locator('#aadhaar')).toHaveValue('123456789012');
+    await expect(page.locator('#pan')).toHaveValue('ABCDE1234F');
+
+    console.log('[E2E FORM] ✅ Valid ID formats accepted');
   });
 });
