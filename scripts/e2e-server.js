@@ -32,11 +32,14 @@ async function handleRequest(req, res) {
 
     // Default to index.html
     if (filePath === '/' || filePath === '') {
-      filePath = '/public/mock/government-portal.html';
+      filePath = '/public/pii-test-page.html';
     }
 
-    // Resolve file path
-    const fullPath = `${ROOT}${filePath}`;
+    // Resolve file path - look in public directory first
+    let fullPath = `${ROOT}/public${filePath}`;
+    if (filePath.startsWith('/public/')) {
+      fullPath = `${ROOT}${filePath}`;
+    }
 
     // Read file
     const content = await readFile(fullPath);
