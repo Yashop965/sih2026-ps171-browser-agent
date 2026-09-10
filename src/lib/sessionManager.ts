@@ -148,15 +148,16 @@ export class SessionManager {
       timestamp: Date.now(),
     });
 
-    // Update snapshot
+    // Note: snapshot stores minimal metadata only
+    // Full DOM extraction happens in content script context
     session.snapshot = {
       url,
-      title: document.title || '',
+      title: '', // Title fetched from content script, not background
       timestamp: Date.now(),
       elementCount: elements?.length || 0,
       elements,
       visionBoxes,
-      scrollY: window.scrollY,
+      scrollY: 0, // Scroll position tracked in content script
     };
 
     // Update context
@@ -172,7 +173,7 @@ export class SessionManager {
   /**
    * Mark session as completed
    */
-  completeSession(sessionId: string, summary?: string): void {
+  completeSession(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
@@ -185,14 +186,14 @@ export class SessionManager {
   /**
    * Mark session as failed
    */
-  failSession(sessionId: string, error?: string): void {
+  failSession(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
     session.status = 'failed';
     session.lastActivity = Date.now();
 
-    console.warn(`[SessionManager] Failed session ${sessionId}: ${error}`);
+    console.warn(`[SessionManager] Failed session ${sessionId}`);
   }
 
   /**
