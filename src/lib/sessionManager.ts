@@ -173,12 +173,15 @@ export class SessionManager {
   /**
    * Mark session as completed
    */
-  completeSession(sessionId: string): void {
+  completeSession(sessionId: string, summary?: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
     session.status = 'completed';
     session.lastActivity = Date.now();
+    if (summary) {
+      session.history.push({ url: '[completed]', timestamp: Date.now(), action: summary });
+    }
 
     console.log(`[SessionManager] Completed session ${sessionId}`);
   }
@@ -186,12 +189,16 @@ export class SessionManager {
   /**
    * Mark session as failed
    */
-  failSession(sessionId: string): void {
+  failSession(sessionId: string, reason?: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
     session.status = 'failed';
     session.lastActivity = Date.now();
+
+    if (reason) {
+      session.history.push({ url: '[failed]', timestamp: Date.now(), action: reason });
+    }
 
     console.warn(`[SessionManager] Failed session ${sessionId}`);
   }
@@ -298,6 +305,14 @@ export class SessionManager {
       this.contextMap.delete(id);
       console.log(`[SessionManager] Pruned stale session ${id}`);
     }
+  }
+
+  /**
+   * Unregister tab listener for a session (call on complete/fail)
+   */
+  unregisterTabListener(tabId: number): void {
+    // Note: browser.tabs.onUpdated doesn't support removeListener in WXT
+    // The listener closure will be garbage collected when session is pruned
   }
 
   /**
