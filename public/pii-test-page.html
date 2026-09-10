@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PII Test Page - No False Positives</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+    h1 { color: #333; }
+    .section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+    .form-group { margin: 15px 0; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+    button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+    th { background: #f5f5f5; }
+  </style>
+</head>
+<body>
+  <h1>PII Detection Test Page</h1>
+  <p>This page is designed to test PII detection with minimal false positives.</p>
+
+  <div class="section">
+    <h2>User Registration Form</h2>
+    <form id="registration-form">
+      <div class="form-group">
+        <label for="full-name">Full Name:</label>
+        <input type="text" id="full-name" name="full-name" placeholder="Enter your name">
+      </div>
+      
+      <div class="form-group">
+        <label for="user-email">Email Address:</label>
+        <input type="email" id="user-email" name="email" placeholder="your@email.com">
+      </div>
+      
+      <div class="form-group">
+        <label for="user-phone">Phone Number:</label>
+        <input type="tel" id="user-phone" name="phone" placeholder="+91 98765 43210">
+      </div>
+      
+      <div class="form-group">
+        <label for="aadhaar-input">Aadhaar Number:</label>
+        <input type="text" id="aadhaar-input" name="aadhaar" placeholder="XXXX XXXX XXXX">
+      </div>
+      
+      <div class="form-group">
+        <label for="pan-input">PAN Card:</label>
+        <input type="text" id="pan-input" name="pan" placeholder="ABCDE1234F">
+      </div>
+      
+      <div class="form-group">
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password">
+      </div>
+      
+      <button type="submit">Register</button>
+    </form>
+  </div>
+
+  <div class="section">
+    <h2>Price Table (Should NOT be detected as PII)</h2>
+    <table>
+      <tr>
+        <th>Product</th>
+        <th>Price</th>
+        <th>Quantity</th>
+      </tr>
+      <tr>
+        <td>Laptop</td>
+        <td>45000</td>
+        <td>5</td>
+      </tr>
+      <tr>
+        <td>Mouse</td>
+        <td>500</td>
+        <td>10</td>
+      </tr>
+      <tr>
+        <td>Keyboard</td>
+        <td>1500</td>
+        <td>3</td>
+      </tr>
+      <tr>
+        <td>Monitor</td>
+        <td>12000</td>
+        <td>2</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Date Range (Should NOT be detected)</h2>
+    <p>Valid from: 01/01/2024 to 31/12/2024</p>
+    <p>Contact us at support@example.com for more info.</p>
+  </div>
+
+  <div class="section">
+    <h2>User Profile (Should have some PII)</h2>
+    <p><strong>Name:</strong> Rajesh Kumar</p>
+    <p><strong>Email:</strong> rajesh.kumar@test.com</p>
+    <p><strong>Phone:</strong> 9876543210</p>
+    <p><strong>Aadhaar:</strong> 1234 5678 9012</p>
+  </div>
+</body>
+</html>
