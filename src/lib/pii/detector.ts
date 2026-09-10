@@ -150,7 +150,7 @@ export class PIIManager {
       [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
       [/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
       [/(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})/g, 'CREDIT_CARD', 0.7],
-      [/([+]?[1-9][\d]{10,12})/g, 'PHONE', 0.6],
+      [/([+]?[1-9][\d\s-]{9,12}\d)/g, 'PHONE', 0.6],
     ];
 
     for (const pattern of patterns) {
