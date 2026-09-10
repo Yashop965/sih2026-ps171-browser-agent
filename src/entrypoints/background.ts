@@ -30,6 +30,20 @@ export default defineBackground({
         case 'CAPTURE_AND_SEND':
           return handleCaptureAndSend(message, sender, privacyLedger, auditLedger, agentState);
 
+        case 'VISION_EXTRACT':
+          // Request vision-enhanced extraction from content script
+          (async () => {
+            try {
+              const tabId = sender.tab?.id;
+              if (!tabId) { sendResponse({ ok: false, error: 'No tab ID' }); return; }
+              const result: any = await browser.tabs.sendMessage(tabId, { type: 'VISION_EXTRACT' });
+              sendResponse(result);
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e) });
+            }
+          })();
+          return true;
+
         case 'EXECUTE_ACTION':
           return executeAction(message, sender, privacyLedger);
 
