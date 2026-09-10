@@ -300,14 +300,25 @@ export class PIIManager {
   }
 
   private isLikelyPassword(value: string): boolean {
-    // Heuristic: passwords are usually mixed case with special chars
+    // Don't flag if field name/id suggests it's not a password
+    const nonPasswordPatterns = ['phone', 'pin', 'code', 'otp', 'uuid', 'number', 'id', 'zip', 'postal'];
+    const lowerValue = value.toLowerCase();
+    if (nonPasswordPatterns.some(pattern => lowerValue.includes(pattern))) {
+      return false;
+    }
+
+    // Require actual password-like characteristics:
+    // 1. Must have at least 2 of: uppercase, lowercase, digit, special char
     const hasUpper = /[A-Z]/.test(value);
     const hasLower = /[a-z]/.test(value);
     const hasDigit = /\d/.test(value);
     const hasSpecial = /[^a-zA-Z0-9]/.test(value);
-    
+
     const strength = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
-    return strength >= 3 && value.length >= 8;
+
+    // Must have special char AND be at least 8 chars
+    // This prevents flagging pure numeric PINs
+    return hasSpecial && strength >= 2 && value.length >= 8;
   }
 
   private getElementSelector(element: Element): string {
