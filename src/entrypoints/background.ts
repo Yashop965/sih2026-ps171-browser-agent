@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/sandbox';
 import { sanitizeSnapshot, redactString, type RawSnapshot } from '../lib/pii/sanitizer';
 import { checkOutboundPayload } from '../lib/pii/firewall';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
+import { sessionManager } from '../lib/sessionManager';
 
 /**
  * Background Service Worker
@@ -113,9 +114,41 @@ export default defineBackground({
         case 'CAPTURE_SCREENSHOT':
           return captureScreenshot(message, sender);
 
+        case 'START_SESSION':
+          return handleStartSession(message, sender);
+
+        case 'UPDATE_SESSION':
+          return handleUpdateSession(message, sender);
+
+        case 'COMPLETE_SESSION':
+          return handleCompleteSession(message, sender);
+
+        case 'GET_SESSION':
+          return handleGetSession(message, sender);
+
         default:
           sendResponse({ error: `Unknown message type: ${message.type}` });
           return true;
+      }
+    });
+
+    // Track tab lifecycle
+    browser.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+      if (changeInfo.url) {
+        const session = sessionManager.getSessionForTab(tabId);
+        if (session) {
+          await sessionManager.updateSession(session.sessionId, changeInfo.url);
+        }
+      }
+    });
+
+    browser.tabs.onRemoved.addListener((tabId) => {
+      // Find and mark session as completed
+      for (const session of sessionManager.getActiveSessions()) {
+        if (session.tabId === tabId) {
+          sessionManager.completeSession(session.sessionId, 'Tab closed');
+          break;
+        }
       }
     });
 
@@ -503,4 +536,70 @@ class AgentState {
   currentTask: string | null = null;
   lastActionResult: any = null;
   stepCount: number = 0;
+}
+
+// ─── Session Handlers ────────────────────────────────────────────────────────
+
+async function handleStartSession(
+  message: any,
+  sender: browser.runtime.MessageSender
+): Promise<any> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return { error: 'No tab ID' };
+
+  const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+  const windowId = sender.tab?.windowId || activeTab?.windowId;
+
+  const sessionId = await sessionManager.startSession(
+    tabId,
+    windowId || 0,
+    message.url || activeTab?.url || '',
+    message.taskDescription || '',
+    message.maxSteps || 50
+  );
+
+  return { success: true, sessionId };
+}
+
+async function handleUpdateSession(
+  message: any,
+  sender: browser.runtime.MessageSender
+): Promise<any> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return { error: 'No tab ID' };
+
+  const session = sessionManager.getSessionForTab(tabId);
+  if (!session) return { error: 'No active session for this tab' };
+
+  await sessionManager.updateSession(session.sessionId, message.url || session.currentUrl);
+
+  return { success: true };
+}
+
+async function handleCompleteSession(
+  message: any,
+  sender: browser.runtime.MessageSender
+): Promise<any> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return { error: 'No tab ID' };
+
+  const session = sessionManager.getSessionForTab(tabId);
+  if (!session) return { error: 'No active session for this tab' };
+
+  sessionManager.completeSession(session.sessionId, message.summary);
+
+  return { success: true };
+}
+
+async function handleGetSession(
+  message: any,
+  sender: browser.runtime.MessageSender
+): Promise<any> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return { error: 'No tab ID' };
+
+  const session = sessionManager.getSessionForTab(tabId);
+  if (!session) return { error: 'No active session for this tab' };
+
+  return { success: true, session };
 }
