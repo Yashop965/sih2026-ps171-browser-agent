@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mock Government Portal - PII Test Page</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+    button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+    .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+    h1 { color: #333; }
+    h2 { color: #555; border-bottom: 2px solid #007bff; padding-bottom: 5px; }
+  </style>
+</head>
+<body>
+  <h1>Government Service Portal</h1>
+  <p>Fill out the form below to apply for services.</p>
+
+  <div class="section">
+    <h2>Personal Information</h2>
+    <div class="form-group">
+      <label for="aadhaar">Aadhaar Number</label>
+      <input type="text" id="aadhaar" name="aadhaar" placeholder="Enter 12-digit Aadhaar" value="">
+    </div>
+    <div class="form-group">
+      <label for="pan">PAN Number</label>
+      <input type="text" id="pan" name="pan" placeholder="Enter PAN number" value="">
+    </div>
+    <div class="form-group">
+      <label for="name">Full Name</label>
+      <input type="text" id="name" name="name" placeholder="Enter your full name" value="">
+    </div>
+    <div class="form-group">
+      <label for="email">Email Address</label>
+      <input type="email" id="email" name="email" placeholder="Enter email" value="">
+    </div>
+    <div class="form-group">
+      <label for="phone">Phone Number</label>
+      <input type="tel" id="phone" name="phone" placeholder="Enter phone number" value="">
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Banking Details</h2>
+    <div class="form-group">
+      <label for="account">Account Number</label>
+      <input type="text" id="account" name="account" placeholder="Enter account number" value="">
+    </div>
+    <div class="form-group">
+      <label for="ifsc">IFSC Code</label>
+      <input type="text" id="ifsc" name="ifsc" placeholder="Enter IFSC code" value="">
+    </div>
+    <div class="form-group">
+      <label for="card">Credit/Debit Card</label>
+      <input type="text" id="card" name="card" placeholder="Enter card number" value="">
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Security</h2>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Create password" value="">
+    </div>
+  </div>
+
+  <button type="button" onclick="submitForm()">Submit Application</button>
+  <div id="status"></div>
+
+  <script>
+    function submitForm() {
+      document.getElementById('status').innerHTML = '<p style="color: green;">Form submitted successfully!</p>';
+    }
+  </script>
+</body>
+</html>

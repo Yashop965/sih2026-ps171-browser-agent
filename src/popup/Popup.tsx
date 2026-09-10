@@ -18,14 +18,12 @@ function Popup() {
   const [serverLatency, setServerLatency] = useState<number>(0);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
 
-  // Load saved provider config from chrome.storage
+  // Load saved provider config from browser.storage (compatible with Chrome & Firefox)
   useEffect(() => {
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(['providerKey', 'apiKey'], (result) => {
-        if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
-        if (result.apiKey) setProviderKey(result.apiKey);
-      });
-    }
+    browser.storage.local.get(['providerKey', 'apiKey']).then((result) => {
+      if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
+      if (result.apiKey) setProviderKey(result.apiKey);
+    });
   }, []);
 
   // Health check function
@@ -285,9 +283,7 @@ function Popup() {
               <button
                 className="save-key-button"
                 onClick={() => {
-                  if (typeof chrome !== 'undefined' && chrome.storage) {
-                    chrome.storage.local.set({ providerKey: selectedProvider, apiKey: providerKey });
-                  }
+                  browser.storage.local.set({ providerKey: selectedProvider, apiKey: providerKey });
                   setShowSettings(false);
                 }}
               >Save</button>

@@ -11,6 +11,9 @@
     "build": "wxt build",
     "prepare": "wxt prepare",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
     "test:watch": "vitest",
     "server:install": "pip install -r server/requirements.txt",
     "ollama:pull": "ollama pull qwen2.5:1.5b && ollama pull Florence-2-base-ft"
@@ -24,6 +27,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/chrome": "^0.0.287",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
