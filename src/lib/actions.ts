@@ -217,8 +217,6 @@ export async function execute(action: Action): Promise<ActionResult> {
     }
 }
 
-// One retry, because a click often fails only because the page was still
-// settling from the previous action.
 export async function executeWithRetry(action: Action): Promise<ActionResult> {
     const first = await execute(action);
     if (first.ok || action.type === 'NAVIGATE' || action.type === 'DONE') {
@@ -226,4 +224,82 @@ export async function executeWithRetry(action: Action): Promise<ActionResult> {
     }
     await new Promise((r) => setTimeout(r, 400));
     return execute(action);
+}
+
+// Exponential backoff with circuit breaker
+export async function executeWithResilience(
+    action: Action,
+    maxRetries: number = 3
+): Promise<ActionResult> {
+    const results: ActionResult[] = [];
+    let lastError: string | undefined;
+
+    for (let i = 0; i < maxRetries; i++) {
+        const result = await execute(action);
+        results.push(result);
+
+        if (result.ok) {
+            return result;
+        }
+
+        lastError = result.error;
+
+        // Exponential backoff: 200ms, 400ms, 800ms
+        await delay(Math.pow(2, i) * 200);
+    }
+
+    // All retries failed
+    return {
+        ok: false,
+        action,
+        error: lastError ?? 'Max retries exceeded',
+        durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
+    };
+}
+
+// Circuit breaker: tracks consecutive failures per element
+export class CircuitBreaker {
+    private failures = new Map<string, number>();
+    private readonly threshold = 3;
+    private readonly resetMs = 30_000;
+
+    shouldAct(targetId: number | string): boolean {
+        const key = String(targetId);
+        const count = this.failures.get(key) ?? 0;
+        if (count >= this.threshold) {
+            const failedAt = this.failures.get(`${key}:time`) as number | undefined;
+            if (failedAt && Date.now() - failedAt < this.resetMs) {
+                console.warn(`[agent] Circuit breaker open for element ${key}`);
+                return false;
+            }
+            // Reset after timeout
+            this.failures.delete(key);
+            this.failures.delete(`${key}:time`);
+        }
+        return true;
+    }
+
+    recordFailure(targetId: number | string): void {
+        const key = String(targetId);
+        const count = (this.failures.get(key) ?? 0) + 1;
+        this.failures.set(key, count);
+        this.failures.set(`${key}:time`, Date.now());
+    }
+
+    recordSuccess(targetId: number | string): void {
+        const key = String(targetId);
+        this.failures.delete(key);
+        this.failures.delete(`${key}:time`);
+    }
+
+    reset(): void {
+        this.failures.clear();
+    }
+}
+
+// Singleton circuit breaker instance
+export const circuitBreaker = new CircuitBreaker();
+
+function delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
