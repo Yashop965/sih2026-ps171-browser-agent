@@ -23,6 +23,7 @@ import {
   type Detection,
   type LedgerTone,
 } from '../lib/ledgerClient';
+import Heatmap from './Heatmap';
 
 // Colour carries meaning, not decoration. Red is something we stopped,
 // green is something we let through, amber is something that needs a look.
