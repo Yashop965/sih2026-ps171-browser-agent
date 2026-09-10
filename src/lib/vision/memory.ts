@@ -32,7 +32,6 @@ export class VisionMemoryPool {
           data: buffer.data.slice(0, requiredSize),
         });
         this.buffers.delete(key);
-        console.log(`[MemoryPool] Reused buffer ${key} → ${id} (${requiredSize / 1024}KB)`);
         return this.buffers.get(id)!;
       }
     }
@@ -50,8 +49,6 @@ export class VisionMemoryPool {
     });
     this.totalSize += requiredSize;
 
-    console.log(`[MemoryPool] Allocated ${id} (${requiredSize / 1024}KB)`);
-
     // Prune if over budget
     this.pruneIfOverBudget();
 
@@ -66,7 +63,6 @@ export class VisionMemoryPool {
       if (buffer.usageCount <= 0) {
         this.totalSize -= buffer.data.byteLength;
         this.buffers.delete(id);
-        console.log(`[MemoryPool] Released ${id}`);
       }
     }
   }
@@ -75,7 +71,6 @@ export class VisionMemoryPool {
   clear(): void {
     this.buffers.clear();
     this.totalSize = 0;
-    console.log('[MemoryPool] Cleared all buffers');
   }
 
   /** Get memory stats */

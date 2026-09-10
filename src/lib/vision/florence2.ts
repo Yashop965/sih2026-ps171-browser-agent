@@ -91,8 +91,7 @@ class Florence2Pipeline {
           : 'wasm';
 
         this.usingWebGPU = backend === 'webgpu';
-
-        console.log(`[Vision] Initializing ${config.modelId} with ${backend} backend...`);
+        // Suppress verbose logging - only show errors
 
         this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
           device: backend === 'webgpu' ? 'webgpu' : 'wasm',
@@ -100,7 +99,6 @@ class Florence2Pipeline {
         });
 
         this.initialized = true;
-        console.log(`[Vision] Florence-2 initialized (${backend}, ${config.dtype})`);
       } catch (error) {
         console.error('[Vision] Failed to initialize:', error);
         throw error;
