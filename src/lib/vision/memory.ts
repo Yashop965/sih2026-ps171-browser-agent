@@ -95,7 +95,6 @@ export class VisionMemoryPool {
         const buffer = this.buffers.get(firstKey)!;
         this.totalSize -= buffer.data.byteLength;
         this.buffers.delete(firstKey);
-        console.log(`[MemoryPool] Pruned buffer ${firstKey} to stay under budget`);
       }
     }
   }
