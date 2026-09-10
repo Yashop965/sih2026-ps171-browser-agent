@@ -183,7 +183,7 @@ export default defineContentScript({
                     if (role && role !== 'presentation' && role !== 'none') {
                         nodes.push({
                             role,
-                            name: el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 100) || '',
+                            name: el.getAttribute('aria-label') || maskLabel(el.textContent?.trim().slice(0, 100)) || '',
                             expanded: el.getAttribute('aria-expanded') === 'true',
                             checked: el.getAttribute('aria-checked') || undefined,
                             required: el.getAttribute('aria-required') === 'true',

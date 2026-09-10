@@ -416,6 +416,8 @@ async function typeInElement(
   elementId: number,
   text: string
 ): Promise<boolean> {
+  // Use JSON.stringify to safely encode text without string interpolation
+  const safeText = JSON.stringify(text);
   await browser.tabs.executeScript(tabId, {
     code: `
       const el = document.querySelector('[data-agent-id="${elementId}"]');
@@ -423,7 +425,7 @@ async function typeInElement(
         el.focus();
         el.value = '';
         el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.value = '${text.replace(/'/g, "\\'")}';
+        el.value = ${safeText};
         el.dispatchEvent(new Event('change', { bubbles: true }));
         true;
       } else {

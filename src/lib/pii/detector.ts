@@ -87,25 +87,6 @@ export class PIIManager {
     return this.detections;
   }
 
-  /**
-   * Synchronous DOM scan for immediate use (e.g., in content scripts)
-   */
-  scanDocument(): PIIDetection[] {
-    this.detections = [];
-    this.scanDOM();
-    return this.detections;
-  }
-
-  /**
-   * Asynchronous DOM scan including fully awaited face detection
-   */
-  async scanDocumentAsync(): Promise<PIIDetection[]> {
-    this.detections = [];
-    this.scanDOM();
-    await this.detectFaces();
-    return this.detections;
-  }
-
   private scanDOM(): void {
     // 1. Password fields
     document.querySelectorAll('input').forEach(input => {
