@@ -100,6 +100,8 @@ function maskLabel(text: string): string {
     return out;
 }
 
+export { maskLabel };
+
 /** Every label leaves through here. Trim, mask, cap. */
 function clean(text: string): string {
     return maskLabel(text.trim()).slice(0, 80);
