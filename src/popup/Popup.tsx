@@ -4,6 +4,7 @@ import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
 import ResourceMonitor from '../components/ResourceMonitor';
 import { PROVIDERS, ProviderKey, getProvider } from '../lib/providerConfig';
+import { guardOutboundPlan } from '../lib/pii/outboundGuard';
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
@@ -131,22 +132,33 @@ function Popup() {
         // Build history with actually filled element stable IDs
         const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK' }));
 
+        // Issue #61: the live /plan egress was bypassing the outbound PII
+        // firewall (the redact->firewall pipeline lived only in the dead
+        // CAPTURE_AND_SEND path). Route it through the shared guard now: it
+        // redacts task + element labels/names in place, then runs
+        // checkOutboundPayload as a final gate. If blocked, abort - no PII
+        // reaches the network.
+        const guard = guardOutboundPlan({
+          task,
+          elements: elements as Record<string, unknown>[],
+          context: pageContext ?? undefined,
+          history,
+          passThrough: { step: currentStep, inputCount: inputFields.length, buttonCount: buttons.length },
+        });
+        if (guard.blocked) {
+          addLog(`⛔ Outbound firewall blocked /plan egress: ${guard.category ?? 'PII'} at ${guard.reason ?? '?'}`);
+          setHealthStatus('unhealthy'); // not really, but surface the block loudly in logs
+          break;
+        }
+        if (guard.redactedCount > 0) {
+          addLog(`Masked ${guard.redactedCount} PII field(s) before /plan egress`);
+        }
+
         const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
         const response = await fetch(`${serverUrl}/plan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            task,
-            elements,
-            step: currentStep,
-            inputCount: inputFields.length,
-            buttonCount: buttons.length,
-            history: history,
-            // Page geometry + scroll affordance (issue #59): lets the planner
-            // see scrollY/scrollHeight/viewport and whether more content is
-            // below the fold, so it can issue SCROLL to reveal the next fields.
-            context: pageContext,
-          }),
+          body: JSON.stringify(guard.payload),
         });
 
         if (!response.ok) {
