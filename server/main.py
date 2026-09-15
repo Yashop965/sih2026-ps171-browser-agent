@@ -184,6 +184,12 @@ class PlanResponse(BaseModel):
     confidence: Optional[float] = 0.0
     session_id: str
     timestamp: float
+    # Issue #68: True when the planner produced this via a degraded path
+    # (no LLM reachable at init, or a heuristic fallback after a runtime
+    # LLM error). Callers MUST NOT treat a DONE emitted while degraded as a
+    # genuine task completion.
+    degraded: bool = False
+    degraded_reason: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -249,12 +255,20 @@ async def plan_action(request: PlanRequest):
         return PlanResponse(
             success=planner_result.success,
             action=planner_result.action,
-            message="Action generated successfully" if planner_result.success else "Action generation degraded",
+            message=(
+                "Action generated successfully"
+                if planner_result.success
+                else "Action generation degraded"
+            ),
             error=planner_result.error,
             reasoning=planner_result.reasoning,
             confidence=planner_result.confidence,
             session_id=session_id,
             timestamp=time.time(),
+            # Issue #68: propagate the degraded flag so the popup can stop
+            # treating a mock/heuristic DONE as a genuine completion.
+            degraded=planner_result.degraded,
+            degraded_reason=planner_result.degraded_reason,
         )
     except Exception as e:
         return PlanResponse(

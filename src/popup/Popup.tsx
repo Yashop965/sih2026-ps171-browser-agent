@@ -79,6 +79,7 @@ function Popup() {
     let filledIds = new Set<string>(); // Element IDs successfully filled/acted on
     let failedIds = new Set<string>(); // Tried but FAILED (issue #63) - retryable, NOT "filled"
     const failedErrors = new Map<string, string>(); // Per-ID last failure reason, sent to the planner
+    let plannerDegraded = false; // True if the planner reported a degraded run (#68)
     let maxSteps = 15; // Will be updated after first extraction
     let recentActionHistory: Array<{targetId: string, type: string}> = []; // Track recent actions for loop detection
 
@@ -180,10 +181,22 @@ function Popup() {
         const plan = await response.json();
         const action = plan.action;
 
+        // Issue #68: the planner may be degraded (no LLM reachable at init, or
+        // a heuristic fallback after a runtime LLM error). Track it so we do
+        // not report a mock/heuristic DONE as a genuine task completion.
+        if (plan.degraded) {
+          addLog(`⚠️ Planner degraded: ${plan.degraded_reason ?? 'no LLM reachable'}`);
+        }
+
         addLog(`Planner returned: ${action?.type ?? 'NONE'}`);
 
         if (!action || action.type === 'DONE') {
-          addLog('✅ Task complete (planner signaled DONE)');
+          if (plan.degraded) {
+            addLog('⚠️ Stopping: planner signaled DONE while DEGRADED (no LLM / heuristic) — task NOT genuinely complete');
+            plannerDegraded = true;
+          } else {
+            addLog('✅ Task complete (planner signaled DONE)');
+          }
           break;
         }
 
@@ -277,7 +290,11 @@ function Popup() {
         addLog(`⚠️ Reached maximum steps (${maxSteps})`);
       }
 
-      addLog('Task completed');
+      if (plannerDegraded) {
+        addLog('⚠️ Task ended while planner was DEGRADED - verify results manually (no LLM was driving this run)');
+      } else {
+        addLog('Task completed');
+      }
     } catch (err) {
       addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
