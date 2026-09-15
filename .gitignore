@@ -62,3 +62,7 @@ tsconfig.tsbuildinfo
 
 # Media assets (keep src/assets but not generated)
 /public/generated/
+
+# ad pipeline build artifacts (regenerate, don't commit)
+ad_pipeline/audio/
+ad_pipeline/frames_*/

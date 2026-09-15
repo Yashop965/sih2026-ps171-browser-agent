@@ -1,0 +1,91 @@
+{
+  "output": "SIH2026_PS171_YC_Ad_v2.mp4",
+  "title": {
+    "duration": 4.5,
+    "kicker": "SIH 2026  \u00b7  PS171  \u00b7  BROWSER AGENT",
+    "headline": "On-Device",
+    "headline2": "Visual Perception",
+    "subheadline": "Your browser. Your data. Never the cloud.",
+    "badges": [
+      "PII Shield",
+      "Secure Autofill",
+      "Privacy Ledger"
+    ]
+  },
+  "problem": {
+    "duration": 5,
+    "headline": "Every form you fill\nsends PII to the cloud.",
+    "lines": [
+      "Agents that read your page",
+      "can leak Aadhaar, PAN, bank details",
+      "to third-party APIs."
+    ],
+    "leaking": [
+      "PAN",
+      "Aadhaar",
+      "IFSC",
+      "Card"
+    ]
+  },
+  "detection": {
+    "duration": 8,
+    "url": "gov.in/apply/subsidy",
+    "headline": "We built the shield into the browser.",
+    "count": 9
+  },
+  "product": {
+    "duration": 5,
+    "url": "chrome-extension://\u00b7\u00b7\u00b7/popup",
+    "headline": "This is the actual product.",
+    "sub": "Task panel \u00b7 live PII detections \u00b7 tamper-proof privacy ledger."
+  },
+  "architecture": {
+    "duration": 7.5
+  },
+  "heatmap": {
+    "duration": 6,
+    "url": "localhost/pii-test-page",
+    "headline": "Precision, not noise.",
+    "sub": "Context-aware filtering: price tables and headings are ignored."
+  },
+  "formfill": {
+    "duration": 7.5,
+    "url": "localhost/mock-form",
+    "headline": "Autofill that never leaks.",
+    "done": "\u2713  Form filled \u00b7 0 PII uploaded"
+  },
+  "metrics": {
+    "duration": 6,
+    "headline": "Battle-tested, production-grade.",
+    "stats": [
+      {
+        "value": 240,
+        "label": "unit + e2e tests passing"
+      },
+      {
+        "value": 1.21,
+        "decimals": 2,
+        "suffix": " MB",
+        "label": "total build size"
+      },
+      {
+        "value": 100,
+        "suffix": "%",
+        "label": "on-device, zero uploads"
+      }
+    ],
+    "sub": "Chromium + Firefox \u00b7 MV3 + MV2 \u00b7 30 fps ready"
+  },
+  "closing": {
+    "duration": 7,
+    "headline": "The browser agent",
+    "sub": "Built by 6 engineers for SIH 2026 \u2014 ISRO challenge PS171.",
+    "repo": "github.com/Yashop965/sih2026-ps171-browser-agent",
+    "badges": [
+      "ISRO \u00b7 SIH 2026",
+      "Open Source",
+      "v1.0"
+    ],
+    "credit": "Built with WXT + Playwright + ffmpeg"
+  }
+}

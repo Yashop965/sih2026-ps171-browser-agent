@@ -131,6 +131,22 @@ class Florence2Pipeline {
       await this.initialize();
     }
 
+    // Suppress ALL console output during processing
+    const silencedConsole = {
+      log: console.log,
+      warn: console.warn,
+      error: console.error,
+      time: console.time,
+      timeEnd: console.timeEnd,
+      timeStamp: console.timeStamp,
+    };
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    console.time = () => {};
+    console.timeEnd = () => {};
+    console.timeStamp = () => {};
+
     const startTime = performance.now();
 
     try {
@@ -165,6 +181,15 @@ class Florence2Pipeline {
     } catch (error) {
       console.error('[Vision] Processing failed:', error);
       throw error;
+    } finally {
+      // Restore console methods
+      console.log = silencedConsole.log;
+      console.warn = silencedConsole.warn;
+      console.error = silencedConsole.error;
+      console.time = silencedConsole.time;
+      console.timeEnd = silencedConsole.timeEnd;
+      console.timeStamp = silencedConsole.timeStamp;
+      const elapsed = performance.now() - startTime;
     }
   }
 
