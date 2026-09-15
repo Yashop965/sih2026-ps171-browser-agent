@@ -45,6 +45,14 @@ except Exception as e:
     from server.llm_clients import MockLLMClient
     planner = ActionPlanner(llm_client=MockLLMClient())
 
+# Log which LLM client is actually active, so a misconfigured
+# LLM_PROVIDER/LLM_API_URL is visible at startup instead of silently
+# degrading to Ollama or the mock (issue #60).
+try:
+    print(f"[planner] active LLM client: {planner.llm_client.name} / {planner.llm_client.model_name}")
+except Exception:
+    print("[planner] could not resolve active LLM client")
+
 app = FastAPI(
     title="SIH2026 Browser Agent Server",
     description="Server-side action planner for privacy-preserving browser agent",
@@ -179,11 +187,14 @@ class HealthResponse(BaseModel):
     uptime_seconds: float
 
 
-# ===== State & Planner Initialization =====
+# ===== State =====
 
 session_store: Dict[str, Dict[str, Any]] = {}
 start_time = time.time()
-planner = ActionPlanner()
+# NOTE: do NOT reassign `planner` here. The configured planner was built at
+# import time from LLM_PROVIDER / LLM_API_URL / LLM_API_KEY / LLM_MODEL
+# (see top of file). A bare `ActionPlanner()` would silently fall back to
+# Ollama / mock and the cloud planner would never be called (issue #60).
 
 
 # ===== Endpoints =====
