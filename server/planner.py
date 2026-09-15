@@ -39,6 +39,12 @@ class PlannerResult(BaseModel):
     confidence: float = 0.0
     reasoning: str = ""
     error: Optional[str] = None
+    # Issue #68: True when this result was produced by a degraded path -
+    # the mock fallback (no LLM reachable at init) or a heuristic fallback
+    # (an unreachable / LLM errored at runtime). Callers MUST NOT treat a
+    # DONE emitted while degraded as a real task completion.
+    degraded: bool = False
+    degraded_reason: Optional[str] = None
 
 
 # ===== LLM Client Interface Boundary =====
@@ -86,6 +92,12 @@ class ActionPlanner:
             except Exception as e:
                 logger.warning(f"Failed to create LLM client: {e}, using mock")
                 self.llm_client = MockLLMClient()
+
+        # Issue #68: record whether the planner is running on the no-op mock
+        # (used when no LLM was configured or the client factory raised). A
+        # DONE emitted by the mock is NOT a real task completion and must be
+        # surfaced as degraded to the caller.
+        self._using_mock_fallback = isinstance(self.llm_client, MockLLMClient)
 
     def build_context_prompt(
         self,
@@ -433,6 +445,10 @@ RETURN ONLY this JSON (no markdown, no explanation):
                     action=ActionSchema(type="TYPE", targetId=element_id, value=value),
                     confidence=0.9,
                     reasoning=f"Heuristic: typing into {role} field #{element_id}",
+                    # Issue #68: heuristic, not LLM - mark degraded so the
+                    # caller can surface "planner fell back to heuristics".
+                    degraded=True,
+                    degraded_reason=f"Fallback heuristic ({error_msg})",
                 )
 
         # Find button for CLICK
@@ -452,6 +468,8 @@ RETURN ONLY this JSON (no markdown, no explanation):
                     action=ActionSchema(type="CLICK", targetId=element_id),
                     confidence=0.9,
                     reasoning=f"Heuristic: clicking button #{element_id}",
+                    degraded=True,
+                    degraded_reason=f"Fallback heuristic ({error_msg})",
                 )
 
         # Default fallback to scroll or done
@@ -461,6 +479,8 @@ RETURN ONLY this JSON (no markdown, no explanation):
             confidence=0.3,
             reasoning="Fallback heuristic scroll down",
             error=error_msg,
+            degraded=True,
+            degraded_reason=f"Fallback heuristic ({error_msg})",
         )
 
     async def plan(
@@ -533,6 +553,13 @@ RETURN ONLY this JSON (no markdown, no explanation):
                 elif context and context.get("moreContentBelow"):
                     result.reasoning = "Keeping SCROLL: visible inputs are filled, more content below the fold"
                     logger.info(result.reasoning)
+
+            # Issue #68: if this result came from the no-op mock (no LLM
+            # reachable at init), mark it degraded so the caller does NOT
+            # treat a DONE as a real completion.
+            if getattr(self, "_using_mock_fallback", False) and not result.degraded:
+                result.degraded = True
+                result.degraded_reason = "No LLM client reachable - planner running on mock fallback"
 
             return result
         except Exception as e:
