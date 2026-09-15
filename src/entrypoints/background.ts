@@ -80,6 +80,12 @@ export default defineBackground({
                 // popup was previously dropping this, so the planner never
                 // knew the page was taller than the viewport.
                 context: snapshot.context,
+                // Forward where the agent IS. Without these the server's
+                // /plan fell back to url="http://localhost", so a planner
+                // could never issue a meaningful NAVIGATE or know which page
+                // it was looking at. (Autonomy / multi-page support.)
+                url: snapshot.url || '',
+                title: snapshot.title || '',
               });
             } catch (e) {
               sendResponse({ ok: false, error: String(e) });
@@ -112,6 +118,57 @@ export default defineBackground({
                 error: result?.error,
               });
               sendResponse(result);
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e) });
+            }
+          })();
+          return true;
+
+        case 'NAVIGATE_TAB':
+          // Multi-page autonomy: navigate the active tab WITHOUT going through
+          // the content script. A NAVIGATE run in-page would call
+          // location.assign(), which unloads the page and kills the content
+          // script before it can return a response. browser.tabs.update runs
+          // in the service worker (which survives the page load), then we wait
+          // for the new document to finish loading so the next EXTRACT sees the
+          // fresh DOM instead of the half-loaded page.
+          (async () => {
+            try {
+              let tabId = sender.tab?.id;
+              if (!tabId) {
+                const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+                tabId = activeTab?.id;
+              }
+              if (!tabId) { sendResponse({ ok: false, error: 'No active tab' }); return; }
+              const target = message.url;
+              // Only http(s) - refuse javascript: and other dangerous schemes.
+              let url = target;
+              try {
+                const parsed = new URL(target, 'http://invalid');
+                if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                  sendResponse({ ok: false, error: `refused protocol: ${parsed.protocol}` });
+                  return;
+                }
+                url = parsed.href;
+              } catch {
+                sendResponse({ ok: false, error: 'invalid url' });
+                return;
+              }
+              await browser.tabs.update(tabId, { url });
+              // Wait for the new page to settle (bounded) so the agent does not
+              // re-extract a half-rendered DOM. Falls through on timeout.
+              await waitForTabLoad(tabId, 10_000);
+              privacyLedger.log({
+                timestamp: Date.now(),
+                tabId,
+                url,
+                type: 'EXECUTION',
+                selector: 'NAVIGATE',
+                confidence: 1,
+                verified: true,
+                action: 'SUCCESS',
+              });
+              sendResponse({ ok: true, url });
             } catch (e) {
               sendResponse({ ok: false, error: String(e) });
             }
@@ -484,6 +541,55 @@ async function waitForCondition(tabId: number, condition: string): Promise<boole
     `,
   });
   return true;
+}
+
+/**
+ * Resolve when a tab finishes loading a (new) document, or after a timeout.
+ *
+ * This is what a NAVIGATE waits on before the agent re-extracts: without it,
+ * the next EXTRACT would read a half-rendered DOM and the planner would act on
+ * nothing. We watch tabs.onUpdated for status === 'complete' and race it
+ * against a hard deadline so a stuck page (or a same-document hash change that
+ * never fires a fresh load) can't wedge the whole run.
+ *
+ * Returns true when we observed a load-complete, false when we timed out.
+ */
+async function waitForTabLoad(tabId: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  // 1) Fast path: the tab is already fully loaded (e.g. navigating to the
+  //    same URL, or the new page finished before we started listening).
+  try {
+    const tab = await browser.tabs.get(tabId);
+    if (tab.status === 'complete') return true;
+  } catch {
+    // Tab may have been closed mid-navigation; fall through to the timeout.
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const listener = (_id: number, changeInfo: { status?: string; url?: string }) => {
+      if (_id !== tabId) return;
+      if (changeInfo.status === 'complete') {
+        cleanup();
+        resolve(true);
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(false);
+    }, Math.max(0, deadline - Date.now()));
+
+    function cleanup() {
+      clearTimeout(timer);
+      try {
+        browser.tabs.onUpdated.removeListener(listener);
+      } catch {
+        /* already removed / SW shutting down - safe to ignore */
+      }
+    }
+
+    browser.tabs.onUpdated.addListener(listener);
+  });
 }
 
 // Types

@@ -54,7 +54,10 @@ class TestFastAPIPlanner(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
-        self.assertIn(data["action"]["type"], ["CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "DONE"])
+        # Full LLM-planner action vocabulary. WAIT/NAVIGATE were added for
+        # multi-page autonomy; a live LLM may legitimately return any of them
+        # (e.g. WAIT "results will load after the search").
+        self.assertIn(data["action"]["type"], ["CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "DONE"])
 
     def test_payload_50kb_rejection(self):
         large_label = "A" * (60 * 1024)
@@ -117,6 +120,68 @@ class TestFastAPIPlanner(unittest.TestCase):
         )
         self.assertIn("RECENT ACTION HISTORY:", prompt)
         self.assertIn("Action: TYPE, TargetId: 1", prompt)
+
+
+class TestAutonomousActionVocabulary(unittest.TestCase):
+    """Regression tests: the planner now understands WAIT + NAVIGATE so the
+    agent can act across pages and time, not just fill the current form."""
+
+    def test_wait_action_parses_with_waitMs(self):
+        planner = ActionPlanner(llm_client=MockLLMClient())
+        result = planner.parse_llm_output(
+            '{"type": "WAIT", "waitMs": 2500, "reasoning": "page loading"}',
+            [{"id": 1, "role": "button", "label": "Submit"}],
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(result.action.type, "WAIT")
+        self.assertEqual(result.action.waitMs, 2500)
+        self.assertEqual(result.confidence, 1.0)
+
+    def test_wait_defaults_waitMs_when_missing(self):
+        planner = ActionPlanner(llm_client=MockLLMClient())
+        result = planner.parse_llm_output(
+            '{"type": "WAIT", "reasoning": "settle"}',
+            [{"id": 1, "role": "button", "label": "Submit"}],
+        )
+        self.assertEqual(result.action.type, "WAIT")
+        self.assertEqual(result.action.waitMs, 1000)
+
+    def test_navigate_with_url_parses(self):
+        planner = ActionPlanner(llm_client=MockLLMClient())
+        result = planner.parse_llm_output(
+            '{"type": "NAVIGATE", "url": "https://example.com/profile"}',
+            [{"id": 1, "role": "button", "label": "Submit"}],
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(result.action.type, "NAVIGATE")
+        self.assertEqual(result.action.url, "https://example.com/profile")
+
+    def test_navigate_without_url_falls_back(self):
+        planner = ActionPlanner(llm_client=MockLLMClient())
+        result = planner.parse_llm_output(
+            '{"type": "NAVIGATE", "reasoning": "no destination given"}',
+            [{"id": 1, "role": "button", "label": "Submit", "interactive": True}],
+        )
+        # No url -> a navigation is a no-op, so it must degrade to a safe
+        # heuristic action (which is flagged degraded), not an empty NAVIGATE.
+        self.assertTrue(result.degraded)
+        self.assertNotEqual(result.action.type, "NAVIGATE")
+
+    def test_prompt_advertises_wait_and_navigate(self):
+        planner = ActionPlanner(llm_client=MockLLMClient())
+        prompt = planner.build_context_prompt(
+            url="https://example.com",
+            title="Form",
+            interactive_elements=[{"id": 1, "role": "textbox"}],
+            accessibility_tree=[],
+            task_description="Fill and submit",
+        )
+        # The LLM must be told about the new primitives and that DONE is
+        # goal-based, not "form filled".
+        self.assertIn('"NAVIGATE"', prompt)
+        self.assertIn('"WAIT"', prompt)
+        self.assertIn("waitMs", prompt)
+        self.assertIn("overall TASK goal", prompt)
 
 
 if __name__ == "__main__":

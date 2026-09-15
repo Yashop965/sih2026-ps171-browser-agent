@@ -1,16 +1,19 @@
 // src/lib/actions.ts
 // Takes an action from the planner server and performs it on the page.
 
-import { getElementById } from './dom';
+import { getElementById, getElementByStableId } from './dom';
 
 export interface Action {
-    type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'DONE';
+    type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'DONE';
     // Can be either numeric ID or stableId string
     targetId?: number | string;
     value?: string;
     scrollDirection?: 'up' | 'down' | 'left' | 'right';
     scrollAmount?: number;
     url?: string;
+    // WAIT: how long to let the page settle (ms). Autonomy primitive so the
+    // agent can pause for content to load / appear before re-extracting.
+    waitMs?: number;
 }
 
 export interface ActionResult {
@@ -178,6 +181,20 @@ function doNavigate(action: Action) {
     location.assign(target.href);
 }
 
+// WAIT: let the page settle (content loading, a spinner finishing, a modal
+// opening) before the agent re-extracts and re-plans. This is what turns the
+// agent from a blind one-shot form filler into something that can operate on
+// pages that change over time. Capped so a runaway/absent value can't wedge
+// the whole run.
+function doWait(action: Action) {
+    const requested = Number.isFinite(action.waitMs) ? (action.waitMs as number) : 1000;
+    const ms = Math.min(Math.max(requested, 0), 30_000); // clamp to [0, 30s]
+    // Return a promise that resolves after ms; the executor's surrounding
+    // 5s action timeout still applies to non-wait actions, so WAIT is exempted
+    // in execute() below by awaiting the returned promise directly.
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export async function execute(action: Action): Promise<ActionResult> {
     const started = performance.now();
 
@@ -188,17 +205,29 @@ export async function execute(action: Action): Promise<ActionResult> {
             case 'SELECT': doSelect(action); break;
             case 'SCROLL': doScroll(action); break;
             case 'NAVIGATE': doNavigate(action); break;
+            case 'WAIT': await doWait(action); break;
             case 'DONE': break;
             default:
                 throw new Error(`unknown action type: ${(action as Action).type}`);
         }
-        // Let the page react before we report success
-        await new Promise((r) => setTimeout(r, 120));
+        // Let the page react before we report success. WAIT already yielded
+        // for its full duration, so skip the extra settle for it.
+        if (action.type !== 'WAIT') {
+            await new Promise((r) => setTimeout(r, 120));
+        }
     };
 
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Per-action timeout. Most actions are fast (scroll/typing settle in
+    // well under a second); WAIT is the deliberate exception, where the whole
+    // point is to sleep. Give WAIT a bound that matches its requested
+    // duration (clamped to the same [0, 30s] window doWait uses) plus a
+    // small margin, so a 10s wait isn't killed by the default 5s race.
+    const bound = action.type === 'WAIT'
+        ? Math.min(Math.max(Number.isFinite(action.waitMs) ? (action.waitMs as number) : 1000, 0), 30_000) + 500
+        : ACTION_TIMEOUT_MS;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('action timed out')), ACTION_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('action timed out')), bound);
     });
 
     try {
@@ -219,7 +248,10 @@ export async function execute(action: Action): Promise<ActionResult> {
 
 export async function executeWithRetry(action: Action): Promise<ActionResult> {
     const first = await execute(action);
-    if (first.ok || action.type === 'NAVIGATE' || action.type === 'DONE') {
+    // NAVIGATE leaves the page (retries would re-run a navigation), DONE is a
+    // terminal signal, and WAIT already slept for the requested duration -
+    // none of them benefit from an automatic retry.
+    if (first.ok || action.type === 'NAVIGATE' || action.type === 'DONE' || action.type === 'WAIT') {
         return first;
     }
     await new Promise((r) => setTimeout(r, 400));
