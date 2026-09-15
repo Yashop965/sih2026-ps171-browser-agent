@@ -1,0 +1,356 @@
+{
+  "pii_heatmap": [
+    {
+      "label": "Enter your name",
+      "type": "text",
+      "isPii": true,
+      "value": "Arjun Sharma",
+      "box": {
+        "x": 341,
+        "y": 299.6875,
+        "w": 780,
+        "h": 37
+      }
+    },
+    {
+      "label": "your@email.com",
+      "type": "email",
+      "isPii": true,
+      "value": "arjun.sharma@mail.com",
+      "box": {
+        "x": 341,
+        "y": 374.6875,
+        "w": 780,
+        "h": 37
+      }
+    },
+    {
+      "label": "+91 98765 43210",
+      "type": "tel",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 341,
+        "y": 449.6875,
+        "w": 780,
+        "h": 37
+      }
+    },
+    {
+      "label": "XXXX XXXX XXXX",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 341,
+        "y": 524.6875,
+        "w": 780,
+        "h": 37
+      }
+    },
+    {
+      "label": "ABCDE1234F",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 341,
+        "y": 599.6875,
+        "w": 780,
+        "h": 37
+      }
+    },
+    {
+      "label": "PAN Card:",
+      "type": "password",
+      "isPii": true,
+      "value": "ABCPK1234F",
+      "box": {
+        "x": 341,
+        "y": 674.6875,
+        "w": 780,
+        "h": 37
+      }
+    }
+  ],
+  "form_demo": [
+    {
+      "label": "Enter first name",
+      "type": "text",
+      "isPii": true,
+      "value": "Arjun",
+      "box": {
+        "x": 360,
+        "y": 460.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "Enter last name",
+      "type": "text",
+      "isPii": true,
+      "value": "Sharma",
+      "box": {
+        "x": 730,
+        "y": 460.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "e.g., Rajesh Kumar Sharma",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 554.59375,
+        "w": 720,
+        "h": 47
+      }
+    },
+    {
+      "label": "XXXX XXXX XXXX",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 740.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "ABCDE1234F",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 730,
+        "y": 740.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "+91 9876543210",
+      "type": "tel",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 855.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "example@email.com",
+      "type": "email",
+      "isPii": true,
+      "value": "arjun.sharma@mail.com",
+      "box": {
+        "x": 730,
+        "y": 855.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "e.g., New Delhi",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 1212.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "XXXXXX",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 730,
+        "y": 1212.59375,
+        "w": 350,
+        "h": 47
+      }
+    },
+    {
+      "label": "Min 8 characters",
+      "type": "password",
+      "isPii": true,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 1514.59375,
+        "w": 720,
+        "h": 47
+      }
+    },
+    {
+      "label": "Re-enter password",
+      "type": "password",
+      "isPii": true,
+      "value": "••••••••",
+      "box": {
+        "x": 360,
+        "y": 1629.59375,
+        "w": 720,
+        "h": 47
+      }
+    },
+    {
+      "label": "Enter your answer",
+      "type": "text",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 1819.59375,
+        "w": 720,
+        "h": 47
+      }
+    },
+    {
+      "label": "Security Answer                         ",
+      "type": "checkbox",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 1909.59375,
+        "w": 13.140625,
+        "h": 18
+      }
+    },
+    {
+      "label": "I hereby declare that all the informatio",
+      "type": "checkbox",
+      "isPii": false,
+      "value": "",
+      "box": {
+        "x": 360,
+        "y": 1967.59375,
+        "w": 18,
+        "h": 18
+      }
+    }
+  ],
+  "gov_portal": [
+    {
+      "label": "Enter 12-digit Aadhaar",
+      "type": "text",
+      "isPii": true,
+      "value": "4821 5678 9012",
+      "box": {
+        "x": 336,
+        "y": 291.6875,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter PAN number",
+      "type": "text",
+      "isPii": true,
+      "value": "ABCPK1234F",
+      "box": {
+        "x": 336,
+        "y": 362.6875,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter your full name",
+      "type": "text",
+      "isPii": true,
+      "value": "Arjun Sharma",
+      "box": {
+        "x": 336,
+        "y": 433.6875,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter email",
+      "type": "email",
+      "isPii": true,
+      "value": "arjun.sharma@mail.com",
+      "box": {
+        "x": 336,
+        "y": 504.6875,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter phone number",
+      "type": "tel",
+      "isPii": true,
+      "value": "+91 98765 43210",
+      "box": {
+        "x": 336,
+        "y": 575.6875,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter account number",
+      "type": "text",
+      "isPii": true,
+      "value": "50100211345",
+      "box": {
+        "x": 336,
+        "y": 773.5,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter IFSC code",
+      "type": "text",
+      "isPii": true,
+      "value": "SBI0001234",
+      "box": {
+        "x": 336,
+        "y": 844.5,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Enter card number",
+      "type": "text",
+      "isPii": true,
+      "value": "4521 8836 0012",
+      "box": {
+        "x": 336,
+        "y": 915.5,
+        "w": 786,
+        "h": 33
+      }
+    },
+    {
+      "label": "Create password",
+      "type": "password",
+      "isPii": true,
+      "value": "••••••••",
+      "box": {
+        "x": 336,
+        "y": 1113.3125,
+        "w": 786,
+        "h": 33
+      }
+    }
+  ]
+}

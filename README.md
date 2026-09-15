@@ -418,6 +418,27 @@ Flip Wi-Fi off mid-demo — DOM path continues working locally, proving the offl
 
 ---
 
+## 🎬 Video Ad Pipeline
+
+Programmatic launch-ad video (9 scenes, 56.5s, 3 themes) built with
+Pillow + ffmpeg + edge-tts — real extension screenshots, no manual
+recording. **See [`ad_pipeline/README.md`](./ad_pipeline/README.md)**
+for the full pipeline, quick-start commands, and conventions.
+
+**Final deliverables** (repo root, ~12 MB each, QC 67/0):
+
+| File | Theme |
+|------|-------|
+| `SIH2026_PS171_YC_Ad_black_FINAL.mp4` | lead (black) |
+| `SIH2026_PS171_YC_Ad_project_FINAL.mp4` | indigo, matches extension UI |
+| `SIH2026_PS171_YC_Ad_light_FINAL.mp4` | warm paper, matches Popup.css |
+
+Rebuild: `python ad_pipeline/build_ad.py --theme all` →
+`python ad_pipeline/qc_frames.py --theme all` →
+`python ad_pipeline/assemble_final.py --theme all`.
+
+---
+
 ## 📚 References
 
 - **Problem Statement:** [SIH 2026 PS171](https://sidh.nihm.ac.in/page/participants/problem-statements)
