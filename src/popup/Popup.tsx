@@ -98,6 +98,14 @@ function Popup() {
         const elements = snapshot.elements ?? [];
         addLog(`Found ${elements.length} interactive elements`);
 
+        // Page geometry + scroll affordance (issue #59). The background now
+        // forwards this; forward it on to the planner so it knows whether the
+        // form continues below the fold and can decide to scroll.
+        const pageContext = snapshot.context ?? null;
+        if (pageContext?.moreContentBelow) {
+            addLog(`Page has more content below the fold (scrollY=${pageContext.scrollY}/${pageContext.scrollHeight})`);
+        }
+
         if (elements.length === 0) {
           addLog('No interactive elements found');
           break;
@@ -134,6 +142,10 @@ function Popup() {
             inputCount: inputFields.length,
             buttonCount: buttons.length,
             history: history,
+            // Page geometry + scroll affordance (issue #59): lets the planner
+            // see scrollY/scrollHeight/viewport and whether more content is
+            // below the fold, so it can issue SCROLL to reveal the next fields.
+            context: pageContext,
           }),
         });
 
@@ -172,7 +184,14 @@ function Popup() {
           addLog(`Scrolling page... (${consecutiveScrolls}/3)`);
           const scrollResult: any = await browser.runtime.sendMessage({
             type: 'EXECUTE',
-            action: { type: 'SCROLL', direction: 'down', amount: 500 }
+            // doScroll (src/lib/actions.ts) reads `scrollDirection`/`scrollAmount`.
+            // We previously sent `direction`/`amount`, which it ignored and fell
+            // back to a hard-coded 400px — now forward the planner's intent.
+            action: {
+              type: 'SCROLL',
+              scrollDirection: action.scrollDirection || 'down',
+              scrollAmount: action.scrollAmount || 500,
+            }
           });
           if (!scrollResult?.ok) {
             addLog('Scroll failed');

@@ -204,7 +204,22 @@ export function extract(): ExtractedElement[] {
 
         const id = nextId++;
         const label = getLabel(el);
-        const stableId = `${label}_${rect.left.toFixed(0)}_${rect.top.toFixed(0)}`;
+        // Content-invariant stable ID (issue #62). Previously this was
+        // `${label}_${rect.left}_${rect.top}` — screen coordinates — so the
+        // same element got a *different* stableId after any scroll. That
+        // broke the "already filled" tracking across scroll/re-extract, which
+        // is exactly what a scroll-to-reveal form walk needs. Now the id is
+        // built from what the element *is* (tag + name/for + role + label +
+        // its ordinal among same-kind siblings), never where it is on screen.
+        const nameAttr = el.getAttribute?.('name') || '';
+        const forAttr = el.getAttribute?.('for') || '';
+        const kind = el.tagName.toLowerCase();
+        const stableId = [
+            kind,
+            nameAttr || forAttr,
+            getRole(el),
+            label.replace(/\s+/g, '_').slice(0, 30) || 'unnamed',
+        ].join('|');
 
         registry.set(id, el);
         stableIdRegistry.set(stableId, el);
@@ -232,15 +247,33 @@ export function extract(): ExtractedElement[] {
     return results;
 }
 
-export function getPageContext() {
+export interface PageContext {
+    url: string;
+    title: string;
+    scrollY: number;
+    scrollHeight: number;
+    viewport: { width: number; height: number };
+    // True when the document has content below the current viewport. This is
+    // the single signal the planner needs to decide "scroll to reveal more
+    // fields". Without it the model only ever sees visible elements and has no
+    // idea the form continues (issue #59).
+    moreContentBelow: boolean;
+}
+
+export function getPageContext(): PageContext {
+    // 4px epsilon so a page scrolled flush to the bottom doesn't report
+    // "more below" and cause an endless scroll.
+    const bottom = Math.round(window.scrollY + window.innerHeight);
+    const height = Math.round(document.body.scrollHeight);
     return {
         url: location.href,
         title: document.title,
         scrollY: Math.round(window.scrollY),
-        scrollHeight: Math.round(document.body.scrollHeight),
+        scrollHeight: height,
         viewport: {
             width: window.innerWidth,
             height: window.innerHeight,
         },
+        moreContentBelow: bottom < height - 4,
     };
 }

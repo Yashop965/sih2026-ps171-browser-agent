@@ -95,6 +95,7 @@ class ActionPlanner:
         accessibility_tree: List[Dict[str, Any]],
         task_description: Optional[str] = None,
         history: Optional[List[Dict[str, Any]]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Builds a structured prompt for the LLM based on sanitized page metadata.
@@ -163,8 +164,22 @@ class ActionPlanner:
         # Filter out already-filled elements for cleaner context
         available_elements = [el for el in sanitized_elements if not el.get("filled", False)]
 
+        # Page geometry + scroll affordance (issue #59). The model can only
+        # scroll if it is told the form continues below the fold; without this
+        # it fills the first screen and stops.
+        context_str = "None"
+        if context:
+            more_below = "true" if context.get("moreContentBelow") else "false"
+            context_str = (
+                f"scrollY={context.get('scrollY', 0)}, "
+                f"scrollHeight={context.get('scrollHeight', 0)}, "
+                f"viewport={json.dumps(context.get('viewport', {}))}, "
+                f"moreContentBelow={more_below}"
+            )
+
         prompt = f"""URL: {url}
 PAGE TITLE: {title}
+PAGE GEOMETRY: {context_str}
 
 TASK: {task_str}
 
@@ -185,9 +200,10 @@ CRITICAL INSTRUCTIONS:
 2. TYPE the matching VALUE into elements that are NOT already filled
 3. SKIP elements marked as "filled": true - they are already done
 4. When all inputs are filled, CLICK the SUBMIT button
-5. Only use SCROLL if there are NO visible input fields
+5. USE SCROLL when moreContentBelow is true AND there are no UNFILLED fields visible in the current viewport - this reveals the next fields below the fold. Scroll down, then re-plan against the newly-revealed elements.
 6. ALWAYS check the "tag" and "type" fields before choosing action
 7. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
+8. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -341,6 +357,38 @@ RETURN ONLY this JSON (no markdown, no explanation):
 
         return None
 
+    def _unfilled_inputs(
+        self,
+        interactive_elements: List[Dict[str, Any]],
+        history: Optional[List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Visible, non-password inputs that have NOT been filled yet (issue #59).
+
+        An element counts as filled if it appears in `history` with result OK,
+        matched by numeric id or stableId - the same matching the prompt's
+        "filled" flag uses. This is what lets the SCROLL->TYPE override stop
+        clobbering the scroll once every visible field is done.
+        """
+        filled_targets = set()
+        for step in history or []:
+            if step.get("result") == "OK" and step.get("targetId") is not None:
+                filled_targets.add(str(step.get("targetId")))
+
+        def is_filled(el: Dict[str, Any]) -> bool:
+            ids = [str(el.get("id"))]
+            if el.get("stableId"):
+                ids.append(str(el.get("stableId")))
+            return any(i in filled_targets for i in ids)
+
+        return [
+            el for el in interactive_elements
+            if el.get("role") in ["textbox", "input"]
+            and not el.get("isPassword", False)
+            and not is_filled(el)
+            and el.get("interactive", True)
+        ]
+
     def _fallback_action(self, interactive_elements: List[Dict[str, Any]], error_msg: str) -> PlannerResult:
         """
         Generates a safe fallback action when planning fails.
@@ -415,9 +463,15 @@ RETURN ONLY this JSON (no markdown, no explanation):
         accessibility_tree: List[Dict[str, Any]],
         task_description: Optional[str] = None,
         history: Optional[List[Dict[str, Any]]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> PlannerResult:
         """
         Main entry point for generating an action plan.
+
+        ``context`` carries on-device page geometry (scrollY, scrollHeight,
+        viewport, moreContentBelow). It is the signal that tells the model the
+        form continues below the fold so it can SCROLL to reveal the next
+        fields instead of stopping after the first screen (issue #59).
         """
         system_prompt = (
             "You are a browser automation assistant. Given sanitized webpage metadata, "
@@ -430,6 +484,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
             accessibility_tree=accessibility_tree,
             task_description=task_description,
             history=history,
+            context=context,
         )
 
         try:
@@ -439,16 +494,17 @@ RETURN ONLY this JSON (no markdown, no explanation):
             llm_response = await self.llm_client.generate(prompt, system_prompt)
             result = self.parse_llm_output(llm_response, interactive_elements)
 
-            # POST-PROCESSING: Override SCROLL with TYPE if input fields exist
+            # POST-PROCESSING: Override SCROLL with TYPE when an UNFILLED input
+            # is visible (issue #59). The old version overrode SCROLL whenever
+            # ANY textbox existed - including already-filled ones - so once a
+            # screen of fields was done the agent could never scroll to reveal
+            # the next section. Now: only override while there is work to do
+            # on this screen; otherwise the scroll proceeds.
             if result.success and result.action and result.action.type == "SCROLL":
-                input_fields = [
-                    el for el in interactive_elements
-                    if el.get("role") in ["textbox", "input"]
-                    and not el.get("isPassword", False)
-                ]
+                unfilled_inputs = self._unfilled_inputs(interactive_elements, history)
 
-                if input_fields:
-                    first_input = input_fields[0]
+                if unfilled_inputs:
+                    first_input = unfilled_inputs[0]
                     element_id = first_input.get("id")
                     label = str(first_input.get("label", "")).lower()
 
@@ -464,7 +520,10 @@ RETURN ONLY this JSON (no markdown, no explanation):
                         value = "Test Data"
 
                     result.action = ActionSchema(type="TYPE", targetId=element_id, value=value)
-                    result.reasoning = f"Override: LLM returned SCROLL but input #{element_id} exists"
+                    result.reasoning = f"Override: unfilled input #{element_id} visible - fill before scrolling"
+                    logger.info(result.reasoning)
+                elif context and context.get("moreContentBelow"):
+                    result.reasoning = "Keeping SCROLL: visible inputs are filled, more content below the fold"
                     logger.info(result.reasoning)
 
             return result
