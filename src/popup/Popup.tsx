@@ -9,6 +9,7 @@ import { guardOutboundPlan } from '../lib/pii/outboundGuard';
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
   const [task, setTask] = useState('');
+  const [startUrl, setStartUrl] = useState('');
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
@@ -21,8 +22,9 @@ function Popup() {
 
   // Load saved state from browser.storage
   useEffect(() => {
-    browser.storage.local.get(['task', 'providerKey', 'apiKey']).then((result) => {
+    browser.storage.local.get(['task', 'startUrl', 'providerKey', 'apiKey']).then((result) => {
       if (result.task) setTask(result.task);
+      if (result.startUrl) setStartUrl(result.startUrl);
       if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
       if (result.apiKey) setProviderKey(result.apiKey);
     });
@@ -34,6 +36,14 @@ function Popup() {
       browser.storage.local.set({ task });
     }
   }, [task]);
+
+  // Save start URL to browser.storage whenever it changes (multi-page tasks
+  // need a starting point; empty means "run on the current tab").
+  useEffect(() => {
+    if (startUrl) {
+      browser.storage.local.set({ startUrl });
+    }
+  }, [startUrl]);
 
   // Health check function
   const checkHealth = useCallback(async () => {
@@ -87,6 +97,24 @@ function Popup() {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) throw new Error('No active tab');
 
+      // Multi-page autonomy: if the task specifies a starting URL, navigate
+      // there first (and wait for load) so the agent begins at the right page
+      // instead of whatever happens to be open. Empty startUrl = run on the
+      // current tab. Reuses the background NAVIGATE_TAB handler.
+      if (startUrl.trim()) {
+        addLog(`Starting at ${startUrl}`);
+        const nav = await browser.runtime.sendMessage({
+          type: 'NAVIGATE_TAB',
+          url: startUrl.trim(),
+        });
+        if (nav?.ok) {
+          addLog('✅ Navigated to start URL');
+          await new Promise((r) => setTimeout(r, 600)); // hydration settle
+        } else {
+          addLog(`⚠️ Could not navigate to start URL (${nav?.error ?? 'unknown'}) - running on current tab`);
+        }
+      }
+
       while (currentStep < maxSteps) {
         currentStep++;
         addLog(`--- Step ${currentStep}/${maxSteps} ---`);
@@ -101,6 +129,13 @@ function Popup() {
 
         const elements = snapshot.elements ?? [];
         addLog(`Found ${elements.length} interactive elements`);
+
+        // Where the agent is right now (multi-page autonomy). The background
+        // forwards these from capturePage; sending them lets the planner see
+        // the current page and issue a meaningful NAVIGATE instead of planning
+        // against a blind "http://localhost" default.
+        const pageUrl: string = snapshot.url ?? '';
+        const pageTitle: string = snapshot.title ?? '';
 
         // Page geometry + scroll affordance (issue #59). The background now
         // forwards this; forward it on to the planner so it knows whether the
@@ -155,7 +190,7 @@ function Popup() {
           elements: elements as Record<string, unknown>[],
           context: pageContext ?? undefined,
           history,
-          passThrough: { step: currentStep, inputCount: inputFields.length, buttonCount: buttons.length },
+          passThrough: { step: currentStep, inputCount: inputFields.length, buttonCount: buttons.length, url: pageUrl, title: pageTitle },
         });
         if (guard.blocked) {
           addLog(`⛔ Outbound firewall blocked /plan egress: ${guard.category ?? 'PII'} at ${guard.reason ?? '?'}`);
@@ -266,10 +301,14 @@ function Popup() {
             setStep(currentStep);
             filledIds.add(action.targetId);
 
-            // If we clicked submit, task might be done
+            // Autonomy: the planner (not a hardcoded guess) owns DONE. A submit
+            // click may end the task OR continue it (confirmation page, next
+            // step, another section) - re-plan against the new page state
+            // instead of force-stopping the agent at the first submit. Loop
+            // detection + maxSteps + the planner's own DONE judgment are the
+            // real safeguards.
             if (action.targetId === buttons[buttons.length - 1]?.id) {
-              addLog('🎯 Submit button clicked - task likely complete');
-              break;
+              addLog('🎯 Submit button clicked - re-planning against the result page');
             }
           } else {
             addLog(`❌ Click failed: ${result?.error ?? 'unknown'}`);
@@ -277,6 +316,66 @@ function Popup() {
             // FAILED with the reason so the planner can re-plan.
             failedIds.add(action.targetId);
             failedErrors.set(action.targetId, result?.error ?? 'unknown');
+          }
+        } else if (action.type === 'SELECT' && action.targetId && action.value) {
+          consecutiveScrolls = 0;
+          // Dropdowns: route through the content relay, which runs the SELECT
+          // executor in src/lib/actions.ts (matches an option by value or text
+          // and fires a change event). Previously this fell into "Unknown
+          // action", so the agent could not operate on any <select>.
+          addLog(`Selecting "${action.value}" in element #${action.targetId}`);
+          const result: any = await browser.runtime.sendMessage({
+            type: 'EXECUTE',
+            action,
+          });
+          if (result?.ok) {
+            addLog('✅ Selected successfully');
+            setStep(currentStep);
+            filledIds.add(action.targetId);
+            recentActionHistory.push({ targetId: action.targetId, type: 'SELECT' });
+          } else {
+            addLog(`❌ Select failed: ${result?.error ?? 'unknown'}`);
+            failedIds.add(action.targetId);
+            failedErrors.set(action.targetId, result?.error ?? 'unknown');
+            recentActionHistory.push({ targetId: action.targetId, type: 'SELECT' });
+          }
+        } else if (action.type === 'WAIT') {
+          // Let the page settle (loading / spinner / content appearing) before
+          // re-planning. No target needed. Route through the content relay,
+          // which now has a WAIT executor in src/lib/actions.ts.
+          const waitMs = Number.isFinite(action.waitMs) ? action.waitMs : 1000;
+          addLog(`⏳ Waiting ${waitMs}ms for page to settle...`);
+          const result: any = await browser.runtime.sendMessage({
+            type: 'EXECUTE',
+            action: { type: 'WAIT', waitMs },
+          });
+          if (!result?.ok) {
+            addLog(`⚠️ Wait reported issue: ${result?.error ?? 'unknown'}`);
+          }
+        } else if (action.type === 'NAVIGATE' && action.url) {
+          // Multi-page autonomy: move to a different page. This must go through
+          // the background NAVIGATE_TAB handler (browser.tabs.update + wait-for-
+          // load), NOT the content relay - an in-page location.assign() would
+          // unload the page and kill the content script before it could respond.
+          addLog(`🧭 Navigating to ${action.url}`);
+          const result: any = await browser.runtime.sendMessage({
+            type: 'NAVIGATE_TAB',
+            url: action.url,
+          });
+          if (result?.ok) {
+            addLog('✅ Navigated (new page loaded)');
+            setStep(currentStep);
+            // The element IDs / scroll position are all stale on the new page.
+            // Reset per-page loop-detection state; keep filledIds as a global
+            // "what I've done" record (new-page IDs won't collide).
+            consecutiveScrolls = 0;
+            recentActionHistory = [];
+            // Give the new page a moment for any client-side hydration before the
+            // next EXTRACT re-plans against it.
+            await new Promise((r) => setTimeout(r, 600));
+          } else {
+            addLog(`❌ Navigate failed: ${result?.error ?? 'unknown'}`);
+            break;
           }
         } else {
           addLog(`Unknown action: ${JSON.stringify(action)}`);
@@ -367,10 +466,17 @@ function Popup() {
           <label className="input-label">Task Description</label>
           <textarea
             className="task-textarea"
-            placeholder="e.g., Fill the form with test data and submit..."
+            placeholder="e.g., Go to the signup page, fill the form, and submit. Or: navigate to example.com/pricing and click the Pro plan..."
             value={task}
             onChange={(e) => setTask(e.target.value)}
             rows={3}
+          />
+          <label className="input-label">Start URL (optional)</label>
+          <input
+            className="api-key-input"
+            placeholder="e.g. https://example.com/signup — leave blank to use the current tab"
+            value={startUrl}
+            onChange={(e) => setStartUrl(e.target.value)}
           />
         </div>
 

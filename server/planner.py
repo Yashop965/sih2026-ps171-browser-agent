@@ -25,12 +25,15 @@ logger = logging.getLogger("sih_agent_planner")
 # ===== Protocol Schema (Matches src/lib/actions.ts) =====
 
 class ActionSchema(BaseModel):
-    type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, DONE
+    type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, WAIT, DONE
     targetId: Optional[int] = None
     value: Optional[str] = None
     scrollDirection: Optional[str] = None  # up, down, left, right
     scrollAmount: Optional[int] = None
     url: Optional[str] = None
+    # WAIT: how long to let the page settle before re-planning (ms). Autonomy
+    # primitive - lets the agent operate on pages that change over time.
+    waitMs: Optional[int] = None
 
 
 class PlannerResult(BaseModel):
@@ -215,15 +218,22 @@ ALL ELEMENTS (for reference - do NOT use filled ones):
 {json.dumps(sanitized_elements, indent=2)}
 
 CRITICAL INSTRUCTIONS:
+You are completing the TASK as a GOAL, not just filling the form on the current page.
+The task may span multiple pages. The current page is the URL shown at the top.
+Use your full action vocabulary to act on whatever page you land on:
 1. Match KEY names from the task to LABEL names on elements
 2. TYPE the matching VALUE into elements that are NOT already filled
 3. SKIP elements marked as "filled": true - they are already done
-4. When all inputs are filled, CLICK the SUBMIT button
+4. When all inputs on the CURRENT page are filled, CLICK the SUBMIT / continue button (or the next-step button if the task continues on another page)
 5. USE SCROLL when moreContentBelow is true AND there are no UNFILLED fields visible in the current viewport - this reveals the next fields below the fold. Scroll down, then re-plan against the newly-revealed elements.
-6. ALWAYS check the "tag" and "type" fields before choosing action
-7. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
-8. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
-9. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field, and do NOT signal DONE while a field is FAILED.
+6. USE WAIT when the page is still loading, a spinner/skeleton is present, or expected content has not appeared yet. Pause 1-3 seconds, then re-plan. A short WAIT is safer than acting on a half-rendered page.
+7. USE NAVIGATE to go to a specific URL when the task names a destination different from the current page. After navigating, re-plan against the new page.
+8. CLICK links / buttons that move the task forward (e.g. "Next", "Continue", "Go to profile", a result link) when that is what the task requires.
+9. ALWAYS check the "tag" and "type" fields before choosing action
+10. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
+11. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
+12. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field.
+13. Signal DONE ONLY when the overall TASK goal is achieved (the required fields are filled/submitted, or the requested page state is reached) - NOT merely because the current form is complete. If the task requires a different page or a further step, keep going.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -237,18 +247,22 @@ ACTION EXAMPLES:
 - For text input: {{"type": "TYPE", "targetId": 1, "value": "John", "reasoning": "filling first name"}}
 - For dropdown: {{"type": "SELECT", "targetId": 9, "value": "Option A", "reasoning": "selecting from dropdown"}}
 - For button: {{"type": "CLICK", "targetId": 4, "reasoning": "clicking submit button"}}
+- To go to another page: {{"type": "NAVIGATE", "url": "https://site.example/profile", "reasoning": "task continues on the profile page"}}
+- To let content load: {{"type": "WAIT", "waitMs": 2000, "reasoning": "page still loading, settle before next step"}}
 
-YOUR NEXT ACTION MUST BE:
+YOUR NEXT ACTION MUST BE THE ONE THAT ADVANCES THE TASK:
 - TYPE into an UNFILLED text input field using the matching value from the task
 - SELECT from an unfilled dropdown (if any exist)
-- CLICK the SUBMIT button ONLY when ALL inputs are filled
-- DONE only when all fields are filled OR no more actions needed
+- CLICK a link / button / SUBMIT that moves the task forward
+- NAVIGATE to the target URL when the task requires a different page
+- WAIT when the page has not finished loading
+- DONE only when the TASK goal is met OR no further useful action exists
 
-SYSTEMATIC APPROACH:
+SYSTEMATIC APPROACH (for form-like pages):
 1. Fill all text input fields first (one per step)
 2. Then fill all dropdown/select fields
 3. Then click any checkboxes/radios if needed
-4. Finally click SUBMIT button
+4. Finally click SUBMIT / continue, or NAVIGATE / CLICK to the next step
 5. Do NOT skip any unfilled fields
 
 MATCHING RULES:
@@ -262,7 +276,7 @@ MATCHING RULES:
 - For emails: use "test@example.com"
 - For phones: use "9876543210"
 
-IMPORTANT: Fill EVERY unfilled field you see. Do not stop until all inputs are completed.
+IMPORTANT: The TASK is the source of truth. Complete the task end-to-end across pages as needed; do not stop just because one form is filled if the task has more steps. Signal DONE only when the task is genuinely complete.
 
 RETURN ONLY this JSON (no markdown, no explanation):
 {{"type": "TYPE", "targetId": <input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
@@ -285,7 +299,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
 
         # Normalize action type
         raw_type = str(data.get("type", "")).upper().strip()
-        valid_types = {"CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "DONE"}
+        valid_types = {"CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "DONE"}
         
         if raw_type not in valid_types:
             logger.warning(f"Invalid action type: {raw_type}")
@@ -317,6 +331,24 @@ RETURN ONLY this JSON (no markdown, no explanation):
 
         url = data.get("url")
 
+        # WAIT duration. Accept the canonical key plus the aliases an LLM might
+        # reach for, and default to a sensible 1s when a WAIT is issued with no
+        # duration so the primitive still settles the page.
+        wait_ms = None
+        for key in ("waitMs", "wait_ms", "durationMs", "duration", "ms"):
+            candidate = data.get(key)
+            if candidate is not None:
+                try:
+                    wait_ms = int(float(candidate))
+                    break
+                except (ValueError, TypeError):
+                    continue
+        if raw_type == "WAIT" and wait_ms is None:
+            wait_ms = 1000
+        # Clamp so a runaway model value can't wedge the run.
+        if wait_ms is not None:
+            wait_ms = max(0, min(wait_ms, 30_000))
+
         # Validate target element existence if targetId is required
         valid_element_ids = {
             el.get("id") for el in interactive_elements if el.get("id") is not None
@@ -341,7 +373,17 @@ RETURN ONLY this JSON (no markdown, no explanation):
                     confidence = 0.5
                     reasoning += " (Targeting password field)"
 
-        if raw_type == "DONE":
+        # NAVIGATE must carry a URL - a navigation with no destination is a
+        # no-op the executor would reject. Guard it here so it degrades to a
+        # safe fallback instead of a wasted step.
+        if raw_type == "NAVIGATE" and not url:
+            logger.warning("NAVIGATE action without url - falling back")
+            return self._fallback_action(
+                interactive_elements,
+                "NAVIGATE action missing url"
+            )
+
+        if raw_type in {"DONE", "WAIT"}:
             confidence = 1.0
 
         action = ActionSchema(
@@ -351,6 +393,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
             scrollDirection=scroll_direction,
             scrollAmount=scroll_amount,
             url=url,
+            waitMs=wait_ms,
         )
 
         return PlannerResult(
