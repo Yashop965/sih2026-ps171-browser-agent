@@ -151,9 +151,16 @@ class ActionPlanner:
         history_summary = []
         if history:
             for step in history[-5:]:
-                history_summary.append(
-                    f"- Action: {step.get('action')}, TargetId: {step.get('targetId')}, Result: {step.get('result', 'OK')}"
+                result = step.get('result', 'OK')
+                line = (
+                    f"- Action: {step.get('action')}, "
+                    f"TargetId: {step.get('targetId')}, Result: {result}"
                 )
+                # Surface the failure reason so the model can re-plan (#63).
+                if result == "FAILED":
+                    err = step.get("error")
+                    line += f" (reason: {err})" if err else " (reason: unknown)"
+                history_summary.append(line)
 
         history_str = "\n".join(history_summary) if history_summary else "None"
         task_str = task_description or "Interact with the page to assist the user."
@@ -186,7 +193,7 @@ TASK: {task_str}
 KEY-VALUE PAIRS FROM TASK:
 {kv_str}
 
-RECENT ACTION HISTORY (already filled fields):
+RECENT ACTION HISTORY (results so far — OK = filled, FAILED = not yet done, retryable):
 {history_str}
 
 AVAILABLE INTERACTIVE ELEMENTS (NOT yet filled):
@@ -204,6 +211,7 @@ CRITICAL INSTRUCTIONS:
 6. ALWAYS check the "tag" and "type" fields before choosing action
 7. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
 8. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
+9. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field, and do NOT signal DONE while a field is FAILED.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value

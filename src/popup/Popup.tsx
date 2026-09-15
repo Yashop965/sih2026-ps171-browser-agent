@@ -76,7 +76,9 @@ function Popup() {
     const started = performance.now();
     let currentStep = 0;
     let consecutiveScrolls = 0;
-    let filledIds = new Set<string>(); // Track stable element IDs (label_x_y)
+    let filledIds = new Set<string>(); // Element IDs successfully filled/acted on
+    let failedIds = new Set<string>(); // Tried but FAILED (issue #63) - retryable, NOT "filled"
+    const failedErrors = new Map<string, string>(); // Per-ID last failure reason, sent to the planner
     let maxSteps = 15; // Will be updated after first extraction
     let recentActionHistory: Array<{targetId: string, type: string}> = []; // Track recent actions for loop detection
 
@@ -129,8 +131,17 @@ function Popup() {
         }
 
         addLog('Sending sanitized context to planner...');
-        // Build history with actually filled element stable IDs
-        const history = Array.from(filledIds).map(id => ({ targetId: id, result: 'OK' }));
+        // Build history. Issue #63: previously every attempted field was
+        // reported as result:'OK' (filledIds doubled as success + gave-up), so
+        // a FAILED type was sent to the planner as "already filled" and could
+        // never be retried. Now successes are OK, failures are FAILED with the
+        // error reason so the planner can re-plan / retry a different value.
+        const history: Array<{ targetId: string; result: 'OK' | 'FAILED'; error?: string }> = [];
+        for (const id of filledIds) history.push({ targetId: id, result: 'OK' });
+        for (const id of failedIds) {
+          if (filledIds.has(id)) continue; // succeeded on a later retry -> OK only
+          history.push({ targetId: id, result: 'FAILED', error: failedErrors.get(id) ?? 'unknown' });
+        }
 
         // Issue #61: the live /plan egress was bypassing the outbound PII
         // firewall (the redact->firewall pipeline lived only in the dead
@@ -223,8 +234,10 @@ function Popup() {
             recentActionHistory.push({ targetId: action.targetId, type: 'TYPE' });
           } else {
             addLog(`❌ Type failed: ${result?.error ?? 'unknown'}`);
-            // Still mark as attempted so planner doesn't retry forever
-            filledIds.add(action.targetId);
+            // Issue #63: record as FAILED (retryable) with the error reason so
+            // the planner can re-plan — NOT as filled/OK (the old behaviour).
+            failedIds.add(action.targetId);
+            failedErrors.set(action.targetId, result?.error ?? 'unknown');
             recentActionHistory.push({ targetId: action.targetId, type: 'TYPE' });
           }
         } else if (action.type === 'CLICK' && action.targetId) {
@@ -247,8 +260,10 @@ function Popup() {
             }
           } else {
             addLog(`❌ Click failed: ${result?.error ?? 'unknown'}`);
-            // Still mark as attempted so planner doesn't retry forever
-            filledIds.add(action.targetId);
+            // Issue #63: a failed click is retryable, not "done" — record it as
+            // FAILED with the reason so the planner can re-plan.
+            failedIds.add(action.targetId);
+            failedErrors.set(action.targetId, result?.error ?? 'unknown');
           }
         } else {
           addLog(`Unknown action: ${JSON.stringify(action)}`);
