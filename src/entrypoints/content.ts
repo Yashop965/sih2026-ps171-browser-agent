@@ -59,6 +59,9 @@ export default defineContentScript({
                 accessibilityTree: a11yTree,
                 interactiveElements,
                 detectedPII: piiDetector.scanDocument(),
+                // Page geometry + scroll affordance (issue #59): lets the planner
+                // know the form continues below the fold so it can scroll.
+                context: getPageContext(),
             };
         }
 
@@ -586,6 +589,10 @@ interface SanitizedDOMSnapshot {
     accessibilityTree: ARIAElement[];
     interactiveElements: InteractiveElement[];
     detectedPII: DetectedPII[];
+    // Page geometry + scroll affordance (issue #59). The background forwards
+    // this to the popup, which forwards it to the planner so it knows whether
+    // the form continues below the fold.
+    context: import('../lib/dom').PageContext;
 }
 
 interface ARIAElement {

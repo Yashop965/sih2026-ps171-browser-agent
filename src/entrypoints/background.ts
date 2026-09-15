@@ -73,7 +73,14 @@ export default defineBackground({
                   action: 'DETECTED',
                 });
               }
-              sendResponse({ ok: true, elements: snapshot.interactiveElements || [] });
+              sendResponse({
+                ok: true,
+                elements: snapshot.interactiveElements || [],
+                // Forward page geometry + scroll affordance (issue #59). The
+                // popup was previously dropping this, so the planner never
+                // knew the page was taller than the viewport.
+                context: snapshot.context,
+              });
             } catch (e) {
               sendResponse({ ok: false, error: String(e) });
             }

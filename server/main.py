@@ -114,6 +114,9 @@ class SanitizedPayload(BaseModel):
     hasScreenshots: Optional[bool] = False
     task_description: Optional[str] = None
     history: Optional[List[Dict[str, Any]]] = None
+    # Page geometry + scroll affordance (issue #59): scrollY, scrollHeight,
+    # viewport, moreContentBelow — computed on-device, carries no PII.
+    context: Optional[Dict[str, Any]] = None
 
 
 class PlanRequest(BaseModel):
@@ -131,6 +134,8 @@ class PlanRequest(BaseModel):
     step: Optional[int] = None
     inputCount: Optional[int] = None
     buttonCount: Optional[int] = None
+    # Page geometry + scroll affordance from the popup (issue #59).
+    context: Optional[Dict[str, Any]] = None
 
     model_config = {"populate_by_name": True}
 
@@ -166,6 +171,7 @@ class PlanRequest(BaseModel):
             detectedPII=self.detectedPII or [],
             task_description=task_desc,
             history=self.history,
+            context=self.context,
         )
 
 
@@ -224,6 +230,10 @@ async def plan_action(request: PlanRequest):
         raw_a11y = [el.model_dump() for el in payload.accessibilityTree]
         task_desc = payload.task_description or request.task_description
         history_list = payload.history or request.history
+        # Page geometry + scroll affordance (issue #59): lets the planner see
+        # scrollY/scrollHeight/viewport and whether more content is below the
+        # fold, so it can issue SCROLL to reveal the next fields.
+        page_context = payload.context
 
         # Delegate planning to planner module
         planner_result: PlannerResult = await planner.plan(
@@ -233,6 +243,7 @@ async def plan_action(request: PlanRequest):
             accessibility_tree=raw_a11y,
             task_description=task_desc,
             history=history_list,
+            context=page_context,
         )
 
         return PlanResponse(
