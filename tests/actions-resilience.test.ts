@@ -20,7 +20,15 @@ describe('executeWithResilience', () => {
     // Note: Without real DOM, this will fail - testing the retry logic instead
   });
 
-  it('should retry with exponential backoff on failure', async () => {
+  it('should retry with exponential backoff on a TRANSIENT failure', async () => {
+    // A live, CONNECTED element of the wrong type is a TRANSIENT error
+    // ("cannot TYPE into <button>") - the element exists, the action just
+    // didn't work. The retry loop SHOULD keep trying (issue #64 only
+    // short-circuits stale / not-found targets, not transient ones).
+    const liveButton = document.createElement('button');
+    document.body.appendChild(liveButton);
+    mockElements.set(500, liveButton);
+
     const delays: number[] = [];
     const originalSetTimeout = global.setTimeout;
     global.setTimeout = ((fn: () => void, ms: number) => {
@@ -28,24 +36,40 @@ describe('executeWithResilience', () => {
       return originalSetTimeout(fn, 0);
     }) as any;
 
-    const action: Action = { type: 'CLICK', targetId: 999 }; // Non-existent element
+    const action: Action = { type: 'TYPE', targetId: 500, value: 'x' };
     const result = await executeWithResilience(action, 3);
 
     expect(result.ok).toBe(false);
-    // Should have timeout delays (5000ms) between each attempt plus backoff
-    expect(delays.some(d => d === 5000)).toBe(true);
+    expect(result.stale).toBe(false); // wrong-type is transient, not stale
+    // The transient failure must still run the full backoff ladder.
     expect(delays.some(d => d === 200 || d === 400 || d === 800)).toBe(true);
+    expect(delays.some(d => d === 5000)).toBe(true);
 
     global.setTimeout = originalSetTimeout;
+    mockElements.delete(500);
+    liveButton.remove();
   });
 
-  it('should stop retrying after maxRetries', async () => {
-    const action: Action = { type: 'CLICK', targetId: 999 };
-    const result = await executeWithResilience(action, 2);
+  it('stops early (no backoff) on a STALE / not-found target', async () => {
+    // Issue #64: a not-found target is flagged stale, so the loop breaks on
+    // the first attempt instead of burning the 200/400/800ms backoff.
+    const delays: number[] = [];
+    const originalSetTimeout = global.setTimeout;
+    global.setTimeout = ((fn: () => void, ms: number) => {
+      delays.push(ms);
+      return originalSetTimeout(fn, 0);
+    }) as any;
+
+    const action: Action = { type: 'CLICK', targetId: 999 }; // not in registry
+    const result = await executeWithResilience(action, 3);
 
     expect(result.ok).toBe(false);
-    // Error comes from execute() itself, not from max retries message
+    expect(result.stale).toBe(true);
     expect(result.error).toContain('not found');
+    // No exponential-backoff delay was incurred because we short-circuited.
+    expect(delays.some(d => d === 200 || d === 400 || d === 800)).toBe(false);
+
+    global.setTimeout = originalSetTimeout;
   });
 });
 

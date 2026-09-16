@@ -25,6 +25,11 @@ export interface ActionResult {
     action: Action;
     error?: string;
     durationMs: number;
+    // Issue #64: true when the failure is a stale / not-found element. The
+    // target is gone from the DOM (page re-rendered / navigated), so re-acting
+    // on the same id can never succeed - the caller must re-extract to
+    // re-register elements instead of retrying the dead id.
+    stale?: boolean;
 }
 
 const ACTION_TIMEOUT_MS = 5000;
@@ -324,16 +329,36 @@ export async function execute(action: Action): Promise<ActionResult> {
         await Promise.race([run(), timeout]);
         return { ok: true, action, durationMs: performance.now() - started };
     } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        // Issue #64: distinguish a dead-element failure (the element is gone
+        // from the DOM - resolve() threw "not found" / "stale") from a
+        // transient one. Re-acting on the same id can never fix a dead
+        // element; the caller must re-extract to re-register elements.
         return {
             ok: false,
             action,
-            error: err instanceof Error ? err.message : String(err),
+            error,
             durationMs: performance.now() - started,
+            stale: isStaleElementError(error),
         };
     } finally {
         // Without this every action leaves a live 5s timer behind.
         if (timer !== undefined) clearTimeout(timer);
     }
+}
+
+// Issue #64: true when the error means the target element no longer exists in
+// the DOM. These come from resolve() ("not found" / "stale") and from a
+// selector that matched nothing. A time-out / "cannot TYPE into <x>" error is
+// NOT stale - the element is fine, the action just didn't work this time.
+function isStaleElementError(message: string): boolean {
+    const m = message.toLowerCase();
+    return (
+        m.includes('not found') ||
+        m.includes('stale') ||
+        m.includes('page may have changed') ||
+        m.includes('page changed since extract')
+    );
 }
 
 export async function executeWithRetry(action: Action): Promise<ActionResult> {
@@ -344,6 +369,11 @@ export async function executeWithRetry(action: Action): Promise<ActionResult> {
     // would double-submit or re-focus). None of them benefit from an
     // automatic retry.
     if (first.ok || action.type === 'NAVIGATE' || action.type === 'DONE' || action.type === 'WAIT' || action.type === 'KEY') {
+        return first;
+    }
+    // Issue #64: a stale / not-found target can't be fixed by re-acting on the
+    // same id. Return immediately (with stale=true) so the caller re-extracts.
+    if (first.stale) {
         return first;
     }
     await new Promise((r) => setTimeout(r, 400));
@@ -368,16 +398,25 @@ export async function executeWithResilience(
 
         lastError = result.error;
 
+        // Issue #64: a stale / not-found element will never come back by
+        // re-acting on the same id. Stop the loop immediately and let the
+        // planner re-extract (which re-registers elements) instead of
+        // burning the full backoff on a dead target.
+        if (result.stale) {
+            break;
+        }
+
         // Exponential backoff: 200ms, 400ms, 800ms
         await delay(Math.pow(2, i) * 200);
     }
 
-    // All retries failed
+    // All retries failed (or we short-circuited on a stale element).
     return {
         ok: false,
         action,
         error: lastError ?? 'Max retries exceeded',
         durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
+        stale: results.some((r) => r.stale),
     };
 }
 
