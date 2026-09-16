@@ -219,9 +219,12 @@ function doKey(action: Action) {
     if (!name) throw new Error('key missing');
 
     // Resolve target: explicit element, else whatever currently has focus,
-    // else the body (so a key still lands somewhere meaningful).
+    // else the body (so a key still lands somewhere meaningful). A null /
+    // absent targetId means "press on the focused element" - the planner uses
+    // that to submit a search box it just typed into. (Bug: null was treated
+    // as a resolvable id -> "element null not found" and the Enter never fired.)
     let target: Element | null = null;
-    if (action.targetId !== undefined) {
+    if (action.targetId !== undefined && action.targetId !== null) {
         target = resolve(action.targetId);
         scrollIntoView(target);
         if (target instanceof HTMLElement) target.focus();

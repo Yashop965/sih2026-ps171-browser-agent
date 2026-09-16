@@ -19,27 +19,37 @@
 export interface RecentAction {
   targetId: string;
   type: string;
+  value?: string;
 }
 
 /**
- * True when the planner re-issues the exact same (targetId, type) action as
- * the previous one - e.g. re-clicking the same submit button or re-typing
- * the same field the moment it was just typed. Action types that carry no
- * element target (SCROLL / NAVIGATE / WAIT / DONE) have targetId undefined
- * and so never repeat here; their guard is separate (ScrollGuard + the
- * max-steps cap).
+ * True when the planner re-issues the exact same action as the previous one.
+ *
+ * Value-blind repeat detection (comparing only targetId+type) breaks
+ * legitimate re-use of a field: e.g. the agent searches "Web browser" in the
+ * Wikipedia box, then searches "Progressive web app" in the SAME box — both
+ * are TYPE on the same targetId, but with different values, so the second is
+ * real progress, not a loop. For value-bearing actions we therefore only flag
+ * a repeat when the value is identical; a different value is a fresh action.
+ * Action types that carry no element target (SCROLL / NAVIGATE / WAIT / DONE)
+ * have targetId undefined and never repeat here (their guard is the
+ * ScrollGuard + max-steps cap).
  */
 export function isRepeatedAction(
   recentHistory: RecentAction[],
-  action: { targetId?: number | string; type: string },
+  action: { targetId?: number | string; type: string; value?: string },
 ): boolean {
   if (action.targetId === undefined) return false;
   const last = recentHistory[recentHistory.length - 1];
-  return (
-    !!last &&
-    String(last.targetId) === String(action.targetId) &&
-    last.type === action.type
-  );
+  if (!last) return false;
+  if (String(last.targetId) !== String(action.targetId)) return false;
+  if (last.type !== action.type) return false;
+  // Value-bearing actions: same value = a genuine loop; different value =
+  // legitimate re-use of the field (re-search, re-entering data).
+  if (action.type === 'TYPE' || action.type === 'SELECT') {
+    return String(last.value ?? '') === String(action.value ?? '');
+  }
+  return true;
 }
 
 /**

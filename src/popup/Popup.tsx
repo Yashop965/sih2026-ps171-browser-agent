@@ -18,6 +18,7 @@ function Popup() {
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
   const [serverLatency, setServerLatency] = useState<number>(0);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
+  const [copyFlash, setCopyFlash] = useState(false);
 
   // Load saved state from browser.storage
   useEffect(() => {
@@ -78,9 +79,22 @@ function Popup() {
     setStep(state.step ?? 0);
     setIsRunning(state.running === true);
     const raw = Array.isArray(state.logs) ? state.logs : [];
-    // Runner logs are chronological; the UI shows newest-first (last 50).
-    setLogs([...raw].reverse().slice(0, 50));
+    // Runner logs are chronological; keep the WHOLE run (Bug D: the Copy
+    // button needs every entry, not just the last 50). Stored newest-first.
+    setLogs([...raw].reverse());
   }, []);
+
+  // Bug D: copy the complete activity log (oldest → newest) to the clipboard.
+  const copyFullLog = useCallback(async () => {
+    const text = [...logs].reverse().join('\n'); // logs are newest-first
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFlash(true);
+      setTimeout(() => setCopyFlash(false), 1500);
+    } catch {
+      // clipboard may be unavailable in some contexts; no-op
+    }
+  }, [logs]);
 
   // Subscribe to runner progress + restore the last state on mount so a
   // reopened popup shows the running / previous run instead of a blank UI.
@@ -234,15 +248,32 @@ function Popup() {
         <div className={`log-section ${logsCollapsed ? 'collapsed' : ''}`}>
           <div className="log-header" onClick={() => setLogsCollapsed(!logsCollapsed)}>
             <span className="log-title">Activity Log</span>
+            <span className="log-header-actions" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="copy-log-btn"
+                onClick={copyFullLog}
+                disabled={logs.length === 0}
+                title="Copy the full activity log"
+              >
+                {copyFlash ? 'Copied ✓' : 'Copy'}
+              </button>
+            </span>
             <svg className="log-toggle" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points={logsCollapsed ? "9 18 15 12 9 6" : "15 18 9 12 15 6"} />
+              <polyline points={logsCollapsed ? "9 18 15 12 9 6" : "15 18 9 12 9 6"} />
             </svg>
           </div>
           {!logsCollapsed && (
             <div className="log-container">
-              {logs.map((log, i) => (
-                <div key={i} className="log-entry">{log}</div>
-              ))}
+              {logs.length === 0 ? (
+                <div className="log-entry log-empty">No activity yet</div>
+              ) : (
+                // Display the most recent ~60 so the panel stays scrollable;
+                // the Copy button always has the FULL log.
+                [...logs].slice(0, 60).map((log, i) => (
+                  <div key={i} className="log-entry">{log}</div>
+                ))
+              )}
             </div>
           )}
         </div>

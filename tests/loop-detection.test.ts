@@ -49,6 +49,25 @@ describe('isRepeatedAction (the real loop-detect)', () => {
     expect(isRepeatedAction(recent, { type: 'CLICK', targetId: 2 })).toBe(true);
     expect(isRepeatedAction(recent, { type: 'TYPE', targetId: 1 })).toBe(false);
   });
+
+  it('VALUE-AWARE: re-typing a NEW value into the same box is NOT a loop', () => {
+    // The Wikipedia two-search case: TYPE "Web browser" into the search box,
+    // then TYPE "Progressive web app" into the SAME box. Different value =>
+    // real progress, must not be skipped.
+    const recent = [{ targetId: '2', type: 'TYPE', value: 'Web browser' }];
+    expect(isRepeatedAction(recent, { type: 'TYPE', targetId: 2, value: 'Progressive web app' })).toBe(false);
+  });
+
+  it('VALUE-AWARE: re-typing the SAME value into the same box IS a loop', () => {
+    const recent = [{ targetId: '2', type: 'TYPE', value: 'Web browser' }];
+    expect(isRepeatedAction(recent, { type: 'TYPE', targetId: 2, value: 'Web browser' })).toBe(true);
+  });
+
+  it('VALUE-AWARE: SELECT honors the same value-aware rule', () => {
+    const recent = [{ targetId: '9', type: 'SELECT', value: 'Option A' }];
+    expect(isRepeatedAction(recent, { type: 'SELECT', targetId: 9, value: 'Option B' })).toBe(false);
+    expect(isRepeatedAction(recent, { type: 'SELECT', targetId: 9, value: 'Option A' })).toBe(true);
+  });
 });
 
 describe('ScrollGuard (stops a scroll storm)', () => {
