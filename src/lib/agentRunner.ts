@@ -434,6 +434,18 @@ export class AgentRunner {
       if (r?.ok) {
         this.log('✅ Clicked successfully');
         this.filledIds.add(String(action.targetId));
+        // A click that navigates (opening an article/suggestion link) drops the
+        // content port; the SW reports ok:true with a "page navigated" note
+        // (#86). Give the new page a full-navigation settle before the next
+        // EXTRACT - a navigating CLICK is otherwise the one action the flat
+        // 300ms inter-step settle does NOT cover (it would read a half-loaded
+        // DOM). Mirrors the KEY/NAVIGATE navigation handling below.
+        if (r.note && /navigat/i.test(r.note)) {
+          this.log('🧭 Click triggered a navigation - re-planning on the new page');
+          this.scrollGuard.noteOtherAction();
+          this.recentActionHistory = [];
+          await d.delay(600);
+        }
       } else {
         this.log(`❌ Click failed: ${r?.error ?? 'unknown'}`);
         recordFailure(String(action.targetId), r?.error);
