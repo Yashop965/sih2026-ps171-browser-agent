@@ -1,90 +1,106 @@
+/**
+ * Issue #76 - the "loop-detection" test used to build a local mock array and
+ * assert on it, so it could pass forever no matter what the shipping code
+ * did. The real loop-detection now lives in src/lib/loopDetection.ts
+ * (delegated to by the SW agent loop in src/lib/agentRunner.ts). This file
+ * tests THAT module directly:
+ *   - isRepeatedAction  -> duplicate planned action on the same element
+ *   - ScrollGuard       -> a "scroll storm" (no progress) is stopped
+ *   - calculateMaxSteps -> the shared step budget (test and loop can't drift)
+ */
 import { describe, it, expect } from 'vitest';
+import {
+  isRepeatedAction,
+  ScrollGuard,
+  calculateMaxSteps,
+} from '../src/lib/loopDetection';
 
-describe('Loop Detection', () => {
-  it('should track repeated actions', () => {
-    // Test that we can detect when same action is repeated
-    const actionHistory: Array<{targetId: number, type: string}> = [];
-    
-    // Simulate adding actions
-    actionHistory.push({ targetId: 1, type: 'TYPE' });
-    actionHistory.push({ targetId: 1, type: 'TYPE' }); // Same action twice
-    
-    // Check for loop detection
-    const recentActions = actionHistory.slice(-5);
-    const lastAction = recentActions[recentActions.length - 1];
-    const secondLastAction = recentActions[recentActions.length - 2];
-    
-    expect(lastAction?.targetId).toBe(secondLastAction?.targetId);
-    expect(lastAction?.type).toBe(secondLastAction?.type);
+describe('isRepeatedAction (the real loop-detect)', () => {
+  it('flags a back-to-back same (targetId, type) as a loop', () => {
+    const recent = [{ targetId: '7', type: 'CLICK' }];
+    expect(isRepeatedAction(recent, { type: 'CLICK', targetId: 7 })).toBe(true);
+    // Numeric id vs string target in history - still the same element.
+    expect(isRepeatedAction(recent, { type: 'CLICK', targetId: '7' })).toBe(true);
   });
 
-  it('should detect different actions as not repeated', () => {
-    const actionHistory: Array<{targetId: number, type: string}> = [];
-    
-    actionHistory.push({ targetId: 1, type: 'TYPE' });
-    actionHistory.push({ targetId: 2, type: 'TYPE' }); // Different element
-    
-    const recentActions = actionHistory.slice(-5);
-    const lastAction = recentActions[recentActions.length - 1];
-    const secondLastAction = recentActions[recentActions.length - 2];
-    
-    expect(lastAction?.targetId).not.toBe(secondLastAction?.targetId);
+  it('does NOT flag a different element or a different action type', () => {
+    const recent = [{ targetId: '7', type: 'CLICK' }];
+    expect(isRepeatedAction(recent, { type: 'CLICK', targetId: 8 })).toBe(false);
+    expect(isRepeatedAction(recent, { type: 'TYPE', targetId: 7 })).toBe(false);
+  });
+
+  it('ignores actions with no element target (SCROLL / NAVIGATE / WAIT / DONE)', () => {
+    const recent = [{ targetId: 'scroll', type: 'SCROLL' }];
+    // A targetless action cannot be a "repeated same element" loop; its guard
+    // is the ScrollGuard / step budget, not isRepeatedAction.
+    expect(isRepeatedAction(recent, { type: 'SCROLL' })).toBe(false);
+    expect(isRepeatedAction(recent, { type: 'NAVIGATE', url: 'x' })).toBe(false);
+  });
+
+  it('is false when there is no history yet', () => {
+    expect(isRepeatedAction([], { type: 'CLICK', targetId: 1 })).toBe(false);
+  });
+
+  it('compares only the most recent action', () => {
+    const recent = [
+      { targetId: '1', type: 'TYPE' },
+      { targetId: '2', type: 'CLICK' },
+    ];
+    expect(isRepeatedAction(recent, { type: 'CLICK', targetId: 2 })).toBe(true);
+    expect(isRepeatedAction(recent, { type: 'TYPE', targetId: 1 })).toBe(false);
   });
 });
 
-describe('Dynamic Max Steps', () => {
-  // Single definition of calculateMaxSteps
-  const calculateMaxSteps = (inputs: number, selects: number, buttons: number): number => {
-    return Math.max(10, Math.min(50, (inputs + selects) * 3 + buttons + 5));
-  };
-
-  it('should calculate steps based on element count', () => {
-    // Small form: 3 inputs, 0 selects, 1 button = max(10, min(50, 3*3 + 1 + 5)) = max(10, 15) = 15
-    expect(calculateMaxSteps(3, 0, 1)).toBe(15);
-
-    // Large form: 13 inputs, 2 selects, 3 buttons
-    expect(calculateMaxSteps(13, 2, 3)).toBe(50); // capped at 50
-
-    // Very small form: 1 input, 0 selects, 1 button
-    expect(calculateMaxSteps(1, 0, 1)).toBe(10); // minimum 10
+describe('ScrollGuard (stops a scroll storm)', () => {
+  it('allows up to the threshold of consecutive scrolls, then blocks', () => {
+    const guard = new ScrollGuard(3);
+    expect(guard.nextScroll()).toEqual({ allowed: true, consecutive: 1 });
+    expect(guard.nextScroll()).toEqual({ allowed: true, consecutive: 2 });
+    expect(guard.nextScroll()).toEqual({ allowed: true, consecutive: 3 });
+    // 4th consecutive scroll is a storm - blocked.
+    const fourth = guard.nextScroll();
+    expect(fourth.allowed).toBe(false);
+    expect(fourth.consecutive).toBe(4);
   });
 
-  it('should handle edge cases', () => {
-    // Empty form
-    expect(calculateMaxSteps(0, 0, 0)).toBe(10);
+  it('a non-scroll action resets the counter', () => {
+    const guard = new ScrollGuard(3);
+    guard.nextScroll();
+    guard.nextScroll();
+    guard.noteOtherAction(); // user/planner did something else
+    // After the reset, three more consecutive scrolls are again allowed.
+    expect(guard.nextScroll()).toEqual({ allowed: true, consecutive: 1 });
+  });
 
-    // Huge form
-    expect(calculateMaxSteps(20, 10, 5)).toBe(50); // capped
+  it('respects a custom threshold', () => {
+    const guard = new ScrollGuard(1);
+    expect(guard.nextScroll().allowed).toBe(true);
+    expect(guard.nextScroll().allowed).toBe(false);
+  });
+
+  it('exposes the running count', () => {
+    const guard = new ScrollGuard(5);
+    expect(guard.count).toBe(0);
+    guard.nextScroll();
+    guard.nextScroll();
+    expect(guard.count).toBe(2);
+    guard.noteOtherAction();
+    expect(guard.count).toBe(0);
   });
 });
 
-describe('SELECT Action for Dropdowns', () => {
-  it('should identify select elements correctly', () => {
-    const elements = [
-      { tag: 'input', type: 'text', role: 'textbox' },
-      { tag: 'select', type: 'select-one', role: 'combobox' },
-      { tag: 'button', type: undefined, role: 'button' },
-      { tag: 'a', href: '#', role: 'link' },
-    ];
-
-    const selects = elements.filter((e: any) => e.tag === 'select' || e.type === 'select-one');
-    expect(selects).toHaveLength(1);
-    expect(selects[0].tag).toBe('select');
+describe('calculateMaxSteps (shared budget the loop and test both use)', () => {
+  it('is generous for a small form', () => {
+    // 3 inputs, 0 selects, 1 button -> max(20, 3*3+1+10) = 20
+    expect(calculateMaxSteps(3, 0, 1)).toBe(20);
   });
 
-  it('should distinguish between input types', () => {
-    const elements = [
-      { tag: 'input', type: 'text' },
-      { tag: 'input', type: 'email' },
-      { tag: 'input', type: 'password' },
-      { tag: 'input', type: 'number' },
-      { tag: 'textarea' },
-      { tag: 'select' },
-    ];
+  it('scales with field count', () => {
+    // 10 inputs, 2 selects, 3 buttons -> totalFields=12; 12*3 + 3 + 10 = 49
+    expect(calculateMaxSteps(10, 2, 3)).toBe(49);
+  });
 
-    const textInputs = elements.filter((e: any) => 
-      e.tag === 'input' && ['text', 'email', 'password', 'number'].includes(e.type)
-    );
-    expect(textInputs).toHaveLength(4);
+  it('caps at 100 for huge forms', () => {
+    expect(calculateMaxSteps(50, 10, 5)).toBe(100);
   });
 });

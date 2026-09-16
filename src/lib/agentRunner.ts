@@ -18,6 +18,7 @@
 
 import { guardOutboundPlan } from './pii/outboundGuard';
 import type { SessionManager, SessionContext } from './sessionManager';
+import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
 
 // ── Task state (shared + persisted so the SW can resume/report) ──────────────
 
@@ -68,15 +69,15 @@ export function buildPlanHistory(
   return history;
 }
 
-export function calculateMaxSteps(
-  inputCount: number,
-  selectCount: number,
-  buttonCount: number,
-): number {
-  const totalFields = inputCount + selectCount;
-  const calculated = Math.max(20, totalFields * 3 + buttonCount + 10);
-  return Math.min(100, calculated);
-}
+// Loop-detection + step-budget + scroll-guard now live in ./loopDetection so
+// they have a single source of truth the tests can exercise directly (issue
+// #76). Re-exported here for backward-compatible imports.
+export {
+  calculateMaxSteps,
+  isRepeatedAction,
+  ScrollGuard,
+  type RecentAction,
+} from './loopDetection';
 
 export interface AgentActionLike {
   type: string;
@@ -88,20 +89,6 @@ export interface AgentActionLike {
   scrollDirection?: string;
   scrollAmount?: number;
   [k: string]: unknown;
-}
-
-/** Loop-detection: true when the planner re-issues the same (targetId, type). */
-export function isRepeatedAction(
-  recentHistory: Array<{ targetId: string; type: string }>,
-  action: AgentActionLike,
-): boolean {
-  if (action.targetId === undefined) return false;
-  const last = recentHistory[recentHistory.length - 1];
-  return (
-    !!last &&
-    String(last.targetId) === String(action.targetId) &&
-    last.type === action.type
-  );
 }
 
 // ── Narrow channel interfaces (the SW wires these to its handler bodies) ─────
@@ -156,7 +143,9 @@ export class AgentRunner {
   private failedIds = new Set<string>();
   private failedErrors = new Map<string, string>();
   private recentActionHistory: Array<{ targetId: string; type: string }> = [];
-  private consecutiveScrolls = 0;
+  // Issue #76: the scroll-storm guard now lives in loopDetection.ScrollGuard
+  // (single source of truth, unit-tested) instead of an inline counter.
+  private scrollGuard = new ScrollGuard(3);
   private plannerDegraded = false;
 
   constructor(private readonly deps: AgentRunnerDeps) {
@@ -400,13 +389,13 @@ export class AgentRunner {
     };
 
     if (action.type === 'SCROLL') {
-      this.consecutiveScrolls++;
-      if (this.consecutiveScrolls > 3) {
+      const { allowed, consecutive } = this.scrollGuard.nextScroll();
+      if (!allowed) {
         this.log('⚠️ Too many scrolls, stopping to prevent loop');
         this.state.status = 'failed';
         return;
       }
-      this.log(`Scrolling page... (${this.consecutiveScrolls}/3)`);
+      this.log(`Scrolling page... (${consecutive}/3)`);
       const r = await d.execute({
         type: 'SCROLL',
         scrollDirection: action.scrollDirection || 'down',
@@ -418,7 +407,7 @@ export class AgentRunner {
     }
 
     if (action.type === 'TYPE' && action.targetId !== undefined && action.value !== undefined) {
-      this.consecutiveScrolls = 0;
+      this.scrollGuard.noteOtherAction();
       this.log(`Typing: "${action.value}" into element #${action.targetId}`);
       const r = await d.execute(action);
       if (r?.ok) {
@@ -433,7 +422,7 @@ export class AgentRunner {
     }
 
     if (action.type === 'CLICK' && action.targetId !== undefined) {
-      this.consecutiveScrolls = 0;
+      this.scrollGuard.noteOtherAction();
       this.log(`Clicking element #${action.targetId}`);
       const r = await d.execute(action);
       if (r?.ok) {
@@ -448,7 +437,7 @@ export class AgentRunner {
     }
 
     if (action.type === 'SELECT' && action.targetId !== undefined && action.value !== undefined) {
-      this.consecutiveScrolls = 0;
+      this.scrollGuard.noteOtherAction();
       this.log(`Selecting "${action.value}" in element #${action.targetId}`);
       const r = await d.execute(action);
       if (r?.ok) {
@@ -463,7 +452,7 @@ export class AgentRunner {
     }
 
     if (action.type === 'KEY') {
-      this.consecutiveScrolls = 0;
+      this.scrollGuard.noteOtherAction();
       const key = action.key || 'Enter';
       this.log(`⌨️ Pressing key "${key}"${action.targetId !== undefined ? ` on element #${action.targetId}` : ''}`);
       const r = await d.execute(action);
@@ -473,7 +462,7 @@ export class AgentRunner {
         // ok:true with a "page navigated" note (#86) - reset per-page state.
         if (r.note && /navigat/i.test(r.note)) {
           this.log('🧭 Key triggered a navigation - re-planning on the new page');
-          this.consecutiveScrolls = 0;
+          this.scrollGuard.noteOtherAction();
           this.recentActionHistory = [];
           await d.delay(600);
         }
@@ -498,7 +487,7 @@ export class AgentRunner {
       const r = await d.navigate(action.url);
       if (r.ok) {
         this.log('✅ Navigated (new page loaded)');
-        this.consecutiveScrolls = 0;
+        this.scrollGuard.noteOtherAction();
         this.recentActionHistory = [];
         await d.delay(600);
       } else {
