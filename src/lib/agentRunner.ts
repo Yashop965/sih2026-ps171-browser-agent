@@ -142,7 +142,7 @@ export class AgentRunner {
   private filledIds = new Set<string>();
   private failedIds = new Set<string>();
   private failedErrors = new Map<string, string>();
-  private recentActionHistory: Array<{ targetId: string; type: string }> = [];
+  private recentActionHistory: Array<{ targetId: string; type: string; value?: string }> = [];
   // Issue #76: the scroll-storm guard now lives in loopDetection.ScrollGuard
   // (single source of truth, unit-tested) instead of an inline counter.
   private scrollGuard = new ScrollGuard(3);
@@ -158,7 +158,9 @@ export class AgentRunner {
 
   private log(msg: string): void {
     this.state.logs.push(`${new Date().toLocaleTimeString()}: ${msg}`);
-    if (this.state.logs.length > 200) this.state.logs = this.state.logs.slice(-200);
+    // Keep the whole run's activity log (Bug D: the Copy button needs it all,
+    // not just the last 200). 5000 short strings is still tiny.
+    if (this.state.logs.length > 5000) this.state.logs = this.state.logs.slice(-5000);
     this.state.lastUpdate = Date.now();
   }
 
@@ -331,11 +333,12 @@ export class AgentRunner {
         break;
       }
 
-      // Loop detection - a repeated (targetId, type) is skipped + marked done.
+      // Loop detection - a repeated action (same target+type, and same value
+      // for value-bearing types) is skipped + marked done.
       if (isRepeatedAction(this.recentActionHistory, action)) {
         this.log(`⚠️ Skipping repeated action on element #${action.targetId}`);
         this.filledIds.add(String(action.targetId));
-        this.recentActionHistory.push({ targetId: String(action.targetId), type: action.type });
+        this.recentActionHistory.push({ targetId: String(action.targetId), type: action.type, value: action.value });
         this.state.step = currentStep;
         this.notify();
         continue;
@@ -345,8 +348,11 @@ export class AgentRunner {
       this.state.step = currentStep;
       this.notify();
 
-      // #70: a Stop pressed during the inter-step delay is honored in 100ms slices.
-      for (let w = 0; w < 800; w += 100) {
+      // #70: a Stop pressed during the inter-step delay is honored in 100ms
+      // slices. Bug E: the settle is 300ms (was 800) - the next EXTRACT is
+      // what actually reads the page, so a long blind sleep only slows the
+      // run without improving the planner's view.
+      for (let w = 0; w < 300; w += 100) {
         await d.delay(100);
         if (d.isStopped()) {
           this.log('⏹ Stopped by user');
@@ -417,7 +423,7 @@ export class AgentRunner {
         this.log(`❌ Type failed: ${r?.error ?? 'unknown'}`);
         recordFailure(String(action.targetId), r?.error);
       }
-      this.recentActionHistory.push({ targetId: String(action.targetId), type: 'TYPE' });
+      this.recentActionHistory.push({ targetId: String(action.targetId), type: 'TYPE', value: action.value });
       return;
     }
 
@@ -428,6 +434,18 @@ export class AgentRunner {
       if (r?.ok) {
         this.log('✅ Clicked successfully');
         this.filledIds.add(String(action.targetId));
+        // A click that navigates (opening an article/suggestion link) drops the
+        // content port; the SW reports ok:true with a "page navigated" note
+        // (#86). Give the new page a full-navigation settle before the next
+        // EXTRACT - a navigating CLICK is otherwise the one action the flat
+        // 300ms inter-step settle does NOT cover (it would read a half-loaded
+        // DOM). Mirrors the KEY/NAVIGATE navigation handling below.
+        if (r.note && /navigat/i.test(r.note)) {
+          this.log('🧭 Click triggered a navigation - re-planning on the new page');
+          this.scrollGuard.noteOtherAction();
+          this.recentActionHistory = [];
+          await d.delay(600);
+        }
       } else {
         this.log(`❌ Click failed: ${r?.error ?? 'unknown'}`);
         recordFailure(String(action.targetId), r?.error);
@@ -447,7 +465,7 @@ export class AgentRunner {
         this.log(`❌ Select failed: ${r?.error ?? 'unknown'}`);
         recordFailure(String(action.targetId), r?.error);
       }
-      this.recentActionHistory.push({ targetId: String(action.targetId), type: 'SELECT' });
+      this.recentActionHistory.push({ targetId: String(action.targetId), type: 'SELECT', value: action.value });
       return;
     }
 

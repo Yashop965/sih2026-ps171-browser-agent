@@ -78,6 +78,27 @@ describe('KEY action (issue #84)', () => {
     expect(keyEvents.find((e) => e.type === 'keydown')!.key).toBe('Enter');
   });
 
+  it('presses on the FOCUSED element when targetId is null (Bug: "element null not found")', async () => {
+    // The planner emits KEY with targetId: null to mean "submit the search
+    // box I just typed into" (i.e. press Enter on whatever has focus). A
+    // null targetId must NOT be resolved through the element registry (that
+    // throws "element null not found" and the Enter never fires); it should
+    // fall through to the active element / body.
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    const result = await execute({ type: 'KEY', key: 'Enter', targetId: null as unknown as number });
+    expect(result.ok).toBe(true);
+    expect(result.error ?? '').not.toMatch(/null|not found/i);
+    input.remove();
+  });
+
+  it('presses on the FOCUSED element when targetId is absent', async () => {
+    const result = await execute({ type: 'KEY', key: 'Enter' });
+    expect(result.ok).toBe(true);
+    expect(result.error ?? '').not.toMatch(/not found/i);
+  });
+
   it('rejects an unknown multi-char key that is not a known key name', async () => {
     const result = await execute({ type: 'KEY', key: 'NotAKey' });
     expect(result.ok).toBe(false);

@@ -232,6 +232,7 @@ Use your full action vocabulary to act on whatever page you land on:
 12. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
 13. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field.
 14. Signal DONE ONLY when the overall TASK goal is achieved (the required fields are filled/submitted, or the requested page state is reached) - NOT merely because the current form is complete. If the task requires a different page or a further step, keep going.
+15. COMPLETION CHECK (do this BEFORE scrolling): if the task is a "look up / open / go to X" style goal and the current PAGE TITLE or URL already contains X (or the page clearly shows the target), the goal is REACHED - signal DONE. Do NOT keep scrolling a content/article page that already displays the target; SCROLL is only for revealing UNFILLED form fields or the next control, never to "hunt" for a target the page title/URL already confirms is present.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value

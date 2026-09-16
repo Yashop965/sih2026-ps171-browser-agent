@@ -221,6 +221,35 @@
   transition: transform 0.2s ease;
 }
 
+.log-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copy-log-btn {
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary, var(--text-muted));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.copy-log-btn:hover:not(:disabled) {
+  border-color: var(--text-primary, var(--text-muted));
+  color: var(--text-primary, var(--text-muted));
+}
+
+.copy-log-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .log-section.collapsed .log-toggle {
   transform: rotate(-90deg);
 }

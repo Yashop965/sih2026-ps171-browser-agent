@@ -126,6 +126,47 @@ describe('AgentRunner - SW-owned loop (#71/#69)', () => {
     expect(sm.__failedElements.has('1')).toBe(true);
   });
 
+  it('a navigating CLICK resets history + adds a 600ms settle (Bug E regression)', async () => {
+    // A click that opens an article/suggestion link drops the content port;
+    // the SW reports ok:true + a "page navigated" note. The runner must give
+    // the new page a full-navigation settle (600ms) before the next EXTRACT,
+    // because the flat 300ms inter-step settle does NOT cover navigating
+    // CLICKs. We observe the 600ms delay call.
+    const sm = makeSessionManagerStub();
+    const delayCalls: number[] = [];
+    const note = 'page navigated - will re-extract the new page';
+    const steps = [
+      { plan: { action: { type: 'CLICK', targetId: 2 } } },
+      { plan: { action: { type: 'DONE' } } },
+    ];
+    let planIdx = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => ({
+        ok: true,
+        elements: [{ id: 2, tag: 'button', role: 'button', label: 'Go' }],
+        url: 'https://example.com',
+        title: 'Page',
+        context: null,
+      }),
+      execute: async () => ({ ok: true, note }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => steps[planIdx++]?.plan ?? { action: { type: 'DONE' } },
+      delay: async (ms: number) => { delayCalls.push(ms); },
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'open the article',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps as AgentRunnerDeps);
+    await runner.run();
+
+    expect(delayCalls).toContain(600);
+    expect(runner.getState().status).toBe('complete');
+  });
+
   it('honors a cooperative stop between steps (#70)', async () => {
     // Build a runner whose stop flag flips after the first step, so the
     // inter-step polling sees it and the run terminates as 'stopped'.
