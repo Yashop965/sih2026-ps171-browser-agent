@@ -16,7 +16,9 @@ import {
   calculateMaxSteps,
   isRepeatedAction,
   emptyTaskState,
+  mergeChecklist,
   type AgentRunnerDeps,
+  type ChecklistItem,
 } from '../src/lib/agentRunner';
 
 // ── A minimal stub that satisfies the SessionManager surface the runner uses ──
@@ -266,5 +268,128 @@ describe('AgentRunner - pure helpers', () => {
     expect(s.status).toBe('idle');
     expect(s.running).toBe(false);
     expect(s.logs).toEqual([]);
+  });
+});
+
+describe('mergeChecklist (cross-page task memory)', () => {
+  it('starts from the runner existing list, appends new sub-goals, keeps first-seen order', () => {
+    const existing: ChecklistItem[] = [
+      { id: '1', description: 'search Web browser', done: true },
+      { id: '2', description: 'open the Web browser article', done: false },
+    ];
+    const merged = mergeChecklist(existing, [
+      { id: '3', description: 'search PWA', done: false },
+    ]);
+    expect(merged.map((c) => c.id)).toEqual(['1', '2', '3']);
+    expect(merged[2]?.description).toBe('search PWA');
+  });
+
+  it('sticky: an item flips done=true but never back to false', () => {
+    const existing: ChecklistItem[] = [{ id: '1', description: 'x', done: true }];
+    // A weaker response forgets to re-assert done - it must not resurrect it.
+    const merged = mergeChecklist(existing, [{ id: '1', done: false }]);
+    expect(merged[0]?.done).toBe(true);
+  });
+
+  it('fills in a missing description from the incoming entry', () => {
+    const existing: ChecklistItem[] = [{ id: '1', done: false }];
+    const merged = mergeChecklist(existing, [{ id: '1', description: 'do the thing' }]);
+    expect(merged[0]?.description).toBe('do the thing');
+  });
+
+  it('drops malformed entries that have no usable id', () => {
+    const merged = mergeChecklist([], [null, undefined, {}, '  ', { description: 'no id' }] as any);
+    expect(merged).toEqual([]);
+    // A bare string becomes a checklist item keyed by its own text.
+    const merged2 = mergeChecklist([], ['search PWA']);
+    expect(merged2).toEqual([{ id: 'search PWA', description: 'search PWA', done: false }]);
+  });
+});
+
+// ── DONE-gating on the checklist (cross-page memory) ────────────────────────
+// The runner only trusts a planner DONE when the whole checklist is satisfied.
+// A DONE with open items keeps the loop going (strikes), and three consecutive
+// open-item DONEs cap out as best-effort degraded.
+
+function makeChecklistRunner(steps: Array<{ plan: any }>, opts: { executeResults?: Array<{ ok: boolean; error?: string; note?: string }> } = {}) {
+  const sm = makeSessionManagerStub();
+  let planIdx = 0;
+  let execIdx = 0;
+  const deps: AgentRunnerDeps = {
+    extract: async () => ({
+      ok: true,
+      elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+      url: 'https://example.com',
+      title: 'Page',
+      context: null,
+    }),
+    execute: async () => {
+      const list = opts.executeResults ?? [];
+      return { ok: true, ...(list[execIdx++ % Math.max(1, list.length)] ?? {}) };
+    },
+    navigate: async () => ({ ok: true }),
+    fetchPlan: async () => {
+      const step = steps[planIdx++] ?? { plan: { action: { type: 'DONE' } } };
+      return step.plan;
+    },
+    delay: async () => {},
+    sessionManager: sm,
+    tabId: 1,
+    windowId: 1,
+    task: 'look up X',
+    startUrl: '',
+    onProgress: () => {},
+    isStopped: () => false,
+  };
+  return { runner: new AgentRunner(deps), sm };
+}
+
+describe('AgentRunner - checklist DONE-gating', () => {
+  it('completes (not degraded) when every checklist item is done at DONE', async () => {
+    const steps = [
+      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '1', description: 'search', done: false }, { id: '2', description: 'open article', done: false }] } },
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: true }] } },
+    ];
+    const { runner } = makeChecklistRunner(steps);
+    await runner.run();
+    const final = runner.getState();
+    expect(final.status).toBe('complete');
+    expect(final.degraded).toBe(false);
+    expect(final.logs.some((l) => /all checklist items done/i.test(l))).toBe(true);
+  });
+
+  it('keeps going when DONE arrives with an open item, then completes when it is reached', async () => {
+    // Step 1: seed a 2-item checklist, item 1 done, item 2 open. Planner
+    // blurs a DONE while item 2 is still open -> the runner must NOT stop.
+    const steps = [
+      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: false }] } },
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: false }] } }, // open -> continue
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: true }] } }, // now done -> complete
+    ];
+    const { runner } = makeChecklistRunner(steps);
+    await runner.run();
+    const final = runner.getState();
+    expect(final.status).toBe('complete');
+    expect(final.degraded).toBe(false);
+    expect(final.logs.some((l) => /still open/i.test(l))).toBe(true); // it logged the strike
+    expect(final.logs.some((l) => /all checklist items done/i.test(l))).toBe(true);
+  });
+
+  it('caps a stuck planner at 3 consecutive open-item DONEs -> best-effort degraded', async () => {
+    const open = () => ({ id: '2', description: 'open article', done: false });
+    const steps = [
+      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } },
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // strike 1
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // strike 2
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // strike 3 -> cap
+      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // (not reached)
+    ];
+    const { runner, sm } = makeChecklistRunner(steps);
+    await runner.run();
+    const final = runner.getState();
+    expect(final.status).toBe('degraded');
+    expect(final.degraded).toBe(true);
+    expect(final.logs.some((l) => /stuck at DONE with 1 open item/i.test(l))).toBe(true);
+    expect(sm.__calls).toContain('complete:degraded');
   });
 });
