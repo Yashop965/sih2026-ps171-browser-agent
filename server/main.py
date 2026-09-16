@@ -117,6 +117,9 @@ class SanitizedPayload(BaseModel):
     # Page geometry + scroll affordance (issue #59): scrollY, scrollHeight,
     # viewport, moreContentBelow — computed on-device, carries no PII.
     context: Optional[Dict[str, Any]] = None
+    # Cross-page task checklist (runner's "what's done / what's left" memory).
+    # Fed back to the planner so it can't re-do a completed sub-goal.
+    checklist: Optional[List[Dict[str, Any]]] = None
 
 
 class PlanRequest(BaseModel):
@@ -136,6 +139,8 @@ class PlanRequest(BaseModel):
     buttonCount: Optional[int] = None
     # Page geometry + scroll affordance from the popup (issue #59).
     context: Optional[Dict[str, Any]] = None
+    # Cross-page task checklist (flat popup payload).
+    checklist: Optional[List[Dict[str, Any]]] = None
 
     model_config = {"populate_by_name": True}
 
@@ -172,6 +177,7 @@ class PlanRequest(BaseModel):
             task_description=task_desc,
             history=self.history,
             context=self.context,
+            checklist=self.checklist,
         )
 
 
@@ -184,6 +190,8 @@ class PlanResponse(BaseModel):
     confidence: Optional[float] = 0.0
     session_id: str
     timestamp: float
+    # Cross-page task checklist the planner maintained this step (may be empty).
+    checklist: Optional[List[Dict[str, Any]]] = None
     # Issue #68: True when the planner produced this via a degraded path
     # (no LLM reachable at init, or a heuristic fallback after a runtime
     # LLM error). Callers MUST NOT treat a DONE emitted while degraded as a
@@ -236,6 +244,9 @@ async def plan_action(request: PlanRequest):
         raw_a11y = [el.model_dump() for el in payload.accessibilityTree]
         task_desc = payload.task_description or request.task_description
         history_list = payload.history or request.history
+        # Cross-page task checklist (the planner's running "what's done /
+        # what's left" memory, fed back by the runner).
+        checklist_list = payload.checklist or request.checklist
         # Page geometry + scroll affordance (issue #59): lets the planner see
         # scrollY/scrollHeight/viewport and whether more content is below the
         # fold, so it can issue SCROLL to reveal the next fields.
@@ -250,6 +261,7 @@ async def plan_action(request: PlanRequest):
             task_description=task_desc,
             history=history_list,
             context=page_context,
+            checklist=checklist_list,
         )
 
         return PlanResponse(
@@ -265,6 +277,12 @@ async def plan_action(request: PlanRequest):
             confidence=planner_result.confidence,
             session_id=session_id,
             timestamp=time.time(),
+            # Cross-page task checklist (the planner's maintained "what's done /
+            # what's left" list) - the runner feeds this back next step.
+            checklist=[
+                {"id": c.id, "description": c.description, "done": c.done}
+                for c in planner_result.checklist
+            ],
             # Issue #68: propagate the degraded flag so the popup can stop
             # treating a mock/heuristic DONE as a genuine completion.
             degraded=planner_result.degraded,

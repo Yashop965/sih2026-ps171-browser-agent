@@ -28,6 +28,18 @@ export interface PlanHistoryEntry {
   error?: string;
 }
 
+/**
+ * One item of the planner-authored task checklist (cross-page memory).
+ * Mirrors the server's `ChecklistItem` pydantic model. The runner tracks it
+ * across pages and flips items `done` as they are genuinely reached; the task
+ * only completes when the whole list is satisfied (or the list is empty).
+ */
+export interface ChecklistItem {
+  id: string;
+  description?: string;
+  done: boolean;
+}
+
 export interface AgentTaskState {
   running: boolean;
   step: number;
@@ -67,6 +79,55 @@ export function buildPlanHistory(
     history.push({ targetId: id, result: 'FAILED', error: failedErrors.get(id) ?? 'unknown' });
   }
   return history;
+}
+
+/**
+ * Merge the planner's returned checklist into the runner's authoritative one.
+ *
+ * The runner owns the checklist across pages (cross-page memory). Each step
+ * the planner echoes its view back; we union by `id`:
+ *   - unknown ids are appended (new sub-goals the planner just decomposed),
+ *   - known ids keep their first-seen position,
+ *   - `done` is STICKY: an item flips false->true but never back (a weaker
+ *     response that forgets to re-assert done can't resurrect it),
+ *   - a non-empty incoming `description` fills in a missing one.
+ *
+ * Malformed incoming entries (no usable id) are dropped, not fatal.
+ */
+export function mergeChecklist(
+  existing: ChecklistItem[],
+  incoming: Array<Partial<ChecklistItem> | string | null | undefined>,
+): ChecklistItem[] {
+  const byId = new Map<string, ChecklistItem>();
+  for (const item of existing) byId.set(item.id, { ...item });
+
+  for (const raw of incoming) {
+    let id = '';
+    let description: string | undefined;
+    let done = false;
+    if (typeof raw === 'string') {
+      id = raw.trim();
+      description = raw.trim();
+    } else if (raw && typeof raw === 'object') {
+      const r = raw as Record<string, unknown>;
+      id = String(r.id ?? r.step ?? '').trim();
+      const desc = r.description ?? r.label ?? r.text;
+      if (typeof desc === 'string' && desc.trim()) description = desc.trim();
+      done = Boolean(r.done ?? r.completed ?? r.complete);
+    }
+    if (!id) continue; // no usable key - skip this entry
+
+    const prev = byId.get(id);
+    if (prev) {
+      if (!prev.description && description) prev.description = description;
+      prev.done = prev.done || done; // sticky
+      byId.set(id, prev);
+    } else {
+      byId.set(id, { id, description, done });
+    }
+  }
+
+  return Array.from(byId.values());
 }
 
 // Loop-detection + step-budget + scroll-guard now live in ./loopDetection so
@@ -143,6 +204,15 @@ export class AgentRunner {
   private failedIds = new Set<string>();
   private failedErrors = new Map<string, string>();
   private recentActionHistory: Array<{ targetId: string; type: string; value?: string }> = [];
+  // Cross-page task checklist (the "what's done / what's left" memory). Owned
+  // by the runner; fed back to /plan each step and merged from the planner's
+  // response. The task completes only when the whole list is satisfied (or it
+  // is empty - pre-checklist behaviour).
+  private checklist: ChecklistItem[] = [];
+  // A planner that keeps signaling DONE while checklist items are still open
+  // is stuck. We give it a short grace streak; past that we stop spinning the
+  // budget and complete best-effort with a warning. Reset on any real action.
+  private doneWithOpenStreak = 0;
   // Issue #76: the scroll-storm guard now lives in loopDetection.ScrollGuard
   // (single source of truth, unit-tested) instead of an inline counter.
   private scrollGuard = new ScrollGuard(3);
@@ -300,6 +370,12 @@ export class AgentRunner {
           buttonCount: buttons.length,
           url: pageUrl,
           title: pageTitle,
+          // Cross-page task checklist - the planner's running "what's done /
+          // what's left" memory. Feeding it back stops the thrashing bug where
+          // it re-did already-completed sub-goals after every navigation.
+          checklist: this.checklist.length
+            ? this.checklist.map((c) => ({ id: c.id, description: c.description ?? '', done: c.done }))
+            : undefined,
         },
       });
       if (guard.blocked) {
@@ -319,19 +395,57 @@ export class AgentRunner {
       }
       const action: AgentActionLike | undefined = plan.action;
 
+      // Merge the planner's returned checklist into the runner's authoritative
+      // one (cross-page memory). done is sticky, new sub-goals are appended.
+      const incoming =
+        plan && Array.isArray(plan.checklist)
+          ? (plan.checklist as Array<Partial<ChecklistItem>>)
+          : [];
+      this.checklist = mergeChecklist(this.checklist, incoming);
+      if (this.checklist.length > 0) {
+        const doneCount = this.checklist.filter((c) => c.done).length;
+        this.log(`Checklist: ${doneCount}/${this.checklist.length} done`);
+      }
+
       if (plan.degraded) this.log(`⚠️ Planner degraded: ${plan.degraded_reason ?? 'no LLM reachable'}`);
       this.log(`Planner returned: ${action?.type ?? 'NONE'}`);
 
       if (!action || action.type === 'DONE') {
+        const undone = this.checklist.filter((c) => !c.done);
         if (plan.degraded) {
           this.log('⚠️ Stopping: planner signaled DONE while DEGRADED (no LLM / heuristic) — task NOT genuinely complete');
           this.plannerDegraded = true;
           this.state.degraded = true;
-        } else {
-          this.log('✅ Task complete (planner signaled DONE)');
+          break;
         }
+        // Checklist gate: a DONE is only trusted when the task decomposition
+        // is fully satisfied. If the planner blurted DONE while sub-goals are
+        // still open, do NOT break - keep looping so the remaining items get
+        // reached. But cap the streak: if the planner keeps blurring DONE
+        // without advancing the checklist, stop spinning the budget and
+        // complete best-effort with a clear warning.
+        if (this.checklist.length > 0 && undone.length > 0) {
+          this.doneWithOpenStreak += 1;
+          if (this.doneWithOpenStreak >= 3) {
+            const open = undone.map((c) => c.description || c.id).join('; ');
+            this.log(`⚠️ Planner stuck at DONE with ${undone.length} open item(s) (${open}) - completing best-effort`);
+            this.plannerDegraded = true;
+            this.state.degraded = true;
+            break;
+          }
+          const open = undone.map((c) => c.description || c.id).join('; ');
+          this.log(`⚠️ Planner said DONE but ${undone.length} checklist item(s) still open (${open}) - continuing (strike ${this.doneWithOpenStreak}/3)`);
+          this.state.step = currentStep;
+          this.notify();
+          continue;
+        }
+        this.log('✅ Task complete (all checklist items done)');
         break;
       }
+
+      // A real (non-DONE) action means the planner is progressing - clear the
+      // stuck-streak so a flaky mid-run blur doesn't accumulate toward the cap.
+      this.doneWithOpenStreak = 0;
 
       // Loop detection - a repeated action (same target+type, and same value
       // for value-bearing types) is skipped + marked done.

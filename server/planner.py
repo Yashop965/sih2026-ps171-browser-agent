@@ -40,12 +40,28 @@ class ActionSchema(BaseModel):
     key: Optional[str] = None
 
 
+class ChecklistItem(BaseModel):
+    """One step of the planner-authored task checklist (issue: cross-page
+    memory). A stable, ordered list of sub-goals the planner decomposes the
+    task into; it flips ``done`` on items as they are achieved so the runner
+    can track progress across pages and only treat the task as complete when
+    the whole list is satisfied - instead of trusting a bare "DONE"."""
+
+    id: str
+    description: str = ""
+    done: bool = False
+
+
 class PlannerResult(BaseModel):
     success: bool
     action: Optional[ActionSchema] = None
     confidence: float = 0.0
     reasoning: str = ""
     error: Optional[str] = None
+    # Cross-page task checklist the planner authored + maintains (issue:
+    # statelessness). May be empty - the runner treats completion as a
+    # "genuine DONE" when the list is empty or absent.
+    checklist: List[ChecklistItem] = []
     # Issue #68: True when this result was produced by a degraded path -
     # the mock fallback (no LLM reachable at init) or a heuristic fallback
     # (an unreachable / LLM errored at runtime). Callers MUST NOT treat a
@@ -115,9 +131,14 @@ class ActionPlanner:
         task_description: Optional[str] = None,
         history: Optional[List[Dict[str, Any]]] = None,
         context: Optional[Dict[str, Any]] = None,
+        checklist: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         Builds a structured prompt for the LLM based on sanitized page metadata.
+
+        ``checklist`` is the runner's cross-page task memory (an ordered list of
+        sub-goals with a ``done`` flag). It is echoed into the prompt so the LLM
+        remembers what it already finished and does not re-do completed steps.
         """
         # Parse task description into key-value pairs (shared with the
         # conservative fallback in _fallback_action - issue #85).
@@ -180,6 +201,19 @@ class ActionPlanner:
         # Build key-value map for the LLM
         kv_str = json.dumps(task_kv, indent=2) if task_kv else "None"
 
+        # Cross-page task checklist (the "what's already done / what's left"
+        # memory). The runner feeds its own checklist back here; the LLM
+        # echoes it forward with updated ``done`` flags and new items when it
+        # realizes it has finished a sub-goal.
+        checklist_str = "None"
+        if checklist:
+            lines = []
+            for item in checklist[-12:]:
+                mark = "x" if item.get("done") else " "
+                desc = str(item.get("description") or item.get("id") or "").strip()
+                lines.append(f"- [{mark}] {desc} (id: {item.get('id')})")
+            checklist_str = "\n".join(lines) if lines else "None"
+
         # Filter out already-filled elements for cleaner context
         available_elements = [el for el in sanitized_elements if not el.get("filled", False)]
 
@@ -208,6 +242,9 @@ KEY-VALUE PAIRS FROM TASK:
 RECENT ACTION HISTORY (results so far — OK = filled, FAILED = not yet done, retryable):
 {history_str}
 
+TASK CHECKLIST (your running "what's done / what's left" memory across pages — DO NOT re-do completed items):
+{checklist_str}
+
 AVAILABLE INTERACTIVE ELEMENTS (NOT yet filled):
 {json.dumps(available_elements, indent=2)}
 
@@ -233,6 +270,7 @@ Use your full action vocabulary to act on whatever page you land on:
 13. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field.
 14. Signal DONE ONLY when the overall TASK goal is achieved (the required fields are filled/submitted, or the requested page state is reached) - NOT merely because the current form is complete. If the task requires a different page or a further step, keep going.
 15. COMPLETION CHECK (do this BEFORE scrolling): if the task is a "look up / open / go to X" style goal and the current PAGE TITLE or URL already contains X (or the page clearly shows the target), the goal is REACHED - signal DONE. Do NOT keep scrolling a content/article page that already displays the target; SCROLL is only for revealing UNFILLED form fields or the next control, never to "hunt" for a target the page title/URL already confirms is present.
+16. MAINTAIN THE TASK CHECKLIST. On your FIRST step, decompose the task into a small ordered checklist of sub-goals (e.g. for "search Web browser, then search PWA, land on the PWA article": [search Web browser, open the Web browser article, search PWA, open the PWA article]). Every step afterwards, echo the FULL checklist back in the output's "checklist" field, flipping an item to "done": true ONLY when you have genuinely reached it on the live page (confirmed by the URL/title/elements, not by assumption). NEVER mark an item done just because you typed/pressed a key - only when the resulting page state proves it. An item already "[x]" is COMPLETE - do not act on it again. Only signal DONE when every checklist item is done (or the list is empty and the goal is otherwise met).
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -281,7 +319,10 @@ MATCHING RULES:
 IMPORTANT: The TASK is the source of truth. Complete the task end-to-end across pages as needed; do not stop just because one form is filled if the task has more steps. Signal DONE only when the task is genuinely complete.
 
 RETURN ONLY this JSON (no markdown, no explanation):
-{{"type": "TYPE", "targetId": <input_id>, "value": "<matching_value>", "reasoning": "filling the field"}}"""
+{{"type": "TYPE", "targetId": <input_id>, "value": "<matching_value>", "reasoning": "filling the field", "checklist": [{{"id": "1", "description": "search Web browser", "done": true}}, {{"id": "2", "description": "open the PWA article", "done": false}}]}}
+
+ALWAYS include the "checklist" array in your output (rule 16). It is your cross-page memory: keep it stable, only flip items to done when the live page proves it, and only signal "type":"DONE" once every checklist item is done. If you have no checklist yet, start it on this step.
+"""
         return prompt
 
     def parse_llm_output(self, llm_response: str, interactive_elements: List[Dict[str, Any]]) -> PlannerResult:
@@ -420,6 +461,11 @@ RETURN ONLY this JSON (no markdown, no explanation):
         if raw_type in {"DONE", "WAIT", "KEY"}:
             confidence = 1.0
 
+        # Cross-page task checklist: the LLM echoes its "what's done / what's
+        # left" list forward. Normalize to a stable shape (id/description/done)
+        # so the runner can diff it against its own memory and gate completion.
+        checklist = self._parse_checklist(data.get("checklist"))
+
         action = ActionSchema(
             type=raw_type,
             targetId=target_id,
@@ -436,7 +482,46 @@ RETURN ONLY this JSON (no markdown, no explanation):
             action=action,
             confidence=confidence,
             reasoning=reasoning,
+            checklist=checklist,
         )
+
+    def _parse_checklist(self, raw: Any) -> List[ChecklistItem]:
+        """Normalize the LLM's "checklist" output into ChecklistItem[].
+
+        Accepts the documented shape (a list of {id, description, done}) plus
+        reasonable variants a weaker model might emit (strings, {label/text,
+        completed/complete}, missing id). Degrades to [] rather than raising -
+        an empty checklist means "no task decomposition," which the runner
+        treats as the pre-checklist behaviour (genuine-DONE gating off)."""
+        if not isinstance(raw, (list, tuple)):
+            return []
+        items: List[ChecklistItem] = []
+        for i, entry in enumerate(raw):
+            if isinstance(entry, ChecklistItem):
+                items.append(entry)
+                continue
+            if isinstance(entry, str):
+                desc = entry.strip()
+                if not desc:
+                    continue
+                items.append(ChecklistItem(id=str(i), description=desc, done=False))
+                continue
+            if not isinstance(entry, dict):
+                continue
+            desc = ""
+            for k in ("description", "label", "text", "step", "task"):
+                if entry.get(k):
+                    desc = str(entry.get(k)).strip()
+                    break
+            done = entry.get("done")
+            if done is None:
+                done = entry.get("completed") or entry.get("complete") or entry.get("finished")
+            done = bool(done)
+            cid = entry.get("id")
+            if cid is None:
+                cid = str(i)
+            items.append(ChecklistItem(id=str(cid), description=desc, done=done))
+        return items
 
     def _extract_json_substring(self, text: str) -> Optional[str]:
         """Extracts JSON object string from raw LLM output text."""
@@ -665,6 +750,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
         task_description: Optional[str] = None,
         history: Optional[List[Dict[str, Any]]] = None,
         context: Optional[Dict[str, Any]] = None,
+        checklist: Optional[List[Dict[str, Any]]] = None,
     ) -> PlannerResult:
         """
         Main entry point for generating an action plan.
@@ -673,6 +759,11 @@ RETURN ONLY this JSON (no markdown, no explanation):
         viewport, moreContentBelow). It is the signal that tells the model the
         form continues below the fold so it can SCROLL to reveal the next
         fields instead of stopping after the first screen (issue #59).
+
+        ``checklist`` is the runner's cross-page task memory: the planner
+        authors + maintains an ordered list of sub-goals, flipping items
+        ``done`` as they are reached. It is fed back into the prompt so the
+        model can't re-do a step it already completed (the thrashing bug).
         """
         system_prompt = (
             "You are a browser automation assistant. Given sanitized webpage metadata, "
@@ -686,6 +777,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
             task_description=task_description,
             history=history,
             context=context,
+            checklist=checklist,
         )
 
         try:
