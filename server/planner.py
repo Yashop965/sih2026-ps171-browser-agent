@@ -119,16 +119,9 @@ class ActionPlanner:
         """
         Builds a structured prompt for the LLM based on sanitized page metadata.
         """
-        # Parse task description into key-value pairs
-        task_kv = {}
-        if task_description:
-            # Pattern: "Label: Value" separated by commas
-            # e.g. "First Name: John, Last Name: Doe, Email: john@example.com"
-            pairs = re.split(r',\s*(?=[A-Za-z][A-Za-z ]+\s*:)', task_description)
-            for pair in pairs:
-                if ':' in pair:
-                    key, val = pair.split(':', 1)
-                    task_kv[key.strip().lower()] = val.strip()
+        # Parse task description into key-value pairs (shared with the
+        # conservative fallback in _fallback_action - issue #85).
+        task_kv = self._task_kv(task_description)
 
         # Filter and preview elements safely (ensuring zero password leaks)
         sanitized_elements = []
@@ -493,12 +486,78 @@ RETURN ONLY this JSON (no markdown, no explanation):
             and el.get("interactive", True)
         ]
 
-    def _fallback_action(self, interactive_elements: List[Dict[str, Any]], error_msg: str) -> PlannerResult:
+    @staticmethod
+    def _task_kv(task_description: Optional[str]) -> Dict[str, str]:
         """
-        Generates a safe fallback action when planning fails.
-        Uses heuristic rules to fill forms intelligently.
+        Parse "Label: Value, Label: Value" task text into lowercase
+        {label-keyword: value} pairs. The same pattern build_context_prompt
+        uses to feed the LLM (kept here, not just in the prompt, so the
+        conservative fallback below can reuse it - issue #85).
         """
-        # Find first non-password input field for TYPE
+        task_kv: Dict[str, str] = {}
+        if not task_description:
+            return task_kv
+        # Pattern: "Label: Value" separated by commas
+        # e.g. "First Name: John, Last Name: Doe, Email: john@example.com"
+        pairs = re.split(r',\s*(?=[A-Za-z][A-Za-z ]+\s*:)', task_description)
+        for pair in pairs:
+            if ':' in pair:
+                key, val = pair.split(':', 1)
+                task_kv[key.strip().lower()] = val.strip()
+        return task_kv
+
+    @staticmethod
+    def _task_value_for_label(label: str, task_kv: Dict[str, str]) -> Optional[str]:
+        """
+        Issue #85: pick the task value that belongs to a page field, or None
+        if the task does not reference this field. Fills only the fields the
+        task names - that is the whole point of the conservative fallback.
+        Matching: longest task-key whose every word occurs in the label wins
+        (so "first name" beats "name" for a "First Name" field when both
+        keys exist in the task).
+        """
+        lbl = label.lower()
+        best_key: Optional[str] = None
+        for key in task_kv:
+            words = [w for w in key.split() if len(w) > 2]
+            if not words:
+                continue
+            if all(w in lbl for w in words) and (best_key is None or len(key) > len(best_key)):
+                best_key = key
+        return task_kv[best_key] if best_key is not None else None
+
+    def _fallback_action(
+        self,
+        interactive_elements: List[Dict[str, Any]],
+        error_msg: str,
+        task_description: Optional[str] = None,
+    ) -> PlannerResult:
+        """
+        Generates a safe, CONSERVATIVE fallback action when planning fails
+        (issue #85).
+
+        The old behaviour typed "Test Data" into the first live input and
+        clicked the first button it found - which, mid-run, clobbered the
+        agent's own search query and made the stall unrecoverable. Now the
+        fallback only ever touches fields the TASK references:
+
+        1. A field whose label matches a task key-value pair  -> TYPE the
+           task's own value into it (values come from task_kv, i.e. what the
+           user already typed into the task box - redacted before egress).
+        2. A "search"-style task with no labelled fields -> TYPE the task's
+           first word into an element that looks like a search box.
+        3. A button whose label matches a task keyword (submit / continue /
+           search / next / go) -> CLICK it.
+        4. Nothing task-referenced is actionable -> WAIT a short beat and
+           let the next EXTRACT re-plan (instead of a destructive SCROLL).
+
+        Every result stays flagged degraded=True so the UI never shows it as
+        a genuine LLM decision.
+        """
+        task_kv = self._task_kv(task_description)
+        reason = f"Conservative fallback ({error_msg}) - only task-referenced fields"
+
+        # Pass 1: task-referenced inputs.
         for el in interactive_elements:
             element_id = el.get("id")
             role = str(el.get("role", "")).lower()
@@ -509,62 +568,91 @@ RETURN ONLY this JSON (no markdown, no explanation):
 
             if element_id is None or not interactive or is_pass:
                 continue
-
-            # TYPE into text inputs
-            if role in ["textbox", "input"] or tag == "input":
-                # Generate appropriate test data based on label
-                if "name" in label:
-                    value = "Test User"
-                elif "email" in label or "mail" in label:
-                    value = "test@example.com"
-                elif "phone" in label or "mobile" in label or "aadhaar" in label:
-                    value = "+91 9876543210"
-                elif "address" in label:
-                    value = "123 Test Street, City"
-                else:
-                    value = "Test Data"
-
+            if not (role in ["textbox", "input"] or tag == "input"):
+                continue
+            value = self._task_value_for_label(label, task_kv)
+            if value:
                 return PlannerResult(
                     success=True,
                     action=ActionSchema(type="TYPE", targetId=element_id, value=value),
-                    confidence=0.9,
-                    reasoning=f"Heuristic: typing into {role} field #{element_id}",
-                    # Issue #68: heuristic, not LLM - mark degraded so the
-                    # caller can surface "planner fell back to heuristics".
+                    confidence=0.5,
+                    reasoning=reason,
                     degraded=True,
-                    degraded_reason=f"Fallback heuristic ({error_msg})",
+                    degraded_reason=reason,
                 )
 
-        # Find button for CLICK
+        # Pass 2: "search ..."/"find ..." task, no labelled value fields -
+        # type the task's first word into a search-looking input (the
+        # Wikipedia case from #85: "search Web browser" types "search" into
+        # the box named/labelled search, not into a random field).
+        task_words = [w for w in re.split(r"[\s,:;]+", (task_description or "")) if w]
+        if any(w.lower().startswith(("search", "find", "look")) for w in task_words):
+            first_word = task_words[0] if task_words else ""
+            if first_word:
+                for el in interactive_elements:
+                    element_id = el.get("id")
+                    role = str(el.get("role", "")).lower()
+                    tag = str(el.get("tag", "")).lower()
+                    label = str(el.get("label", "")).lower()
+                    name = str(el.get("name") or "").lower()
+                    ident = str(el.get("id") or "").lower()
+                    if element_id is None or el.get("isPassword", False) or not el.get("interactive", True):
+                        continue
+                    is_input = role in ["textbox", "input"] or tag in ("input", "textarea")
+                    el_type = str(el.get("type", "")).lower()
+                    # A "search-looking" input: the word "search" appears in
+                    # its label / name / id, OR it is literally a search
+                    # input. This is what distinguishes THE search box from
+                    # some other text field on the page - we never type the
+                    # query into a random field (the #85 failure mode).
+                    is_search_like = (
+                        "search" in label
+                        or "search" in name
+                        or "search" in ident
+                        or (tag == "input" and el_type in ("search", "text"))
+                    )
+                    if is_input and is_search_like:
+                        return PlannerResult(
+                            success=True,
+                            action=ActionSchema(type="TYPE", targetId=element_id, value=first_word),
+                            confidence=0.5,
+                            reasoning=reason,
+                            degraded=True,
+                            degraded_reason=reason,
+                        )
+
+        # Pass 3: task-keyword buttons only (never a blind "first button").
+        button_kw = ("submit", "continue", "search", "next", "go")
+        task_text = (task_description or "").lower()
         for el in interactive_elements:
             element_id = el.get("id")
             role = str(el.get("role", "")).lower()
             tag = str(el.get("tag", "")).lower()
-            is_pass = el.get("isPassword", False)
-            interactive = el.get("interactive", True)
-
-            if element_id is None or not interactive or is_pass:
+            label = str(el.get("label", "")).lower()
+            if element_id is None or el.get("isPassword", False) or not el.get("interactive", True):
                 continue
-
-            if role in ["button", "submit"] or tag == "button":
+            if not (role in ["button", "submit"] or tag == "button"):
+                continue
+            if any(k in label or k in task_text for k in button_kw):
                 return PlannerResult(
                     success=True,
                     action=ActionSchema(type="CLICK", targetId=element_id),
-                    confidence=0.9,
-                    reasoning=f"Heuristic: clicking button #{element_id}",
+                    confidence=0.5,
+                    reasoning=reason,
                     degraded=True,
-                    degraded_reason=f"Fallback heuristic ({error_msg})",
+                    degraded_reason=reason,
                 )
 
-        # Default fallback to scroll or done
+        # Pass 4: nothing task-referenced is actionable. Do NOT clobber the
+        # page - wait a beat so the next EXTRACT re-plans against fresh state.
         return PlannerResult(
             success=True,
-            action=ActionSchema(type="SCROLL", scrollDirection="down", scrollAmount=400),
+            action=ActionSchema(type="WAIT", waitMs=1000),
             confidence=0.3,
-            reasoning="Fallback heuristic scroll down",
+            reasoning=reason,
             error=error_msg,
             degraded=True,
-            degraded_reason=f"Fallback heuristic ({error_msg})",
+            degraded_reason=reason,
         )
 
     async def plan(
@@ -648,7 +736,16 @@ RETURN ONLY this JSON (no markdown, no explanation):
             return result
         except Exception as e:
             logger.error(f"Planner LLM execution error: {e}")
-            return self._fallback_action(interactive_elements, f"LLM execution error: {e}")
+            # Issue #85: a 429/5xx that survived the client-side retry (or a
+            # parse failure) degrades to the CONSERVATIVE fallback - which
+            # only touches fields the task references - instead of the old
+            # "type Test Data into the first live input" behaviour that
+            # clobbered the agent's own state mid-run.
+            return self._fallback_action(
+                interactive_elements,
+                f"LLM execution error: {e}",
+                task_description=task_description,
+            )
 
     async def health_check(self) -> Dict[str, Any]:
         """Check if LLM provider is healthy."""
