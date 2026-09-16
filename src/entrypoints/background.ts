@@ -3,6 +3,7 @@ import { PrivacyAuditLedger } from '../lib/pii/audit';
 import { sessionManager } from '../lib/sessionManager';
 import { PrivacyLedger, type PrivacyLogEntry } from '../lib/pii/privacyLedger';
 import { AgentRunner, emptyTaskState, type AgentTaskState } from '../lib/agentRunner';
+import { withPortRetry } from '../lib/portRetry';
 
 /**
  * Background Service Worker
@@ -121,26 +122,33 @@ export default defineBackground({
       const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
       const tabId = activeTab?.id;
       if (tabId === undefined) return { ok: false, error: 'No active tab' };
-      try {
-        const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
-        if (!snapshot) return { ok: false, error: 'No snapshot' };
-        for (const pii of snapshot.detectedPII || []) {
-          privacyLedger.log({
-            timestamp: Date.now(), tabId, url: snapshot.url || '', type: pii.type || 'PII',
-            selector: pii.selector || '', confidence: pii.confidence || 1,
-            verified: Boolean(pii.isVerified), action: 'DETECTED',
-          });
-        }
-        return {
-          ok: true,
-          elements: snapshot.interactiveElements || [],
-          context: snapshot.context,
-          url: snapshot.url || '',
-          title: snapshot.title || '',
-        };
-      } catch (e) {
-        return { ok: false, error: String(e) };
+      // After a navigating CLICK/KEY the content port drops and the content
+      // script re-injects on the new page; there is a brief window where
+      // sendMessage rejects with "Receiving end does not exist" (or resolves
+      // undefined - no listener yet). Retry that transient so a not-yet-
+      // attached content script doesn't hard-fail the whole run (symmetric
+      // with how executeChannel treats the same error as a "page navigated"
+      // success). See src/lib/portRetry.ts.
+      const { ok, value, error } = await withPortRetry(
+        async () => await browser.tabs.sendMessage(tabId, { type: 'capturePage' }),
+        (v: any) => v === undefined,
+      );
+      if (!ok || !value) return { ok: false, error: error };
+      const snapshot: any = value;
+      for (const pii of snapshot.detectedPII || []) {
+        privacyLedger.log({
+          timestamp: Date.now(), tabId, url: snapshot.url || '', type: pii.type || 'PII',
+          selector: pii.selector || '', confidence: pii.confidence || 1,
+          verified: Boolean(pii.isVerified), action: 'DETECTED',
+        });
       }
+      return {
+        ok: true,
+        elements: snapshot.interactiveElements || [],
+        context: snapshot.context,
+        url: snapshot.url || '',
+        title: snapshot.title || '',
+      };
     };
 
     const executeChannel = async (action: any): Promise<any> => {
