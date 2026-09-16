@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
@@ -19,6 +19,11 @@ function Popup() {
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
   const [serverLatency, setServerLatency] = useState<number>(0);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
+
+  // Issue #70: stop affordance. A ref (not state) so the running loop sees the
+  // flag on every iteration without re-rendering the whole popup. Toggled by
+  // the Stop button while a task is in flight.
+  const stopRequested = useRef(false);
 
   // Load saved state from browser.storage
   useEffect(() => {
@@ -77,11 +82,16 @@ function Popup() {
 
   const handleStart = async () => {
     if (!task) return;
+    stopRequested.current = false; // issue #70: fresh run, clear any prior stop
     setIsRunning(true);
     setStep(0);
     setLogs([]);
     setLatency(null);
     addLog(`Starting task: "${task}"`);
+
+    // Issue #70: an abort signal so a pending /plan fetch can be cancelled
+    // the moment Stop is pressed (in addition to the loop-level stop check).
+    const abortController = new AbortController();
 
     const started = performance.now();
     let currentStep = 0;
@@ -116,6 +126,13 @@ function Popup() {
       }
 
       while (currentStep < maxSteps) {
+        // Issue #70: honor a Stop request at the top of every iteration so a
+        // user who pressed Stop (or started the wrong task / a runaway loop)
+        // gets the run back immediately.
+        if (stopRequested.current) {
+          addLog('⏹ Stopped by user');
+          break;
+        }
         currentStep++;
         addLog(`--- Step ${currentStep}/${maxSteps} ---`);
         addLog('Extracting page elements...');
@@ -206,6 +223,9 @@ function Popup() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(guard.payload),
+          // Issue #70: cancel the in-flight /plan call the moment Stop is
+          // pressed, so the loop doesn't stall on a multi-second request.
+          signal: abortController.signal,
         });
 
         if (!response.ok) {
@@ -413,25 +433,53 @@ function Popup() {
           break;
         }
 
-        await new Promise(r => setTimeout(r, 800));
+        // Issue #70: a Stop pressed during the inter-step delay should not be
+        // forced to wait the full 800ms - poll it in small slices.
+        for (let wait = 0; wait < 800; wait += 100) {
+          await new Promise(r => setTimeout(r, 100));
+          if (stopRequested.current) break;
+        }
+        if (stopRequested.current) {
+          addLog('⏹ Stopped by user');
+          break;
+        }
       }
 
-      if (currentStep >= maxSteps) {
+      if (stopRequested.current) {
+        // Already logged "Stopped by user" above; nothing else to add.
+      } else if (currentStep >= maxSteps) {
         addLog(`⚠️ Reached maximum steps (${maxSteps})`);
       }
 
-      if (plannerDegraded) {
+      if (plannerDegraded && !stopRequested.current) {
         addLog('⚠️ Task ended while planner was DEGRADED - verify results manually (no LLM was driving this run)');
-      } else {
+      } else if (!stopRequested.current) {
         addLog('Task completed');
       }
     } catch (err) {
-      addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      // Issue #70: an AbortError means the user pressed Stop while a /plan
+      // request was in flight - that is a clean stop, not a task error.
+      const aborted =
+        err instanceof DOMException && err.name === 'AbortError' ||
+        (err as { name?: string })?.name === 'AbortError';
+      if (aborted) {
+        addLog('⏹ Stopped by user (in-flight request cancelled)');
+      } else {
+        addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
       setLatency(Math.round(performance.now() - started));
       setIsRunning(false);
+      stopRequested.current = false;
     }
   };
+
+  // Issue #70: request a stop. The running loop notices it at the top of the
+  // next iteration (and the in-flight fetch is aborted via the signal). The
+  // button only shows while a task is running.
+  const handleStop = useCallback(() => {
+    stopRequested.current = true;
+  }, []);
 
   return (
     <div className="popup">
@@ -513,13 +561,23 @@ function Popup() {
 
         {/* Controls */}
         <div className="controls">
-          <button
-            className={`start-button ${isRunning ? 'running' : ''}`}
-            onClick={handleStart}
-            disabled={isRunning || !task}
-          >
-            {isRunning ? 'Running...' : 'Start Agent'}
-          </button>
+          {isRunning ? (
+            <button
+              className={`start-button running stop-button`}
+              onClick={handleStop}
+              title="Stop the running task"
+            >
+              ⏹ Stop Agent
+            </button>
+          ) : (
+            <button
+              className={`start-button`}
+              onClick={handleStart}
+              disabled={!task}
+            >
+              Start Agent
+            </button>
+          )}
           {step > 0 && (
             <div className="step-indicator">Step {step} of task execution</div>
           )}
