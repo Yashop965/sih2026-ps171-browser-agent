@@ -28,6 +28,16 @@ const MAX_ENTRIES = 2000;
 
 export class PrivacyAuditLedger {
   private entries: AuditEvent[] = [];
+  // Issue #72: persistence hook. When the ledger is created in the service
+  // worker, the caller injects a change-callback that mirrors the in-memory
+  // entries to durable storage (browser.storage.local), so the audit trail
+  // survives an SW idle-termination / reload. Absent in the pure/tested path.
+  private readonly onChange?: (entries: AuditEvent[]) => void;
+
+  constructor(initialEntries: AuditEvent[] = [], onChange?: (entries: AuditEvent[]) => void) {
+    this.entries = [...initialEntries].slice(0, MAX_ENTRIES);
+    this.onChange = onChange;
+  }
 
   // ─── Recording ──────────────────────────────────────────────────────────────
 
@@ -149,6 +159,18 @@ export class PrivacyAuditLedger {
 
   clear(): void {
     this.entries = [];
+    this.onChange?.(this.entries);
+  }
+
+  // Issue #72: load a previously-persisted snapshot at SW start (from
+  // browser.storage.local). Does NOT re-persist - we just restored what
+  // storage already holds. Only fills an EMPTY ledger, so an async hydrate
+  // that lands after the live loop already logged entries does not clobber
+  // the fresher in-memory state.
+  hydrate(entries: AuditEvent[]): void {
+    if (this.entries.length === 0) {
+      this.entries = (entries || []).slice(0, MAX_ENTRIES);
+    }
   }
 
   // ─── Internal ────────────────────────────────────────────────────────────────
@@ -162,6 +184,7 @@ export class PrivacyAuditLedger {
     if (this.entries.length > MAX_ENTRIES) {
       this.entries = this.entries.slice(0, MAX_ENTRIES);
     }
+    this.onChange?.(this.entries);
   }
 }
 
