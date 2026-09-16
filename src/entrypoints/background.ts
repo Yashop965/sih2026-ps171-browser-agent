@@ -1,6 +1,7 @@
 import { defineBackground } from 'wxt/sandbox';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
 import { sessionManager } from '../lib/sessionManager';
+import { PrivacyLedger, type PrivacyLogEntry } from '../lib/pii/privacyLedger';
 
 /**
  * Background Service Worker
@@ -16,9 +17,50 @@ export default defineBackground({
   main() {
     console.log('[PII-Agent] Background service worker started');
 
-    const privacyLedger = new PrivacyLedger();
-    const auditLedger = new PrivacyAuditLedger();
+    // Issue #72: the ledgers were in-SW singletons, recreated empty on every
+    // idle-termination / reload - so a judge who reloaded the extension saw a
+    // blank "tamper-proof" audit trail. Persist to browser.storage.local:
+    // hydrate the last snapshot at SW start, then write-through on every
+    // change (fire-and-forget; storage.local survives SW death and holds the
+    // SHA-256 export inputs across sessions).
+    const PRIVACY_LEDGER_KEY = 'sih_privacy_ledger';
+    const AUDIT_LEDGER_KEY = 'sih_audit_ledger';
+
+    const persistPrivacyLedger = async (entries: PrivacyLogEntry[]) => {
+      try {
+        await browser.storage.local.set({ [PRIVACY_LEDGER_KEY]: entries });
+      } catch {
+        // Swallowed: durability is best-effort, never block the live loop.
+      }
+    };
+    const persistAuditLedger = async (entries: any[]) => {
+      try {
+        await browser.storage.local.set({ [AUDIT_LEDGER_KEY]: entries });
+      } catch {
+        // best-effort, as above
+      }
+    };
+
+    const privacyLedger = new PrivacyLedger([], persistPrivacyLedger);
+    const auditLedger = new PrivacyAuditLedger([], persistAuditLedger);
     const agentState = new AgentState();
+
+    // Hydrate after construction (non-blocking: the SW keeps running even if
+    // storage hasn't loaded yet - the live loop never waits on the audit
+    // trail). Runs after the ledgers exist so it can call hydrate() on them.
+    (async () => {
+      let privacyInitial: PrivacyLogEntry[] = [];
+      let auditInitial: any[] = [];
+      try {
+        const snap = await browser.storage.local.get([PRIVACY_LEDGER_KEY, AUDIT_LEDGER_KEY]);
+        privacyInitial = (snap[PRIVACY_LEDGER_KEY] as PrivacyLogEntry[]) || [];
+        auditInitial = (snap[AUDIT_LEDGER_KEY] as any[]) || [];
+      } catch {
+        // first launch / storage unavailable - start empty.
+      }
+      privacyLedger.hydrate(privacyInitial);
+      auditLedger.hydrate(auditInitial);
+    })();
 
     // Listen for messages from content scripts
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -348,59 +390,6 @@ interface ScreenshotMessage {
   type: 'CAPTURE_SCREENSHOT';
 }
 
-interface PrivacyLogEntry {
-  timestamp: number;
-  tabId: number;
-  url: string;
-  type: string;
-  selector: string;
-  confidence: number;
-  verified: boolean;
-  action: string;
-  payloadSize?: number;
-  actionType?: string;
-  error?: string;
-}
-
-class PrivacyLedger {
-  private entries: PrivacyLogEntry[] = [];
-  private readonly MAX_ENTRIES = 1000;
-  
-  log(entry: Omit<PrivacyLogEntry, 'timestamp'> & Partial<PrivacyLogEntry>): void {
-    this.entries.unshift({
-      timestamp: Date.now(),
-      ...entry,
-    });
-    
-    if (this.entries.length > this.MAX_ENTRIES) {
-      this.entries = this.entries.slice(0, this.MAX_ENTRIES);
-    }
-  }
-  
-  getEntries(): PrivacyLogEntry[] {
-    return this.entries;
-  }
-  
-  clear(): void {
-    this.entries = [];
-  }
-  
-  getSummary(): { total: number; byType: Record<string, number>; byAction: Record<string, number> } {
-    const byType: Record<string, number> = {};
-    const byAction: Record<string, number> = {};
-    
-    for (const entry of this.entries) {
-      byType[entry.type] = (byType[entry.type] || 0) + 1;
-      byAction[entry.action] = (byAction[entry.action] || 0) + 1;
-    }
-    
-    return {
-      total: this.entries.length,
-      byType,
-      byAction,
-    };
-  }
-}
 
 class AgentState {
   currentTask: string | null = null;
