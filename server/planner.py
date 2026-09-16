@@ -25,7 +25,7 @@ logger = logging.getLogger("sih_agent_planner")
 # ===== Protocol Schema (Matches src/lib/actions.ts) =====
 
 class ActionSchema(BaseModel):
-    type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, WAIT, DONE
+    type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, WAIT, KEY, DONE
     targetId: Optional[int] = None
     value: Optional[str] = None
     scrollDirection: Optional[str] = None  # up, down, left, right
@@ -34,6 +34,10 @@ class ActionSchema(BaseModel):
     # WAIT: how long to let the page settle before re-planning (ms). Autonomy
     # primitive - lets the agent operate on pages that change over time.
     waitMs: Optional[int] = None
+    # KEY: which key to press (e.g. "Enter", "Tab", "Escape", "ArrowDown",
+    # or a single printable character). Issue #84: lets the agent submit a
+    # filled search box instead of being stuck after TYPE-ing into it.
+    key: Optional[str] = None
 
 
 class PlannerResult(BaseModel):
@@ -229,11 +233,12 @@ Use your full action vocabulary to act on whatever page you land on:
 6. USE WAIT when the page is still loading, a spinner/skeleton is present, or expected content has not appeared yet. Pause 1-3 seconds, then re-plan. A short WAIT is safer than acting on a half-rendered page.
 7. USE NAVIGATE to go to a specific URL when the task names a destination different from the current page. After navigating, re-plan against the new page.
 8. CLICK links / buttons that move the task forward (e.g. "Next", "Continue", "Go to profile", a result link) when that is what the task requires.
-9. ALWAYS check the "tag" and "type" fields before choosing action
-10. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
-11. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
-12. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field.
-13. Signal DONE ONLY when the overall TASK goal is achieved (the required fields are filled/submitted, or the requested page state is reached) - NOT merely because the current form is complete. If the task requires a different page or a further step, keep going.
+9. USE KEY to press a key after filling a search box or text field that submits on keyboard. For search boxes (Wikipedia, Google, or any field with an autocomplete/suggest dropdown), TYPE the query FIRST, then issue KEY "Enter" to submit. Pressing Enter is what a real user does - a CLICK on a non-existent submit button will not work. You may also press "ArrowDown" to move into an autocomplete suggestion then "Enter", or "Tab" to advance focus. Set key to the key name (e.g. "Enter"). Optionally set targetId to the field you just filled; if omitted the key lands on the focused element.
+10. ALWAYS check the "tag" and "type" fields before choosing action
+11. Only choose from the AVAILABLE ELEMENTS list above - do NOT use filled ones
+12. Do NOT signal DONE while moreContentBelow is true and there are still unfilled fields - scroll to reveal them first
+13. A history entry with Result: FAILED means that action was attempted but did NOT succeed - the element is NOT filled. Retry it: re-issue the same or a revised action for that targetId. Do NOT skip a FAILED field.
+14. Signal DONE ONLY when the overall TASK goal is achieved (the required fields are filled/submitted, or the requested page state is reached) - NOT merely because the current form is complete. If the task requires a different page or a further step, keep going.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -247,6 +252,8 @@ ACTION EXAMPLES:
 - For text input: {{"type": "TYPE", "targetId": 1, "value": "John", "reasoning": "filling first name"}}
 - For dropdown: {{"type": "SELECT", "targetId": 9, "value": "Option A", "reasoning": "selecting from dropdown"}}
 - For button: {{"type": "CLICK", "targetId": 4, "reasoning": "clicking submit button"}}
+- To submit a filled search box (press Enter): {{"type": "KEY", "key": "Enter", "reasoning": "submitting the search I just typed"}}
+- To move into an autocomplete suggestion then submit: {{"type": "KEY", "key": "ArrowDown", "reasoning": "select the highlighted suggestion"}}
 - To go to another page: {{"type": "NAVIGATE", "url": "https://site.example/profile", "reasoning": "task continues on the profile page"}}
 - To let content load: {{"type": "WAIT", "waitMs": 2000, "reasoning": "page still loading, settle before next step"}}
 
@@ -254,6 +261,7 @@ YOUR NEXT ACTION MUST BE THE ONE THAT ADVANCES THE TASK:
 - TYPE into an UNFILLED text input field using the matching value from the task
 - SELECT from an unfilled dropdown (if any exist)
 - CLICK a link / button / SUBMIT that moves the task forward
+- KEY "Enter" to submit a search box you just filled (prefer this over hunting for a submit button)
 - NAVIGATE to the target URL when the task requires a different page
 - WAIT when the page has not finished loading
 - DONE only when the TASK goal is met OR no further useful action exists
@@ -299,7 +307,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
 
         # Normalize action type
         raw_type = str(data.get("type", "")).upper().strip()
-        valid_types = {"CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "DONE"}
+        valid_types = {"CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "KEY", "DONE"}
         
         if raw_type not in valid_types:
             logger.warning(f"Invalid action type: {raw_type}")
@@ -330,6 +338,27 @@ RETURN ONLY this JSON (no markdown, no explanation):
                 scroll_amount = 400
 
         url = data.get("url")
+
+        # KEY: which key to press. Normalize the name to a known key so the
+        # executor's KEY_MAP can look it up; single printable characters pass
+        # through as-is (the executor synthesizes their code/keyCode). Issue
+        # #84: this is what lets the planner submit a filled search box.
+        key_name = data.get("key")
+        if key_name is not None:
+            key_name = str(key_name).strip()
+            if key_name.upper() in {
+                "ENTER", "TAB", "ESCAPE", "BACKSPACE", "DELETE", "SPACE",
+                "ARROWUP", "ARROWDOWN", "ARROWLEFT", "ARROWRIGHT",
+                "HOME", "END",
+            }:
+                key_name = {
+                    "ENTER": "Enter", "TAB": "Tab", "ESCAPE": "Escape",
+                    "BACKSPACE": "Backspace", "DELETE": "Delete", "SPACE": "Space",
+                    "ARROWUP": "ArrowUp", "ARROWDOWN": "ArrowDown",
+                    "ARROWLEFT": "ArrowLeft", "ARROWRIGHT": "ArrowRight",
+                    "HOME": "Home", "END": "End",
+                }[key_name.upper()]
+            # else: leave as the raw (possibly single-char) value the model sent.
 
         # WAIT duration. Accept the canonical key plus the aliases an LLM might
         # reach for, and default to a sensible 1s when a WAIT is issued with no
@@ -383,7 +412,18 @@ RETURN ONLY this JSON (no markdown, no explanation):
                 "NAVIGATE action missing url"
             )
 
-        if raw_type in {"DONE", "WAIT"}:
+        # KEY: optional. If a targetId is present it must be a real element
+        # (the executor's resolve() would throw on a stale/unknown id); if it
+        # is absent the key lands on the focused element / body, which is a
+        # valid "press Enter on the search box I just filled" case.
+        if raw_type == "KEY" and target_id is not None and target_id not in valid_element_ids:
+            logger.warning(f"KEY target #{target_id} not found in page element registry")
+            return self._fallback_action(
+                interactive_elements,
+                f"KEY target element #{target_id} not found on page"
+            )
+
+        if raw_type in {"DONE", "WAIT", "KEY"}:
             confidence = 1.0
 
         action = ActionSchema(
@@ -394,6 +434,7 @@ RETURN ONLY this JSON (no markdown, no explanation):
             scrollAmount=scroll_amount,
             url=url,
             waitMs=wait_ms,
+            key=key_name,
         )
 
         return PlannerResult(

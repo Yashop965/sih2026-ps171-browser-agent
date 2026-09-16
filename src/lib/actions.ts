@@ -4,7 +4,7 @@
 import { getElementById, getElementByStableId } from './dom';
 
 export interface Action {
-    type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'DONE';
+    type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'KEY' | 'DONE';
     // Can be either numeric ID or stableId string
     targetId?: number | string;
     value?: string;
@@ -14,6 +14,10 @@ export interface Action {
     // WAIT: how long to let the page settle (ms). Autonomy primitive so the
     // agent can pause for content to load / appear before re-extracting.
     waitMs?: number;
+    // KEY: the key to press (e.g. "Enter", "Tab", "Escape", "ArrowDown",
+    // or a single printable character). Issue #84: without this the agent
+    // can TYPE into a search box but never submit it.
+    key?: string;
 }
 
 export interface ActionResult {
@@ -181,6 +185,91 @@ function doNavigate(action: Action) {
     location.assign(target.href);
 }
 
+// KEY: press a keyboard key. This is the primitive that lets the agent
+// SUBMIT a search box after TYPE-ing into it (Wikipedia, Google, most
+// autocomplete search) - without it the agent can fill a field but never
+// fire the Enter that the page is waiting for. Issue #84.
+//
+// A key is a full down → (keypress, for printable) → up triple on the target
+// element (the focused one when targetId is omitted). Browsers and most form
+// handlers listen on keydown for submit-on-Enter, so a real triple (not just
+// a bare 'keydown') is what actually triggers the submit.
+const KEY_MAP: Record<string, { code: string; keyCode: number; key: string; printable?: boolean }> = {
+    Enter: { code: 'Enter', keyCode: 13, key: 'Enter', printable: true },
+    Tab: { code: 'Tab', keyCode: 9, key: 'Tab' },
+    Escape: { code: 'Escape', keyCode: 27, key: 'Escape' },
+    Backspace: { code: 'Backspace', keyCode: 8, key: 'Backspace' },
+    Delete: { code: 'Delete', keyCode: 46, key: 'Delete' },
+    Space: { code: 'Space', keyCode: 32, key: ' ', printable: true },
+    ArrowUp: { code: 'ArrowUp', keyCode: 38, key: 'ArrowUp' },
+    ArrowDown: { code: 'ArrowDown', keyCode: 40, key: 'ArrowDown' },
+    ArrowLeft: { code: 'ArrowLeft', keyCode: 37, key: 'ArrowLeft' },
+    ArrowRight: { code: 'ArrowRight', keyCode: 39, key: 'ArrowRight' },
+    Home: { code: 'Home', keyCode: 36, key: 'Home' },
+    End: { code: 'End', keyCode: 35, key: 'End' },
+};
+
+function doKey(action: Action) {
+    const name = (action.key ?? 'Enter').trim();
+    if (!name) throw new Error('key missing');
+
+    // Resolve target: explicit element, else whatever currently has focus,
+    // else the body (so a key still lands somewhere meaningful).
+    let target: Element | null = null;
+    if (action.targetId !== undefined) {
+        target = resolve(action.targetId);
+        scrollIntoView(target);
+        if (target instanceof HTMLElement) target.focus();
+    }
+    target = target ?? document.activeElement ?? document.body;
+
+    // Named key, or a single printable character the LLM asked for.
+    let spec = KEY_MAP[name];
+    if (!spec && name.length === 1) {
+        const c = name;
+        // Physical `code` uses the UPPERCASE letter ("KeyA" for 'a' or 'A').
+        // Real browsers compute `code` from the physical key, but a synthetic
+        // KeyboardEvent only carries what we put in it — so always emit the
+        // physical form rather than letting the char fall through to `key`.
+        const isLetter = c.length === 1 && /[a-zA-Z]/.test(c);
+        const isDigit = c.length === 1 && /[0-9]/.test(c);
+        const code = isLetter
+            ? `Key${c.toUpperCase()}`
+            : isDigit
+                ? `Digit${c}`
+                : c; // symbols/space keep their single-char physical code
+        spec = {
+            code,
+            keyCode: c.toUpperCase().charCodeAt(0),
+            key: c,
+            printable: true,
+        };
+    }
+    if (!spec) {
+        throw new Error(`unknown key: ${name} (use a named key like "Enter" or a single character)`);
+    }
+
+    // NOTE: no `view` / `which` in the init — some DOM implementations
+    // (jsdom, and strict engines) reject a KeyboardEventInit whose `view` is
+    // not their own Window object. keydown handlers never read `view` for
+    // form submission, so dropping it is safe.
+    const base = {
+        key: spec.key,
+        code: spec.code,
+        keyCode: spec.keyCode,
+        bubbles: true,
+        cancelable: true,
+    };
+
+    // A full key sequence so handlers that watch for 'keypress' on printable
+    // characters (some legacy form code) also fire.
+    target.dispatchEvent(new KeyboardEvent('keydown', base));
+    if (spec.printable) {
+        target.dispatchEvent(new KeyboardEvent('keypress', base));
+    }
+    target.dispatchEvent(new KeyboardEvent('keyup', base));
+}
+
 // WAIT: let the page settle (content loading, a spinner finishing, a modal
 // opening) before the agent re-extracts and re-plans. This is what turns the
 // agent from a blind one-shot form filler into something that can operate on
@@ -206,6 +295,7 @@ export async function execute(action: Action): Promise<ActionResult> {
             case 'SCROLL': doScroll(action); break;
             case 'NAVIGATE': doNavigate(action); break;
             case 'WAIT': await doWait(action); break;
+            case 'KEY': doKey(action); break;
             case 'DONE': break;
             default:
                 throw new Error(`unknown action type: ${(action as Action).type}`);
@@ -249,9 +339,11 @@ export async function execute(action: Action): Promise<ActionResult> {
 export async function executeWithRetry(action: Action): Promise<ActionResult> {
     const first = await execute(action);
     // NAVIGATE leaves the page (retries would re-run a navigation), DONE is a
-    // terminal signal, and WAIT already slept for the requested duration -
-    // none of them benefit from an automatic retry.
-    if (first.ok || action.type === 'NAVIGATE' || action.type === 'DONE' || action.type === 'WAIT') {
+    // terminal signal, WAIT already slept for its requested duration, and KEY
+    // presses a key that may have navigated / shifted focus (re-pressing
+    // would double-submit or re-focus). None of them benefit from an
+    // automatic retry.
+    if (first.ok || action.type === 'NAVIGATE' || action.type === 'DONE' || action.type === 'WAIT' || action.type === 'KEY') {
         return first;
     }
     await new Promise((r) => setTimeout(r, 400));
