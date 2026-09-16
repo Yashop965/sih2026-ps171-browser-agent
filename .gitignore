@@ -66,3 +66,6 @@ tsconfig.tsbuildinfo
 # ad pipeline build artifacts (regenerate, don't commit)
 ad_pipeline/audio/
 ad_pipeline/frames_*/
+
+# Transient Chrome/extension UI capture (regenerated ad-hoc for debugging)
+screenshots/*.png
