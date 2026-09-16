@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/sandbox';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
 import { sessionManager } from '../lib/sessionManager';
 import { PrivacyLedger, type PrivacyLogEntry } from '../lib/pii/privacyLedger';
+import { AgentRunner, emptyTaskState, type AgentTaskState } from '../lib/agentRunner';
 
 /**
  * Background Service Worker
@@ -44,6 +45,195 @@ export default defineBackground({
     const privacyLedger = new PrivacyLedger([], persistPrivacyLedger);
     const auditLedger = new PrivacyAuditLedger([], persistAuditLedger);
     const agentState = new AgentState();
+
+    // ─── Issue #71: SW-owned task runner ─────────────────────────────────────
+    // The agent loop now lives here, not in the popup. The popup is a thin
+    // view that subscribes to TASK_PROGRESS broadcasts. Closing the popup no
+    // longer aborts a run; the state survives until the SW itself restarts.
+    let activeTask: AgentTaskState = emptyTaskState();
+    let stopFlag = { stopped: false };
+    let abortController = new AbortController();
+
+    // Persist the live task state so a SW restart can still surface "what
+    // happened" (best-effort; the run itself dies with the SW by design).
+    const TASK_STATE_KEY = 'sih_agent_task_state';
+    const persistTaskState = async (state: AgentTaskState) => {
+      activeTask = state;
+      try {
+        await browser.storage.local.set({ [TASK_STATE_KEY]: state });
+      } catch {
+        /* best-effort */
+      }
+    };
+    const broadcastProgress = (state: AgentTaskState) => {
+      persistTaskState(state);
+      try {
+        browser.runtime.sendMessage({ type: 'TASK_PROGRESS', state }).catch(() => {});
+      } catch {
+        /* no listeners - fine */
+      }
+    };
+
+    // Rehydrate the last task snapshot so the popup shows the previous run's
+    // result instead of a blank "idle".
+    (async () => {
+      try {
+        const snap = await browser.storage.local.get(TASK_STATE_KEY);
+        if (snap[TASK_STATE_KEY]) activeTask = snap[TASK_STATE_KEY];
+      } catch {
+        /* first launch */
+      }
+    })();
+
+    // Narrow channels the runner uses - each delegates to the existing
+    // content/background plumbing.
+    const extractChannel = async (): Promise<any> => {
+      const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const tabId = activeTab?.id;
+      if (tabId === undefined) return { ok: false, error: 'No active tab' };
+      try {
+        const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
+        if (!snapshot) return { ok: false, error: 'No snapshot' };
+        for (const pii of snapshot.detectedPII || []) {
+          privacyLedger.log({
+            timestamp: Date.now(), tabId, url: snapshot.url || '', type: pii.type || 'PII',
+            selector: pii.selector || '', confidence: pii.confidence || 1,
+            verified: Boolean(pii.isVerified), action: 'DETECTED',
+          });
+        }
+        return {
+          ok: true,
+          elements: snapshot.interactiveElements || [],
+          context: snapshot.context,
+          url: snapshot.url || '',
+          title: snapshot.title || '',
+        };
+      } catch (e) {
+        return { ok: false, error: String(e) };
+      }
+    };
+
+    const executeChannel = async (action: any): Promise<any> => {
+      const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const tabId = activeTab?.id;
+      if (tabId === undefined) return { ok: false, error: 'No web tab found' };
+      try {
+        const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
+        privacyLedger.log({
+          timestamp: Date.now(), tabId, url: '', type: 'EXECUTION',
+          selector: action?.targetId?.toString() || '', confidence: 1,
+          verified: result?.ok === true,
+          action: result?.ok ? 'SUCCESS' : 'FAILURE',
+          error: result?.error,
+        });
+        return result;
+      } catch (e) {
+        const msg = String(e);
+        // A click/submit that NAVIGATES the tab disconnects the content port
+        // before it can reply (#86). The action likely worked - the next
+        // EXTRACT re-plans on the new page. Do NOT report it as a failure.
+        const navigated =
+          /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(msg);
+        if (navigated) {
+          privacyLedger.log({
+            timestamp: Date.now(), tabId, url: '', type: 'EXECUTION',
+            selector: action?.targetId?.toString() || '', confidence: 1,
+            verified: true, action: 'SUCCESS',
+          });
+          return { ok: true, note: 'page navigated - will re-extract the new page' };
+        }
+        return { ok: false, error: msg };
+      }
+    };
+
+    const navigateChannel = async (url: string): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        let target = url;
+        try {
+          const parsed = new URL(url, 'http://invalid');
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return { ok: false, error: `refused protocol: ${parsed.protocol}` };
+          }
+          target = parsed.href;
+        } catch {
+          return { ok: false, error: 'invalid url' };
+        }
+        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        if (activeTab?.id === undefined) return { ok: false, error: 'No web tab found' };
+        await browser.tabs.update(activeTab.id, { url: target });
+        await waitForTabLoad(activeTab.id, 10_000);
+        privacyLedger.log({
+          timestamp: Date.now(), tabId: activeTab.id, url: target, type: 'EXECUTION',
+          selector: 'NAVIGATE', confidence: 1, verified: true, action: 'SUCCESS',
+        });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e) };
+      }
+    };
+
+    const fetchPlan = async (payload: unknown, signal?: AbortSignal): Promise<any> => {
+      const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
+      try {
+        const response = await fetch(`${serverUrl}/plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal,
+        });
+        if (!response.ok) return null; // runner logs the non-OK path as an abort/offline
+        return await response.json();
+      } catch {
+        // AbortError (Stop pressed mid-request) or a network failure. Either
+        // way there is no plan to act on this step; the loop stops/re-checks.
+        return null;
+      }
+    };
+
+    // Start (or restart) the SW-owned runner for a task.
+    const startTask = async (message: any, sender: browser.runtime.MessageSender) => {
+      // A popup-originated message has no sender.tab, so resolve the active
+      // web tab to target. The runner's channels re-resolve the active tab per
+      // call, so it always acts on the page the user is looking at.
+      let windowId = sender.tab?.windowId ?? 0;
+      try {
+        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        if (activeTab?.id !== undefined) {
+          windowId = activeTab.windowId ?? windowId;
+        }
+      } catch {
+        /* keep the sender-derived window */
+      }
+
+      // Stop any previous run before starting a new one.
+      stopFlag = { stopped: false };
+      abortController = new AbortController();
+
+      const runner = new AgentRunner({
+        extract: extractChannel,
+        execute: executeChannel,
+        navigate: navigateChannel,
+        fetchPlan,
+        delay: (ms) => new Promise((r) => setTimeout(r, ms)),
+        sessionManager,
+        tabId: -1, // bookkeeping id; the channels resolve the live tab
+        windowId,
+        task: message.task || '',
+        startUrl: message.startUrl,
+        onProgress: broadcastProgress,
+        isStopped: () => stopFlag.stopped,
+        abortSignal: abortController.signal,
+      });
+      runner.run().catch((e) => {
+        console.error('[agent-runner] unhandled loop error:', e);
+        broadcastProgress({
+          ...emptyTaskState(),
+          status: 'failed',
+          logs: [`${new Date().toLocaleTimeString()}: Run error: ${e instanceof Error ? e.message : String(e)}`],
+          lastUpdate: Date.now(),
+        });
+      });
+    };
 
     // Hydrate after construction (non-blocking: the SW keeps running even if
     // storage hasn't loaded yet - the live loop never waits on the audit
@@ -254,6 +444,23 @@ export default defineBackground({
 
         case 'GET_SESSION':
           return handleGetSession(message, sender);
+
+        case 'START_TASK':
+          // Issue #71/#69: spawn the SW-owned runner. Fire-and-forget; the
+          // runner reports progress via TASK_PROGRESS broadcasts.
+          startTask(message, sender);
+          sendResponse({ ok: true, running: true });
+          return true;
+
+        case 'STOP_TASK':
+          stopFlag.stopped = true;
+          abortController.abort();
+          sendResponse({ ok: true });
+          return true;
+
+        case 'GET_TASK_STATE':
+          sendResponse(activeTask);
+          return true;
 
         default:
           sendResponse({ error: `Unknown message type: ${message.type}` });
