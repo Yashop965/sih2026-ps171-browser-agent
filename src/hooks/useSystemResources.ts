@@ -99,8 +99,10 @@ export function useSystemResources(): SystemResources {
     // Initial check
     updateResources();
     
-    // Poll every 2 seconds
-    const interval = setInterval(updateResources, 2000);
+    // Poll every 10s (issue #74: 2s was constant CPU in a tiny popup for the
+    // whole session; the resource numbers move slowly enough that 10s is a
+    // coarse, near-imperceptible timer. No leak - cleared on unmount.)
+    const interval = setInterval(updateResources, 10000);
     
     return () => clearInterval(interval);
   }, [checkGPU]);

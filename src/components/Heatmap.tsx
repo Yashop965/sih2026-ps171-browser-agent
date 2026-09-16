@@ -25,6 +25,18 @@ interface HeatmapProps {
 
 export default function Heatmap({ detections, onHighlight }: HeatmapProps) {
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  // Issue #74: bound the DOM on detection-heavy pages (50-100 PII boxes).
+  // Each type renders at most MAX_CARDS cards by default; the user expands a
+  // type with "Show all N" instead of us mounting hundreds of cards up front.
+  const MAX_CARDS = 50;
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+  const toggleExpand = (type: string) =>
+    setExpandedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
 
   if (detections.length === 0) {
     return (
@@ -239,9 +251,9 @@ export default function Heatmap({ detections, onHighlight }: HeatmapProps) {
                   </div>
                 </div>
 
-                {/* Detection cards */}
+                {/* Detection cards (issue #74: capped to MAX_CARDS unless expanded) */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {items.map((detection, index) => (
+                  {(expandedTypes.has(type) ? items : items.slice(0, MAX_CARDS)).map((detection, index) => (
                     <div
                       key={`${detection.selector}-${index}`}
                       onClick={() => onHighlight(detection.selector)}
@@ -315,6 +327,28 @@ export default function Heatmap({ detections, onHighlight }: HeatmapProps) {
                     </div>
                   ))}
                 </div>
+
+                {/* Issue #74: expand/collapse when a type exceeds the cap */}
+                {items.length > MAX_CARDS && (
+                  <button
+                    onClick={() => toggleExpand(type)}
+                    style={{
+                      marginTop: 8,
+                      padding: '8px 14px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: config.color,
+                      background: config.bg,
+                      border: `1px solid ${config.color}30`,
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {expandedTypes.has(type)
+                      ? `Show fewer (showing all ${items.length})`
+                      : `Show all ${items.length} (showing ${MAX_CARDS})`}
+                  </button>
+                )}
               </div>
             );
           });
