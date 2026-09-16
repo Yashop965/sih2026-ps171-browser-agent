@@ -10,6 +10,7 @@ import json
 import httpx
 from typing import Optional, Dict, Any
 from .base import BaseLLMClient
+from .retry import with_retry
 
 
 class CustomEndpointClient(BaseLLMClient):
@@ -52,6 +53,11 @@ class CustomEndpointClient(BaseLLMClient):
         Call custom OpenAI-compatible endpoint.
         
         Expects endpoint to support: POST /chat/completions
+        
+        Issue #85: the POST is wrapped in with_retry so a transient 429 /
+        5xx (rate limit, provider blip) is retried with exponential backoff
+        instead of instantly degrading the planner into a destructive
+        heuristic fallback.
         """
         url = f"{self.api_url}/chat/completions"
         
@@ -70,12 +76,19 @@ class CustomEndpointClient(BaseLLMClient):
             "max_tokens": 500,
         }
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+        def _post(client: httpx.AsyncClient) -> "httpx.Response":
+            return client.post(url, headers=headers, json=payload)
+        
+        # LLMRateLimitError (all retries exhausted on 429/5xx) propagates to
+        # the planner, which degrades with a real reason instead of the
+        # destructive "type Test Data into the first input" fallback.
+        response = await with_retry(
+            _post, attempts=4, name=f"custom_endpoint/{self.model}", timeout=30.0
+        )
+        response.raise_for_status()
+        
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
     
     async def health_check(self) -> Dict[str, Any]:
         """Check if custom endpoint is reachable."""

@@ -9,6 +9,7 @@ import os
 import httpx
 from typing import Optional, Dict, Any
 from .base import BaseLLMClient
+from .retry import with_retry
 
 
 class OllamaClient(BaseLLMClient):
@@ -41,6 +42,9 @@ class OllamaClient(BaseLLMClient):
         Call Ollama generate endpoint.
         
         Expects: POST /api/generate
+        
+        Issue #85: a local model under load can 5xx; with_retry gives it a
+        bounded backoff before the planner degrades.
         """
         url = f"{self.host}/api/generate"
         
@@ -57,12 +61,16 @@ class OllamaClient(BaseLLMClient):
         if system_prompt:
             payload["system"] = system_prompt
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            
-            data = response.json()
-            return data.get("response", "")
+        def _post(client: httpx.AsyncClient) -> "httpx.Response":
+            return client.post(url, json=payload)
+        
+        response = await with_retry(
+            _post, attempts=4, name=f"ollama/{self.model}", timeout=60.0
+        )
+        response.raise_for_status()
+        
+        data = response.json()
+        return data.get("response", "")
     
     async def health_check(self) -> Dict[str, Any]:
         """Check if Ollama is running."""
