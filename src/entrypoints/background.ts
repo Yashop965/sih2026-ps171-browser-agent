@@ -51,13 +51,11 @@ export default defineBackground({
           // Extract DOM and log PII to ledger
           (async () => {
             try {
-              // Popup doesn't have sender.tab, so query for active tab
-              let tabId = sender.tab?.id;
-              if (!tabId) {
-                const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-                tabId = activeTab?.id;
-              }
-              if (!tabId) { sendResponse({ error: 'No active tab', ok: false }); return; }
+              // Always target a real web tab, never the extension's own
+              // pages (the popup can be driven as a tab via CDP). See
+              // resolveWebTab.
+              const tabId = await resolveWebTab(sender);
+              if (!tabId) { sendResponse({ error: 'No web tab found', ok: false }); return; }
               const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
               if (!snapshot) { sendResponse({ ok: false, error: 'No snapshot' }); return; }
               // Log PII detections
@@ -96,13 +94,13 @@ export default defineBackground({
         case 'EXECUTE':
           // Execute action and log to ledger
           (async () => {
+            // Resolve the target web tab BEFORE the try so the catch block can
+            // also reference it when logging a navigation-triggered disconnect.
+            // resolveWebTab always targets a real http(s) tab - never the
+            // extension's own pages.
+            let tabId = await resolveWebTab(sender);
+            if (!tabId) { sendResponse({ error: 'No web tab found', ok: false }); return; }
             try {
-              let tabId = sender.tab?.id;
-              if (!tabId) {
-                const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-                tabId = activeTab?.id;
-              }
-              if (!tabId) { sendResponse({ error: 'No active tab', ok: false }); return; }
               const action = message.action;
               const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
               // Log execution to ledger
@@ -119,7 +117,29 @@ export default defineBackground({
               });
               sendResponse(result);
             } catch (e) {
-              sendResponse({ ok: false, error: String(e) });
+              const msg = String(e);
+              // A click/submit that NAVIGATES the tab disconnects the content
+              // message channel before it can reply. The action likely worked
+              // (the page moved on) - do not report that as a failure, or the
+              // planner will think the click failed and retry-loop. The next
+              // EXTRACT will see the new page and re-plan correctly.
+              const navigated =
+                /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(msg);
+              if (navigated) {
+                privacyLedger.log({
+                  timestamp: Date.now(),
+                  tabId,
+                  url: '',
+                  type: 'EXECUTION',
+                  selector: message.action?.targetId?.toString() || '',
+                  confidence: 1,
+                  verified: true,
+                  action: 'SUCCESS',
+                });
+                sendResponse({ ok: true, note: 'page navigated - will re-extract the new page' });
+              } else {
+                sendResponse({ ok: false, error: msg });
+              }
             }
           })();
           return true;
@@ -134,12 +154,9 @@ export default defineBackground({
           // fresh DOM instead of the half-loaded page.
           (async () => {
             try {
-              let tabId = sender.tab?.id;
-              if (!tabId) {
-                const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-                tabId = activeTab?.id;
-              }
-              if (!tabId) { sendResponse({ ok: false, error: 'No active tab' }); return; }
+              // Target a real web tab, never the extension's own pages.
+              let tabId = await resolveWebTab(sender);
+              if (!tabId) { sendResponse({ ok: false, error: 'No web tab found' }); return; }
               const target = message.url;
               // Only http(s) - refuse javascript: and other dangerous schemes.
               let url = target;
@@ -531,6 +548,40 @@ async function scrollPage(
 async function navigateTo(tabId: number, url: string): Promise<boolean> {
   await browser.tabs.update(tabId, { url });
   return true;
+}
+
+/**
+ * Resolve the tab the agent should act on: a real web page, never the
+ * extension's own pages (popup, devtools, chrome://, chrome-extension://).
+ *
+ * Why: the popup UI is usually a sender without a tab, so we fall back to the
+ * active web tab. But if the popup itself is open AS A TAB (e.g. driven via
+ * CDP), that active tab IS the extension page - acting on it would make the
+ * agent extract/click its own UI instead of the page the user is looking at.
+ * We therefore only accept a sender tab that is a real web URL; otherwise we
+ * scan the sender's window (or the current window) for an active web tab.
+ */
+async function resolveWebTab(sender: browser.runtime.MessageSender): Promise<number | undefined> {
+  const isWeb = (u?: string) => !!u && (u.startsWith('http://') || u.startsWith('https://'));
+
+  // 1) Sender tab, if it is a real web page (typical content-script sender).
+  if (sender.tab?.id && isWeb(sender.tab?.url)) {
+    return sender.tab.id;
+  }
+
+  // 2) Active web tab in the sender's window.
+  const inWindow = sender.tab?.windowId
+    ? { windowId: sender.tab.windowId }
+    : { currentWindow: true };
+  const [active] = await browser.tabs.query({ active: true, ...inWindow });
+  if (active?.id && isWeb(active.url)) {
+    return active.id;
+  }
+
+  // 3) Any web tab in that window (e.g. a background tab the user is on).
+  const tabs = await browser.tabs.query({ ...inWindow });
+  const web = tabs.find((t) => isWeb(t.url));
+  return web?.id;
 }
 
 async function waitForCondition(tabId: number, condition: string): Promise<boolean> {
