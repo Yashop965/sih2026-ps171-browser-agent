@@ -339,6 +339,37 @@ function Popup() {
             failedErrors.set(action.targetId, result?.error ?? 'unknown');
             recentActionHistory.push({ targetId: action.targetId, type: 'SELECT' });
           }
+        } else if (action.type === 'KEY') {
+          // Issue #84: press a key so the agent can SUBMIT a filled field
+          // (Enter) or navigate an autocomplete (ArrowDown/Tab/Escape). Routed
+          // through the content relay like TYPE/CLICK/SELECT - doKey in
+          // src/lib/actions.ts dispatches the full keydown/keypress/keyup triple.
+          const key = action.key || 'Enter';
+          consecutiveScrolls = 0;
+          addLog(`⌨️ Pressing key "${key}"${action.targetId ? ` on element #${action.targetId}` : ''}`);
+          const result: any = await browser.runtime.sendMessage({
+            type: 'EXECUTE',
+            action,
+          });
+          if (result?.ok) {
+            addLog('✅ Key pressed successfully');
+            setStep(currentStep);
+            // Pressing Enter usually navigates (submit / autocomplete jump).
+            // A page navigation drops the content port, which the background
+            // EXECUTE handler now reports as ok:true with a "page navigated"
+            // note - treat that as a fresh page and reset per-page state.
+            const navigated = !!result.note && /navigat/i.test(result.note);
+            if (navigated) {
+              addLog('🧭 Key triggered a navigation - re-planning on the new page');
+              consecutiveScrolls = 0;
+              recentActionHistory = [];
+              await new Promise((r) => setTimeout(r, 600));
+            }
+            recentActionHistory.push({ targetId: action.targetId ?? 'focus', type: 'KEY' });
+          } else {
+            addLog(`❌ Key press failed: ${result?.error ?? 'unknown'}`);
+            recentActionHistory.push({ targetId: action.targetId ?? 'focus', type: 'KEY' });
+          }
         } else if (action.type === 'WAIT') {
           // Let the page settle (loading / spinner / content appearing) before
           // re-planning. No target needed. Route through the content relay,
