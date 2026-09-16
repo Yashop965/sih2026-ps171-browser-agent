@@ -10,6 +10,7 @@ export default defineConfig({
       'tabs',
       'storage',
       'scripting',
+      'alarms',
     ],
     host_permissions: [
       'http://localhost:8000/*',

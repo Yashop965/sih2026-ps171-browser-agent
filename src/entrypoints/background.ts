@@ -46,6 +46,36 @@ export default defineBackground({
     const auditLedger = new PrivacyAuditLedger([], persistAuditLedger);
     const agentState = new AgentState();
 
+    // ─── Issue #75: MV3 service-worker keepalive for long ops ────────────────
+    // A long in-flight op (Florence-2 first-time init + a vision capture can
+    // outlive the ~30s MV3 idle timeout) used to die with the SW, so the
+    // request caller got silence instead of a result. We track how many long
+    // ops are in flight; while >0 a recurring 25s keepalive alarm keeps the
+    // SW warm. When the count hits 0 the alarm is cleared so we don't hold
+    // the SW alive forever.
+    let longOpsInFlight = 0;
+    const KEEPALIVE_ALARM = 'sih_sw_keepalive';
+    const KEEPALIVE_PERIOD_MIN = 0.5; // ~30s
+
+    const beginLongOp = () => {
+      longOpsInFlight++;
+      browser.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
+    };
+    const endLongOp = () => {
+      longOpsInFlight = Math.max(0, longOpsInFlight - 1);
+      if (longOpsInFlight === 0) {
+        browser.alarms.clear(KEEPALIVE_ALARM);
+      }
+    };
+    // The alarm's own firing is what keeps the SW warm; it just reports and
+    // re-arms. No-op if nothing is in flight (the alarm would have been
+    // cleared already).
+    browser.alarms.onAlarm.addListener((alarm: { name?: string }) => {
+      if (alarm.name !== KEEPALIVE_ALARM) return;
+      console.log('[keepalive] SW keepalive tick -', longOpsInFlight, 'long op(s) in flight');
+    });
+
+
     // ─── Issue #71: SW-owned task runner ─────────────────────────────────────
     // The agent loop now lives here, not in the popup. The popup is a thin
     // view that subscribes to TASK_PROGRESS broadcasts. Closing the popup no
@@ -258,8 +288,12 @@ export default defineBackground({
 
       switch (message.type) {
         case 'VISION_EXTRACT':
-          // Request vision-enhanced extraction from content script
+          // Request vision-enhanced extraction from content script.
+          // Issue #75: this can be a long op (Florence-2 first-time model
+          // init + capture) that would outlive the MV3 idle timeout, so hold
+          // the SW warm for its duration.
           (async () => {
+            beginLongOp();
             try {
               const tabId = sender.tab?.id;
               if (!tabId) { sendResponse({ ok: false, error: 'No tab ID' }); return; }
@@ -267,6 +301,8 @@ export default defineBackground({
               sendResponse(result);
             } catch (e) {
               sendResponse({ ok: false, error: String(e) });
+            } finally {
+              endLongOp();
             }
           })();
           return true;
