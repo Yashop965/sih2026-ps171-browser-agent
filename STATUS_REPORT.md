@@ -1,8 +1,8 @@
 # SIH2026 PS171 - Final Status Report
 
 > **⏱ Submission snapshot (2026-09-02):** 240 tests / 1.21 MB. Current repo state is
-> **303/303 tests / 1.22 MB** (post-deadline hardening: autonomy #84–#86, planner
-> checklist #99, port-retry #105). Figures below are the submission state.
+> **324/324 tests / 1.23 MB** (post-deadline hardening: autonomy #84–#86, planner
+> checklist #99, port-retry #105, vision-stop #107). Figures below are the submission state.
 
 ## Video Assets
 

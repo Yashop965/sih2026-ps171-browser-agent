@@ -5,8 +5,8 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-> **Current state (verified 2026-09-17):** `main` clean · **303/303** vitest tests passing ·
-> Chrome MV3 build **1.22 MB** · 0 PII off-device · planner-authored task checklist as
+> **Current state (verified 2026-09-17):** `main` clean · **324/324** vitest tests passing ·
+> Chrome MV3 build **1.23 MB** · 0 PII off-device · planner-authored task checklist as
 > cross-page memory · port-retry on navigating clicks. Repo:
 > [`github.com/Yashop965/sih2026-ps171-browser-agent`](https://github.com/Yashop965/sih2026-ps171-browser-agent).
 
