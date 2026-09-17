@@ -2,6 +2,7 @@
 // Takes an action from the planner server and performs it on the page.
 
 import { getElementById, getElementByStableId } from './dom';
+import { showCursor, hideCursor, type CursorActionKind } from './agentCursor';
 
 export interface Action {
     type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'KEY' | 'DONE';
@@ -292,8 +293,42 @@ function doWait(action: Action) {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+// #101: show the agent-cursor overlay for this action's target. Presentation
+// only - every failure path (unknown target, detached element, no DOM) just
+// skips the overlay; it must never fail or delay the action itself. KEY
+// without a target points at the currently-focused element.
+function presentCursor(action: Action): void {
+    try {
+        const kind: CursorActionKind =
+            action.type === 'TYPE' ? 'TYPE'
+            : action.type === 'SELECT' ? 'SELECT'
+            : action.type === 'KEY' ? 'KEY'
+            : 'CLICK';
+        let el: Element | undefined;
+        if (action.targetId !== undefined) {
+            el = resolve(action.targetId);
+        } else if (action.type === 'KEY' && typeof document !== 'undefined') {
+            el = document.activeElement ?? undefined;
+        }
+        if (el) showCursor(el, kind);
+    } catch {
+        /* overlay is optional; the action proceeds either way */
+    }
+}
+
 export async function execute(action: Action): Promise<ActionResult> {
     const started = performance.now();
+
+    // #101: present the agent-cursor overlay over the target BEFORE the action
+    // lands, so the user sees exactly where the agent is about to act. Pure
+    // presentation: showCursor never throws (bad rect / detached node just
+    // returns false) and never logs element values. NAVIGATE tears it down -
+    // the element it pointed at ceases to exist on the new page.
+    if (action.type === 'NAVIGATE') {
+        hideCursor();
+    } else {
+        presentCursor(action);
+    }
 
     const run = async () => {
         switch (action.type) {
