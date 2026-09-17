@@ -143,14 +143,80 @@ export class PIIManager {
         this.scanValue(select, selected.value);
       }
     });
+
+    // 5. Dedupe (issue #104): the text scan visits containers AND their
+    //    leaves, so one value in a <p> historically surfaced once per
+    //    ancestor div. Keep only the innermost detection per type+value.
+    this.dedupeAncestorDuplicates();
+  }
+
+  /**
+   * Drop the imprecise half of a duplicate: if two detections share
+   * type+value and one's source element CONTAINS the other's, the outer
+   * (ancestor) detection is redundant - the innermost one is the precise
+   * location. Field-based detections (no metadata.el) are never dropped.
+   * `el` is duck-typed so the check survives cross-realm elements in jsdom.
+   */
+  private dedupeAncestorDuplicates(): void {
+    const elOf = (d: PIIDetection): Element | undefined => {
+      const el = d.metadata?.el;
+      return el && el.nodeType === 1 && typeof el.contains === 'function' ? (el as Element) : undefined;
+    };
+
+    const byKey = new Map<string, PIIDetection[]>();
+    for (const d of this.detections) {
+      const key = `${d.type}::${d.value ?? ''}`;
+      const arr = byKey.get(key);
+      if (arr) arr.push(d); else byKey.set(key, [d]);
+    }
+
+    const drop = new Set<PIIDetection>();
+    for (const group of byKey.values()) {
+      for (let i = 0; i < group.length; i++) {
+        const elI = elOf(group[i]);
+        if (!elI) continue; // keep field-based / no-element detections
+        for (let j = 0; j < group.length; j++) {
+          if (i === j) continue;
+          const elJ = elOf(group[j]);
+          if (!elJ) continue;
+          if (elI !== elJ && elI.contains(elJ)) {
+            drop.add(group[i]); // i is an ancestor of a same-value detection
+            break;
+          }
+        }
+      }
+    }
+    if (drop.size) {
+      this.detections = this.detections.filter((d) => !drop.has(d));
+    }
   }
 
   private scanTextContent(element: Element, text: string): void {
+    // Patterns hardened for precision (issue #104). The core change: digit
+    // patterns are CONTIGUOUS and word-bounded, so they can no longer reach
+    // across whitespace/newlines to stitch unrelated numbers into a "phone"
+    // (the price-table "500 1500 12000" FP and the space-grouped Aadhaar
+    // misread as a phone both came from the old gap-crossing `[\d\s-]`).
     const patterns: [RegExp, PIIType, number][] = [
       [/([A-Z]{5}\d{4}[A-Z]{1})/g, 'PAN', 0.8],
       [/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, 'EMAIL', 0.95],
-      [/(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})/g, 'CREDIT_CARD', 0.7],
-      [/([+]?[1-9][\d\s-]{8,11}\d)/g, 'PHONE', 0.6],
+      // Aadhaar: 12 digits as 4-4-4, single space/dash between groups.
+      // Trailing guard `(?![ -]?\d)` refuses to slice a 16-digit card run
+      // (4500 1234 5678 | 9012) into a fake 12-digit Aadhaar. Unverified
+      // candidates stay low-confidence (0.55); Verhoeff confirms the real ones.
+      [/(?<!\d)(\d{4}[ -]?\d{4}[ -]?\d{4})(?![ -]?\d)/g, 'AADHAAR', 0.55],
+      // Credit card: 16 digits as 4-4-4-4, bounded.
+      [/(?<!\d)(\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4})(?![ -]?\d)/g, 'CREDIT_CARD', 0.7],
+      // Phone - single anchored alternation so a local 10-digit number is
+      // reported ONCE (not by both shapes). Two accepted forms:
+      //  a) country code: +91 98765 43210 (grouped by spaces/dashes, the
+      //     "+" anchor is what makes the spaces safe - a leading "+" can't
+      //     appear in a price-table column)
+      //  b) local: 9876543210 - one CONTIGUOUS 10-digit run
+      // The old `[+]?[1-9][\d\s-]{8,11}\d` reached across newlines and word
+      // gaps, stitching price-table columns ("500\n1500\n12000") into
+      // phantom phones and misreading a space-grouped Aadhaar as a phone.
+      [/\+([1-9]\d{0,2})[\s-]?\d{5}[\s-]?\d{5}|(?<!\d)([1-9]\d{9})(?!\d)/g, 'PHONE', 0.6],
     ];
 
     for (const pattern of patterns) {
@@ -168,6 +234,10 @@ export class PIIManager {
             confidence: baseConfidence,
             isVerified: false,
             redacted: false,
+            // Keep the source element so the post-scan dedupe pass can drop an
+            // ancestor container that re-reports the value its inner <p>/<span>
+            // already flagged (issue #104: nested-div duplicates).
+            metadata: { el: element },
           };
 
           this.detections.push(detection);
