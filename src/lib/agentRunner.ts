@@ -17,6 +17,7 @@
  */
 
 import { guardOutboundPlan } from './pii/outboundGuard';
+import { resolveProfileValue, type UserProfile } from './userProfile';
 import type { SessionManager, SessionContext } from './sessionManager';
 import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
 import { goalBackstop } from './goalBackstop';
@@ -207,6 +208,15 @@ export interface AgentRunnerDeps {
     title: string;
     openItems: ChecklistItem[];
   }) => Promise<{ confirmed: boolean; detail?: string } | null>;
+  /**
+   * #102 local user profile (on-device). When the planner returns an action
+   * whose value is a profile token (<EMAIL>, <ADDRESS> ...), the runner
+   * resolves it to the real stored constant HERE, on-device, right before
+   * execution - so the LLM never saw the raw value (it only saw the token,
+   * via the outbound guard's profileHints) and never does. Absent / empty =
+   * profile feature off, behaviour unchanged.
+   */
+  profile?: UserProfile;
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -376,6 +386,7 @@ export class AgentRunner {
         task: d.task,
         elements: elements as Record<string, unknown>[],
         context: pageContext ?? undefined,
+        profile: d.profile,
         history,
         passThrough: {
           step: currentStep,
@@ -558,6 +569,21 @@ export class AgentRunner {
     d: AgentRunnerDeps,
     sessionId: string | null,
   ): Promise<void> {
+    // #102: profile-token resolution, ON-DEVICE and at execution time. The
+    // planner saw only the token (the outbound guard masks raw values before
+    // egress and advertises which field each token means via profileHints);
+    // the real constant never crosses to the LLM. Resolve it here so the
+    // executor types the user's actual value, not "Test Data". Log the
+    // TOKEN, not the resolved value (the value is personal data - keep it
+    // out of the activity log too).
+    if (d.profile && action.value !== undefined) {
+      const resolved = resolveProfileValue(action.value, d.profile);
+      if (resolved !== undefined && resolved !== '') {
+        this.log(`🔑 Resolving profile token ${action.value.trim()} on-device for element #${action.targetId ?? '?'}`);
+        action.value = resolved;
+      }
+    }
+
     const recordFailure = (id: string, err?: string) => {
       this.failedIds.add(id);
       this.failedErrors.set(id, err ?? 'unknown');

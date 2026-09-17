@@ -23,6 +23,7 @@
 
 import { redactString } from './sanitizer';
 import { checkOutboundPayload } from './firewall';
+import { maskProfileValues, profileHintsForPayload, type UserProfile } from '../userProfile';
 import type { PIIType } from '../types';
 
 /**
@@ -49,6 +50,14 @@ export interface OutboundPlanInput {
   history?: unknown[];
   /** Extra scalar fields the caller wants passed through unchanged. */
   passThrough?: Record<string, unknown>;
+  /**
+   * Issue #102: the local user profile. Raw values are NEVER sent - any that
+   * appear in the task/elements are replaced with stable tokens (<EMAIL> ...),
+   * and a token-only key->token map is added to the payload so the planner
+   * knows which field a token means without the raw value. When omitted,
+   * egress behaves exactly as before.
+   */
+  profile?: UserProfile;
 }
 
 export interface OutboundPlanResult {
@@ -76,9 +85,16 @@ export function guardOutboundPlan(input: OutboundPlanInput): OutboundPlanResult 
   const events: Array<{ type: PIIType; selector: string }> = [];
   let redactedCount = 0;
 
+  // 0. Profile masking (issue #102): replace raw local-constant values with
+  //    stable tokens BEFORE the general PII redactor, so the raw value is
+  //    never present for the redactor (or anything downstream) to see.
+  const profile = input.profile ?? {};
+  const hasProfile = Object.keys(profile).length > 0;
+
   // 1. Redact the task (free text).
   const rawTask = input.task ?? '';
-  const { sanitized: safeTask, matches: taskMatches } = redactString(rawTask, 'task');
+  const taskAfterMask = hasProfile ? maskProfileValues(rawTask, profile) : rawTask;
+  const { sanitized: safeTask, matches: taskMatches } = redactString(taskAfterMask, 'task');
   if (safeTask !== rawTask) redactedCount++;
   for (const m of taskMatches) {
     if (m.redacted) events.push({ type: m.type, selector: 'task' });
@@ -88,10 +104,17 @@ export function guardOutboundPlan(input: OutboundPlanInput): OutboundPlanResult 
   const safeElements: LiveElement[] = (input.elements ?? []).map((el, i) => {
     const copy: LiveElement = { ...el };
     for (const key of PII_FIELDS) {
-      const v = copy[key];
-      if (typeof v === 'string' && v.length > 0) {
-        const { sanitized, matches } = redactString(v, `elements[${i}].${key}`);
-        if (sanitized !== v) {
+      const raw = copy[key];
+      if (typeof raw === 'string' && raw.length > 0) {
+        // Mask profile values first (issue #102); the string type is preserved
+        // on a local const so the redactor sees a `string`, not `unknown`.
+        const masked = hasProfile ? maskProfileValues(raw, profile) : raw;
+        const { sanitized, matches } = redactString(masked, `elements[${i}].${key}`);
+        // Compare against the ORIGINAL raw value, not `masked`: profile-masking
+        // already removed the PII, so redactString returns it unchanged and
+        // `sanitized !== masked` would be false - leaving the raw value in the
+        // copy. Against `raw` we correctly write back the token-masked value.
+        if (sanitized !== raw) {
           copy[key] = sanitized;
           redactedCount++;
         }
@@ -106,11 +129,15 @@ export function guardOutboundPlan(input: OutboundPlanInput): OutboundPlanResult 
   // 3. Assemble the exact body the popup would POST, with the sanitized task
   //    and elements. Geometry + history + pass-through scalars go through
   //    unchanged (they carry no PII, and the firewall still inspects them).
+  //    Issue #102: add a token-only profile map (key -> <TOKEN>) so the
+  //    planner knows which field a token refers to - NEVER the raw value.
+  const profileHints = hasProfile ? profileHintsForPayload(profile) : {};
   const payload: Record<string, unknown> = {
     task: safeTask,
     elements: safeElements,
     ...(input.history === undefined ? {} : { history: input.history }),
     ...(input.context === undefined ? {} : { context: input.context }),
+    ...(Object.keys(profileHints).length ? { profileHints } : {}),
     ...(input.passThrough ?? {}),
   };
 

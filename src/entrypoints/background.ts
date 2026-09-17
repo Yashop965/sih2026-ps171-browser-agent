@@ -5,6 +5,7 @@ import { PrivacyLedger, type PrivacyLogEntry } from '../lib/pii/privacyLedger';
 import { AgentRunner, emptyTaskState, type AgentTaskState, type ChecklistItem } from '../lib/agentRunner';
 import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
+import { loadProfile } from '../lib/userProfile';
 
 /**
  * Background Service Worker
@@ -281,6 +282,12 @@ export default defineBackground({
       stopFlag = { stopped: false };
       abortController = new AbortController();
 
+      // #102: load the on-device user profile so the planner can reference the
+      // user's own constants by token. Never egressed raw - the outbound guard
+      // masks to tokens and the runner resolves back to the real value only
+      // at execution time. Absent / empty => feature off, unchanged behaviour.
+      const profile = await loadProfile();
+
       const runner = new AgentRunner({
         extract: extractChannel,
         execute: executeChannel,
@@ -298,6 +305,8 @@ export default defineBackground({
         // #100: optional on-device vision confirm. Returns null when the
         // model isn't ready; the deterministic backstop carries the loop.
         confirmGoal,
+        // #102: local user profile (on-device constants the agent can fill).
+        profile: Object.keys(profile).length ? profile : undefined,
       });
       runner.run().catch((e) => {
         console.error('[agent-runner] unhandled loop error:', e);
