@@ -21,13 +21,15 @@ type AgentRequest =
     | { type: 'PING' }
     | { type: 'capturePage' }
     | { type: 'HIGHLIGHT'; selector: string }
-    | { type: 'VISION_EXTRACT' }; // New: DOM + Vision extraction
+    | { type: 'VISION_EXTRACT' } // New: DOM + Vision extraction
+    | { type: 'VISION_OCR' }; // #100: on-device OCR confirm
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
     if (typeof msg !== 'object' || msg === null || !('type' in msg)) return false;
     const t = (msg as { type: unknown }).type;
     return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING'
-        || t === 'capturePage' || t === 'HIGHLIGHT' || t === 'VISION_EXTRACT';
+        || t === 'capturePage' || t === 'HIGHLIGHT' || t === 'VISION_EXTRACT'
+        || t === 'VISION_OCR';
 }
 
 const HIGHLIGHT_ID = '__agent-highlight';
@@ -131,6 +133,44 @@ export default defineContentScript({
             } catch (visionErr) {
                 console.warn('[vision] Vision extraction failed, using DOM-only:', visionErr);
                 return { ok: true, elements: domElements, context, vision: { used: false } };
+            }
+        }
+
+        /**
+         * Issue #100 confirm path: OCR the visible screen and return ONLY the
+         * text. The raw screenshot stays on-device (captured by the SW via
+         * captureVisibleTab, processed here in the content script's Florence-2
+         * pipeline). We never ship pixels or a PII-laden DOM back to the SW -
+         * just the OCR string, which the SW matches against the open goals.
+         *
+         * ok:false (rather than throwing) lets the caller degrade cleanly to
+         * the deterministic backstop when the model is unavailable.
+         */
+        async function ocrVisibleScreen(): Promise<{
+            ok: boolean;
+            text?: string;
+            error?: string;
+        }> {
+            try {
+                const screenshotResult: any = await browser.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
+                if (!screenshotResult?.dataUrl) {
+                    return { ok: false, error: 'no screenshot' };
+                }
+                if (!visionPipeline.isInitialized()) {
+                    try {
+                        await visionPipeline.initialize();
+                    } catch (initErr) {
+                        return { ok: false, error: 'vision init failed: ' + String(initErr) };
+                    }
+                }
+                const result = await visionPipeline.processImage(screenshotResult.dataUrl, {
+                    task: 'ocr',
+                });
+                const text = result?.text ?? (result?.data as any)?.text ?? '';
+                if (!text) return { ok: false, error: 'empty ocr' };
+                return { ok: true, text };
+            } catch (e) {
+                return { ok: false, error: String(e) };
             }
         }
 
@@ -310,6 +350,16 @@ export default defineContentScript({
 
             if (message.type === 'VISION_EXTRACT') {
                 return Promise.resolve(extractWithVision());
+            }
+
+            if (message.type === 'VISION_OCR') {
+                // Issue #100 confirm path: OCR the currently-visible screen and
+                // return just the text. The screenshot is captured by the SW
+                // and stays on-device; we run Florence-2 OCR locally and send
+                // back plain OCR text (never the raw pixels, never a PII-heavy
+                // DOM). If the model isn't ready / can't init, we report ok:false
+                // so the caller falls back to the deterministic backstop.
+                return Promise.resolve(ocrVisibleScreen());
             }
 
             if (message.type === 'HIGHLIGHT') {

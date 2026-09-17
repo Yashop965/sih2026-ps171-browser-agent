@@ -2,8 +2,9 @@ import { defineBackground } from 'wxt/sandbox';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
 import { sessionManager } from '../lib/sessionManager';
 import { PrivacyLedger, type PrivacyLogEntry } from '../lib/pii/privacyLedger';
-import { AgentRunner, emptyTaskState, type AgentTaskState } from '../lib/agentRunner';
+import { AgentRunner, emptyTaskState, type AgentTaskState, type ChecklistItem } from '../lib/agentRunner';
 import { withPortRetry } from '../lib/portRetry';
+import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 
 /**
  * Background Service Worker
@@ -228,6 +229,39 @@ export default defineBackground({
       }
     };
 
+    // #100 optional confirm: OCR the visible screen on-device and match the
+    // open goals. Screenshot stays local (SW capture -> content Florence-2
+    // OCR -> text back); only the OCR string moves, never the pixels. Any
+    // failure returns null so the runner falls back to the deterministic
+    // backstop loop - this can't make a task worse.
+    const confirmGoal = async (input: {
+      url: string;
+      title: string;
+      openItems: ChecklistItem[];
+    }): Promise<{ confirmed: boolean; detail?: string } | null> => {
+      try {
+        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        const tabId = activeTab?.id;
+        if (tabId === undefined) return null;
+        const { ok, value } = await withPortRetry(
+          async () => await browser.tabs.sendMessage(tabId, { type: 'VISION_OCR' }),
+          (v: any) => v === undefined,
+        );
+        if (!ok || !value || !value.ok) return null; // model not ready / capture failed
+        const ocrText: string = value.text ?? '';
+        const items: VisionConfirmItem[] = input.openItems.map((i) => ({
+          id: i.id,
+          description: i.description,
+        }));
+        const verdict = visionConfirm(ocrText, items);
+        // Only confirm when EVERY open goal is matched; a partial match keeps
+        // the deterministic loop running.
+        return { confirmed: verdict.confirmed, detail: verdict.detail };
+      } catch {
+        return null;
+      }
+    };
+
     // Start (or restart) the SW-owned runner for a task.
     const startTask = async (message: any, sender: browser.runtime.MessageSender) => {
       // A popup-originated message has no sender.tab, so resolve the active
@@ -261,6 +295,9 @@ export default defineBackground({
         onProgress: broadcastProgress,
         isStopped: () => stopFlag.stopped,
         abortSignal: abortController.signal,
+        // #100: optional on-device vision confirm. Returns null when the
+        // model isn't ready; the deterministic backstop carries the loop.
+        confirmGoal,
       });
       runner.run().catch((e) => {
         console.error('[agent-runner] unhandled loop error:', e);

@@ -24,8 +24,11 @@ interface WorkerResponse {
 }
 
 let model: any = null;
+let processor: any = null;
 let isModelReady = false;
-let modelId = 'microsoft/Florence-2-base-ft';
+// ONNX export only - microsoft/Florence-2-base-ft has no ONNX files, so the
+// browser bundle cannot load it. (Issue #100 verification, 2026-09-17.)
+let modelId = 'onnx-community/Florence-2-base-ft';
 
 // IndexedDB cache for model files
 const DB_NAME = 'vision-model-cache';
@@ -46,7 +49,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
         postMessage({ type: 'ERROR', payload: { message: 'Model not loaded' } } as WorkerResponse);
         return;
       }
-      await detect(payload?.image as HTMLImageElement | HTMLCanvasElement);
+      await detect(
+        payload?.image as HTMLImageElement | HTMLCanvasElement,
+        payload?.task as string | undefined,
+        payload?.query as string | undefined,
+      );
       break;
 
     case 'CAPTURE':
@@ -58,6 +65,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
 
     case 'CLEAR':
       model = null;
+      processor = null;
       isModelReady = false;
       break;
 
@@ -90,7 +98,8 @@ async function loadModel(id: string) {
       payload: { progress: 10, status: 'loading' }
     } as WorkerResponse);
 
-    const { pipeline, env } = await import('@huggingface/transformers');
+    const { env, Florence2ForConditionalGeneration, AutoProcessor } =
+      await import('@huggingface/transformers');
 
     // Configure environment
     env.allowLocalModels = false;
@@ -109,10 +118,14 @@ async function loadModel(id: string) {
     const device = webgpuSupported ? 'webgpu' : 'wasm';
     const dtype = webgpuSupported ? 'q4' : 'fp32';
 
-    model = await pipeline('image-to-text', id, {
+    // Direct classes: v3.8.1 has no pipeline task wired to
+    // AutoModelForImageTextToText, so pipeline('image-to-text') can never
+    // resolve florence2. Load model + processor directly (model-card recipe).
+    model = await Florence2ForConditionalGeneration.from_pretrained(id, {
       device,
       dtype,
     });
+    processor = await AutoProcessor.from_pretrained(id);
 
     isModelReady = true;
 
@@ -133,33 +146,51 @@ async function loadModel(id: string) {
   }
 }
 
-async function detect(image: HTMLImageElement | HTMLCanvasElement) {
+async function detect(
+  image: HTMLImageElement | HTMLCanvasElement,
+  task?: string,
+  query?: string,
+) {
   try {
+    if (!model || !processor) {
+      postMessage({ type: 'ERROR', payload: { message: 'Model not loaded' } } as WorkerResponse);
+      return;
+    }
     const startTime = performance.now();
 
-    // Default to object detection
-    const result = await model(image, {
-      task: '<OD>',
-    });
+    // Florence call: task prefix (+ query) -> generate -> post-process.
+    // The confirm path (issue #100) passes '<OD>' + a phrase to ground a
+    // specific string, or '<OCR>' to read rendered text.
+    const prefix = task || '<OD>';
+    const img: any = image;
+    if (img && !img.size && img.width) img.size = [img.height, img.width];
+    const prompts = processor.construct_prompts(query ? `${prefix} ${query}` : prefix);
+    const inputs = await processor(img, prompts);
+    const generated_ids = await model.generate({ ...inputs, max_new_tokens: 128 });
+    const generated_text = processor.batch_decode(generated_ids, { skip_special_tokens: false })[0];
+    const result = processor.post_process_generation(generated_text, prefix, img.size);
 
     const endTime = performance.now();
     const processingTimeMs = Math.round(endTime - startTime);
 
-    // Parse result into bounding boxes
-    const boxes: BoundingBox[] = parseFlorence2Result(result);
+    const payload: Record<string, unknown> = {
+      boxes: prefix !== '<OD>' ? [] : parseFlorence2Result(result),
+      processingTimeMs,
+      modelId,
+      // Echo back the raw generated text so the caller can do substring checks
+      // without re-running inference (OCR/grounding labels).
+      text: generated_text,
+      result,
+    };
 
     self.postMessage({
       type: 'DETECTION_RESULT',
-      payload: {
-        boxes,
-        processingTimeMs,
-        modelId,
-      }
-    } as WorkerResponse);
+      payload,
+    } as unknown as WorkerResponse);
   } catch (err) {
     self.postMessage({
       type: 'ERROR',
-      payload: { message: err instanceof Error ? err.message : String(err) }
+      payload: { message: err instanceof Error ? err.message : String(err) },
     } as WorkerResponse);
   }
 }

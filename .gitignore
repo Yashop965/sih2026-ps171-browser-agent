@@ -69,3 +69,8 @@ ad_pipeline/frames_*/
 
 # Transient Chrome/extension UI capture (regenerated ad-hoc for debugging)
 screenshots/*.png
+
+# issue #100 verification artifacts (large local ONNX mirror, screenshots)
+scripts/verify/local-model/
+shots/
+scripts/.florence-verify.png

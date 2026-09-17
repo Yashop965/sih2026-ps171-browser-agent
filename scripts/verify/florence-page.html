@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Florence-2 on-device verify</title>
+<script type="importmap">
+{
+  "imports": {
+    "@huggingface/transformers": "/node_modules/@huggingface/transformers/dist/transformers.js",
+    "onnxruntime-web": "/node_modules/onnxruntime-web/dist/ort.all.min.mjs"
+  }
+}
+</script>
+</head>
+<body>
+<pre id="log"></pre>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $('log').textContent += m + '\n'; console.log('[verify]', m); };
+const param = (k, d) => new URLSearchParams(location.search).get(k) || d;
+const img = param('img', 'pwa.png');
+const q = param('query', 'progressive web app');
+
+window.addEventListener('error', (e) => { log('PAGE ERROR: ' + (e.message || e)); });
+
+const fail = (error, extra = {}) => {
+  window.__result = { ok: false, error: String(error), ...extra };
+  log('FATAL: ' + error);
+};
+
+// 1. screenshot bytes (served by the local http server from /shots)
+log('fetching shot: ' + img);
+const shot = await fetch('/shots/' + img).then(r => r.ok ? r.arrayBuffer() : null).catch(e => { log('fetch err ' + e); return null; });
+if (!shot) { fail('screenshot not found at /shots/' + img); throw new Error('no shot'); }
+log('shot: ' + shot.byteLength + ' bytes');
+
+const { env, Florence2ForConditionalGeneration, AutoProcessor, RawImage } =
+  await import('@huggingface/transformers');
+env.allowLocalModels = param('local') === '1';
+env.useBrowserCache = true;
+
+// remote HF repo OR a local directory (served by the static server) - the
+// local dir mirrors the onnx-community repo layout (onnx/*.onnx + config files)
+const MODEL_ID = param('local') === '1'
+  ? '/scripts/verify/local-model'
+  : 'onnx-community/Florence-2-base-ft';
+
+async function loadFl() {
+  const webgpu = !!(navigator.gpu && await navigator.gpu.requestAdapter());
+  const device = webgpu ? 'webgpu' : 'wasm';
+  if (device === 'wasm') {
+    env.backends.onnx.wasm.wasmPaths = 'http://127.0.0.1:8123/node_modules/onnxruntime-web/dist/';
+  }
+  log('loading ' + MODEL_ID + ' on ' + device + ' (q4) ...');
+  const t0 = Date.now();
+  // Direct classes: v3.8.1 has NO pipeline task wired to AutoModelForImageTextToText,
+  // so pipeline('image-to-text', ...) can never resolve florence2 (this is the
+  // bug the shipped florence2.ts/worker have - verified 2026-09-17).
+  const model = await Florence2ForConditionalGeneration.from_pretrained(MODEL_ID, {
+    device, dtype: 'q4',
+  });
+  const processor = await AutoProcessor.from_pretrained(MODEL_ID);
+  log('model+processor loaded in ' + ((Date.now() - t0) / 1000).toFixed(1) + 's (device=' + device + ')');
+  return { model, processor, device };
+}
+
+let model, processor, device;
+try {
+  ({ model, processor, device } = await loadFl());
+} catch (e) {
+  log('device load failed, retrying on WASM: ' + e);
+  try {
+    const r = await (async () => {
+      env.backends.onnx.wasm.wasmPaths = 'http://127.0.0.1:8123/node_modules/onnxruntime-web/dist/';
+      const t0 = Date.now();
+      const m = await Florence2ForConditionalGeneration.from_pretrained(MODEL_ID, { device: 'wasm', dtype: 'q4' });
+      const p = await AutoProcessor.from_pretrained(MODEL_ID);
+      log('model+processor loaded on wasm in ' + ((Date.now() - t0) / 1000).toFixed(1) + 's');
+      return { model: m, processor: p, device: 'wasm' };
+    })();
+    ({ model, processor, device } = r);
+  } catch (e2) { fail('model load failed on webgpu AND wasm: ' + e2, { device }); throw e2; }
+}
+
+// One Florence call: task prefix + optional query -> raw text -> post-processed
+async function runTask(task, image, query) {
+  const prompts = processor.construct_prompts(query ? task + ' ' + query : task);
+  const inputs = await processor(image, prompts);
+  const generated_ids = await model.generate({ ...inputs, max_new_tokens: 128 });
+  const generated_text = processor.batch_decode(generated_ids, { skip_special_tokens: false })[0];
+  const result = processor.post_process_generation(generated_text, task, image.size);
+  return { generated_text, result };
+}
+
+// Decode the PNG screenshot into an <img> the processor can consume.
+const shotImage = new Image();
+const dataUrl = 'data:image/png;base64,' + btoa(String.fromCharCode(...new Uint8Array(shot)));
+shotImage.src = dataUrl;
+await shotImage.decode();
+const image = shotImage;
+image.size = [image.height, image.width]; // Florence's <OD> post-processing scales boxes by image size
+log('image decoded: ' + image.width + 'x' + image.height);
+
+try {
+  // 2. grounding: does the target phrase appear in-frame?
+  let t0 = Date.now();
+  let grounding;
+  try {
+    const r = await runTask('<OD>', image, '"' + q + '"');
+    grounding = r.result;
+    log('grounding ms: ' + (Date.now() - t0) + ' text: ' + JSON.stringify(r.generated_text).slice(0, 300));
+    log('grounding parsed: ' + JSON.stringify(r.result).slice(0, 400));
+  } catch (e) { log('grounding err: ' + e); grounding = { error: String(e) }; }
+
+  // 3. OCR: read the rendered text
+  t0 = Date.now();
+  let ocrText = '';
+  try {
+    const r = await runTask('<OCR>', image);
+    ocrText = (typeof r.result === 'string' ? r.result : JSON.stringify(r.result)) || r.generated_text;
+    log('ocr ms: ' + (Date.now() - t0));
+  } catch (e) { log('ocr err: ' + e); }
+  log('ocr text: ' + ocrText.slice(0, 600));
+
+  const lower = s => (s || '').toLowerCase();
+  const hit = lower(ocrText).includes(lower(q)) ||
+    (Array.isArray(grounding) && grounding.some(g => lower(g?.label || g?.text || (Array.isArray(g) ? g.join(' ') : '')).includes(lower(q))));
+
+  window.__result = { ok: true, device, hit, boxes: Array.isArray(grounding) ? grounding.length : 0, ocrText: ocrText.slice(0, 600), grounding: JSON.stringify(grounding).slice(0, 400) };
+  log('VERDICT hit=' + hit + ' boxes=' + (Array.isArray(grounding) ? grounding.length : 0) + ' device=' + device);
+} catch (e) {
+  fail('inference failed: ' + e, { device });
+  throw e;
+}
+</script>
+</body>
+</html>

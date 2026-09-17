@@ -7,11 +7,14 @@
  * - Visual question answering
  * - Captioning
  *
- * Model: microsoft/Florence-2-base-ft (231M parameters, ~180MB)
+ * Model: onnx-community/Florence-2-base-ft (231M parameters, q4 ONNX ~150MB)
  * Runtime: WebGPU (primary) → WASM fallback for Firefox
+ *
+ * NOTE: must load via Florence2ForConditionalGeneration + AutoProcessor
+ * directly. v3.8.1's `image-to-text` pipeline hardcodes
+ * AutoModelForVision2Seq, whose model map has no `florence2` entry, so
+ * `pipeline('image-to-text', ...)` can never load it (verified 2026-09-17).
  */
-
-import type { Pipeline } from '@huggingface/transformers';
 
 // Florence-2 output formats per task
 // Object Detection: { [x0, y0, x1, y1], [x0, y0, x1, y1], ... } or { bboxes: [...] }
@@ -19,7 +22,11 @@ import type { Pipeline } from '@huggingface/transformers';
 // Caption: { generated_text: string }
 // VQA: { answer: string }
 
-const MODEL_ID = 'microsoft/Florence-2-base-ft';
+// The microsoft/* repo ships PyTorch weights only - there is NO ONNX for it,
+// so browser inference (Transformers.js) must use the onnx-community export.
+// (Issue #100 verification, 2026-09-17: microsoft/Florence-2-base-ft has an
+// empty ONNX sibling list and fails with "no matching files".)
+const MODEL_ID = 'onnx-community/Florence-2-base-ft';
 
 export interface BoundingBox {
   x: number;
@@ -52,7 +59,8 @@ export interface VisionModelConfig {
 }
 
 class Florence2Pipeline {
-  private pipeline: Pipeline | null = null;
+  private model: any = null;
+  private processor: any = null;
   private initialized = false;
   private usingWebGPU = false;
   private loadPromise: Promise<void> | null = null;
@@ -89,7 +97,8 @@ class Florence2Pipeline {
 
     this.loadPromise = (async () => {
       try {
-        const { pipeline, env } = await import('@huggingface/transformers');
+        const { env, Florence2ForConditionalGeneration, AutoProcessor } =
+          await import('@huggingface/transformers');
 
         // Configure environment
         env.allowLocalModels = false;
@@ -97,10 +106,16 @@ class Florence2Pipeline {
         env.logLevel = 'error';
 
         try {
-          this.pipeline = await (pipeline as any)('image-to-text', config.modelId, {
-            device: backend === 'webgpu' ? 'webgpu' : 'wasm',
-            dtype: selectedDtype,
+          // v3.8.1 has NO pipeline task wired to AutoModelForImageTextToText,
+          // so pipeline('image-to-text', ...) can never resolve florence2
+          // (its AutoModelForVision2Seq map lacks 'florence2'). The official
+          // model card loads the model + processor classes directly - we do
+          // the same here. (Verification, issue #100, 2026-09-17.)
+          this.model = await Florence2ForConditionalGeneration.from_pretrained(config.modelId, {
+            device: config.backend === 'webgpu' ? 'webgpu' : 'wasm',
+            dtype: config.dtype,
           });
+          this.processor = await AutoProcessor.from_pretrained(config.modelId);
 
           this.initialized = true;
         } finally {
@@ -154,7 +169,7 @@ class Florence2Pipeline {
 
       switch (options.task) {
         case 'object-detection':
-          result = await this.runObjectDetection(image);
+          result = await this.runObjectDetection(image, options.query);
           break;
         case 'ocr':
           result = await this.runOCR(image);
@@ -193,37 +208,38 @@ class Florence2Pipeline {
     }
   }
 
-  private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
-    if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return (this.pipeline as any)({
-      image,
-      task: '<OD>',
-    });
+  /** One Florence call: task prefix (+ optional query) -> raw text -> parsed.
+   *  Mirrors the official onnx-community model-card recipe. */
+  private async runTask(
+    image: HTMLCanvasElement | HTMLImageElement | string,
+    task: string,
+    query?: string,
+  ): Promise<unknown> {
+    if (!this.model || !this.processor) throw new Error('Pipeline not initialized');
+    // Florence expects an image with a .size ([h, w]) for <OD> box scaling.
+    const img: any = image;
+    if (img && !img.size && img.width) img.size = [img.height, img.width];
+    const prompts = this.processor.construct_prompts(query ? `${task} ${query}` : task);
+    const inputs = await this.processor(img, prompts);
+    const generated_ids = await this.model.generate({ ...inputs, max_new_tokens: 128 });
+    const generated_text = this.processor.batch_decode(generated_ids, { skip_special_tokens: false })[0];
+    return this.processor.post_process_generation(generated_text, task, img.size);
+  }
+
+  private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | string, query?: string): Promise<unknown> {
+    return this.runTask(image, '<OD>', query);
   }
 
   private async runOCR(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
-    if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return (this.pipeline as any)({
-      image,
-      task: '<OCR>',
-    });
+    return this.runTask(image, '<OCR>');
   }
 
   private async runCaption(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
-    if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return (this.pipeline as any)({
-      image,
-      task: '<CAP>',
-    });
+    return this.runTask(image, '<CAP>');
   }
 
   private async runVQA(image: HTMLCanvasElement | HTMLImageElement | string, question: string): Promise<unknown> {
-    if (!this.pipeline) throw new Error('Pipeline not initialized');
-    return (this.pipeline as any)({
-      image,
-      task: '<VQA>',
-      question,
-    });
+    return this.runTask(image, '<VQA>', question);
   }
 
   /**
