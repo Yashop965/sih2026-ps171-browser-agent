@@ -105,5 +105,5 @@ Can research:
 ## Current Status
 ✅ All tools installed and verified
 ✅ 6 video versions generated
-✅ Project: 240/240 tests passing, 1.21MB build
+✅ Project: 240/240 tests passing, 1.21MB build *(submission-snapshot figures; repo is now at **303/303 tests · 1.22 MB** after post-deadline hardening)*
 ✅ Ready for competition demo

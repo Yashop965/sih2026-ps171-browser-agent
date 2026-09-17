@@ -1,5 +1,9 @@
 # SIH2026 PS171 - Final Status Report
 
+> **Current state (2026-09-17):** tests now **303/303**, build **1.22 MB**
+> (post-deadline hardening: autonomy #84–#86, checklist #99, port-retry #105).
+> The metrics below reflect the submission snapshot of 2026-09-02.
+
 ## ✅ COMPLETE AND READY FOR SUBMISSION
 
 ---

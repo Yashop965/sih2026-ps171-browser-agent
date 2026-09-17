@@ -1,6 +1,11 @@
 # SIH 2026 · PS171 — Browser Agent
 ## Technical Approach & Project Report
 
+> **⏱ Submission snapshot (2026-09-02):** 240 tests · 1.21 MB build. Current repo state is
+> **303/303 tests · 1.22 MB** (post-deadline hardening: autonomy #84–#86, planner
+> checklist #99, port-retry #105). Headline numbers in this report reflect the
+> submission state.
+
 **On-Device Visual Perception for a Privacy-First Browser Agent**
 **Team of 6 · ISRO Smart India Hackathon 2026 · Challenge PS171**
 
