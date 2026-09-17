@@ -19,6 +19,7 @@
 import { guardOutboundPlan } from './pii/outboundGuard';
 import type { SessionManager, SessionContext } from './sessionManager';
 import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
+import { goalBackstop } from './goalBackstop';
 
 // ── Task state (shared + persisted so the SW can resume/report) ──────────────
 
@@ -194,6 +195,18 @@ export interface AgentRunnerDeps {
   isStopped: () => boolean;
   /** Abort signal for an in-flight /plan fetch. */
   abortSignal?: AbortSignal;
+  /**
+   * #100 optional confirm: when the planner says DONE with checklist items
+   * still open, ask the on-device vision model to confirm the goal is actually
+   * visible on screen (OCR/grounding; screenshot never leaves the device).
+   * Absent = not wired (fast path is the URL/title backstop only); a `null`
+   * return means "model unavailable / inconclusive" - the loop just carries on.
+   */
+  confirmGoal?: (input: {
+    url: string;
+    title: string;
+    openItems: ChecklistItem[];
+  }) => Promise<{ confirmed: boolean; detail?: string } | null>;
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -402,6 +415,23 @@ export class AgentRunner {
           ? (plan.checklist as Array<Partial<ChecklistItem>>)
           : [];
       this.checklist = mergeChecklist(this.checklist, incoming);
+
+      // #100 fast path: deterministic URL/title backstop. A flaky planner that
+      // drops the checklist JSON on degraded steps leaves items open forever
+      // even when the target page is already on screen. Confirm each open item
+      // against the CURRENT page (no LLM, no model) so the DONE gate can
+      // self-satisfy; a miss is always "not done" (we keep looping).
+      if (this.checklist.length > 0 && (pageUrl || pageTitle)) {
+        for (const item of this.checklist) {
+          if (item.done) continue;
+          const verdict = goalBackstop({ item, url: pageUrl, title: pageTitle });
+          if (verdict.done) {
+            item.done = true;
+            this.log(`👁 Backstop confirmed item "${item.id}" (${verdict.reason}) - marked done`);
+          }
+        }
+      }
+
       if (this.checklist.length > 0) {
         const doneCount = this.checklist.filter((c) => c.done).length;
         this.log(`Checklist: ${doneCount}/${this.checklist.length} done`);
@@ -434,6 +464,32 @@ export class AgentRunner {
             break;
           }
           const open = undone.map((c) => c.description || c.id).join('; ');
+          // #100 optional confirm: before we burn another strike, let the
+          // on-device vision model verify the goal is actually on screen.
+          // Only consulted once per DONE-burst (strike 1) - a confirmed or
+          // unavailable result does not block the deterministic loop above.
+          if (this.doneWithOpenStreak === 1 && d.confirmGoal) {
+            this.log('🔎 Asking on-device vision to confirm open goal(s)...');
+            try {
+              const verdict = await d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: undone });
+              if (verdict?.confirmed) {
+                // The on-device proof says the goal content IS on screen -
+                // trust it for the open items (a screenshot-based check,
+                // stronger than a URL/title string match).
+                for (const item of undone) item.done = true;
+                this.log(`✅ Vision confirmed goal on screen (${verdict.detail ?? 'on-device'})`);
+                this.log('✅ Task complete (vision-confirmed all checklist items done)');
+                this.doneWithOpenStreak = 0;
+                break;
+              } else if (verdict) {
+                this.log(`🔎 Vision: goal not yet confirmed (${verdict.detail ?? 'inconclusive'}) - continuing`);
+              } else {
+                this.log('🔎 Vision unavailable - continuing with the deterministic loop');
+              }
+            } catch (e) {
+              this.log(`⚠️ Vision confirm failed (${e instanceof Error ? e.message : String(e)}) - continuing`);
+            }
+          }
           this.log(`⚠️ Planner said DONE but ${undone.length} checklist item(s) still open (${open}) - continuing (strike ${this.doneWithOpenStreak}/3)`);
           this.state.step = currentStep;
           this.notify();
