@@ -82,42 +82,64 @@ function ensureCursorEl(): { dot: HTMLElement; ring: HTMLElement; label: HTMLEle
       'z-index:2147483647',
     ].join(';');
     const ring = document.createElement('div');
-    ring.style.cssText = ['position:absolute', 'border-radius:6px', 'transition:all 80ms ease-out'].join(';');
-    const dot = document.createElement('div');
-    dot.style.cssText = [
+    ring.style.cssText = [
       'position:absolute',
       'top:50%',
       'left:50%',
-      'width:12px',
-      'height:12px',
-      'border-radius:50%',
-      'transform:translate(-50%,-50%)',
-      'border:2px solid #fff',
-      'box-shadow:0 1px 4px rgba(0,0,0,0.4)',
+      'border-radius:6px',
+      'transition:transform 260ms cubic-bezier(.22,1,.36,1), width 140ms ease, height 140ms ease, border-color 140ms ease, background 140ms ease',
     ].join(';');
+    // #101 follow-up: the plain round dot read as "too plain" - a real mouse
+    // arrow instead. A pointer SVG in a fixed 26px box, coloured by action
+    // kind, white outline so it reads on any page background. The box gets a
+    // transform glide so it eases to each new target rather than teleporting.
+    const arrow = document.createElement('div');
+    arrow.style.cssText = [
+      'position:absolute',
+      'top:50%',
+      'left:50%',
+      'width:26px',
+      'height:26px',
+      'transition:transform 260ms cubic-bezier(.22,1,.36,1)',
+      'filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45))',
+    ].join(';');
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '24');
+    svg.setAttribute('height', '24');
+    svg.style.overflow = 'visible';
+    const path = document.createElementNS(svgNS, 'path');
+    // Classic mouse-pointer arrow, tip at the top-left of the box.
+    path.setAttribute('d', 'M4,2 L4,17 L7.6,13.6 L10.2,19.4 L12.6,18.4 L10,12.6 L15.2,12.6 Z');
+    path.setAttribute('fill', KIND_COLORS.CLICK);
+    path.setAttribute('stroke', '#ffffff');
+    path.setAttribute('stroke-width', '1.4');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    arrow.appendChild(svg);
     const label = document.createElement('div');
     label.style.cssText = [
       'position:absolute',
       'top:0',
-      'left:100%',
-      'margin-left:6px',
-      'margin-top:-8px',
+      'left:0',
       'font:600 11px/1 system-ui,sans-serif',
       'color:#fff',
       'padding:3px 7px',
       'border-radius:5px',
       'white-space:nowrap',
+      'transition:transform 260ms cubic-bezier(.22,1,.36,1), background 140ms ease',
     ].join(';');
     host.appendChild(ring);
-    host.appendChild(dot);
+    host.appendChild(arrow);
     host.appendChild(label);
     document.body.appendChild(host);
   }
   const ring = host.firstElementChild as HTMLElement | null;
-  const dot = host.children[1] as HTMLElement | null;
+  const arrow = host.children[1] as HTMLElement | null;
   const label = host.children[2] as HTMLElement | null;
-  if (!ring || !dot || !label) return null;
-  return { dot, ring, label };
+  if (!ring || !arrow || !label) return null;
+  return { dot: arrow, ring, label };
 }
 
 /**
@@ -139,17 +161,24 @@ export function showCursor(el: Element, kind: CursorActionKind): boolean {
     const s = cursorStyles(rect, kind);
     const cx = Number.isFinite(rect.x) ? rect.x + (Number.isFinite(rect.width) ? rect.width : 0) / 2 : 0;
     const cy = Number.isFinite(rect.y) ? rect.y + (Number.isFinite(rect.height) ? rect.height : 0) / 2 : 0;
-    // Host is pinned at (0,0); dot and ring both centre on the element centre.
+    // Ring: eased glide, centered on the element centre.
     ring.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%)`;
     ring.style.width = s.width;
     ring.style.height = s.height;
     ring.style.border = s.border;
     ring.style.background = s.background;
-    dot.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%)`;
-    dot.style.background = KIND_COLORS[kind];
+    // Arrow: the pointer TIP is the hotspot (like a real OS cursor), so the
+    // 24-unit tip at viewBox (4,2) lands on (cx, cy) - offset by that. The
+    // 260ms transform transition (set in ensureCursorEl) makes it glide.
+    dot.style.transform = `translate(${cx - 4}px, ${cy - 2}px)`;
+    const color = KIND_COLORS[kind];
+    const pathEl = dot.querySelector('svg path') as SVGPathElement | null;
+    if (pathEl) pathEl.setAttribute('fill', color);
+    // Label trails the arrow tip, bottom-right, like a cursor tooltip.
+    label.style.transform = `translate(${cx + 14}px, ${cy + 14}px)`;
     const tag = el.tagName ? el.tagName.toLowerCase() : 'element';
     label.textContent = cursorLabel(kind, tag);
-    label.style.background = KIND_COLORS[kind];
+    label.style.background = color;
     node.dot.style.visibility = 'visible';
     node.ring.style.visibility = 'visible';
     node.label.style.visibility = 'visible';

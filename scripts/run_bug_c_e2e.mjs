@@ -9,15 +9,17 @@
 // state is the reliable source of truth.
 import { execSync } from 'node:child_process';
 
-const CDP = 'http://127.0.0.1:9222';
-const ID = 'npflaobdhllbgleohljinimffoolfpng';
-const TASK =
+const CDP = process.env.CDP_URL || 'http://127.0.0.1:9222';
+const ID = process.env.EXT_ID || 'npflaobdhllbgleohljinimffoolfpng';
+// Env-overridable so the driver can stress-test harder tasks without
+// touching the committed Bug-C defaults (the 2-hop Wikipedia run).
+const TASK = process.env.E2E_TASK ||
   "Read-only task. Using the Wikipedia search box, look up 'Web browser' and open that article. " +
   "Then, from that article, use the search box to look up 'Progressive web app' and open it. " +
   "The task is COMPLETE only when the 'Progressive web app' article is on screen. " +
   "Do not log in, create an account, or edit anything.";
-const START_URL = 'https://en.wikipedia.org/wiki/Main_Page';
-const WAIT_MS = 220000; // ~3.5 min budget for the multi-page task
+const START_URL = process.env.E2E_START_URL || 'https://en.wikipedia.org/wiki/Main_Page';
+const WAIT_MS = Number(process.env.E2E_WAIT_MS || 220000); // ~3.5 min default
 
 const json = () => JSON.parse(execSync(`curl -s ${CDP}/json`, { shell: true }).toString());
 

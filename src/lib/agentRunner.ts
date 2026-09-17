@@ -217,6 +217,15 @@ export interface AgentRunnerDeps {
    * profile feature off, behaviour unchanged.
    */
   profile?: UserProfile;
+  /**
+   * #100 proactive verify cadence: how often, in consecutive actions, to
+   * poll the on-device VLM "is the goal on screen right now?". Default (omit
+   * or 1) checks after EVERY successful action - the strongest early-stop.
+   * Raise to throttle cost on chatty tasks. Checked after executeAction,
+   * before the inter-step settle, so a confirmed goal breaks the loop
+   * without one more LLM plan round-trip.
+   */
+  goalCheckEvery?: number;
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -240,6 +249,9 @@ export class AgentRunner {
   // (single source of truth, unit-tested) instead of an inline counter.
   private scrollGuard = new ScrollGuard(3);
   private plannerDegraded = false;
+  // #100 proactive verify: how many successful actions since the last on-device
+  // goal check. Compares against deps.goalCheckEvery (default 1 = every action).
+  private actionsSinceGoalCheck = 0;
 
   constructor(private readonly deps: AgentRunnerDeps) {
     this.state = emptyTaskState();
@@ -531,6 +543,67 @@ export class AgentRunner {
       await this.executeAction(action, d, sessionId);
       this.state.step = currentStep;
       this.notify();
+
+      // #100 PROACTIVE goal verification (user direction 2026-09-17): after
+      // every successful action, ask the on-device VLM "is the FINAL goal on
+      // screen RIGHT NOW?". If it confirms, stop HERE - before the next
+      // (unnecessary) LLM plan call. It reads the LIVE visible screen
+      // (captureVisibleTab -> Florence OCR, never leaves the device), so it
+      // sees the page the action just landed on even though the loop's
+      // pageUrl/title vars are still the pre-action ones. Throttled by
+      // goalCheckEvery (default = every action).
+      //
+      // We test ONLY the final sub-goal - the last checklist entry - not every
+      // open item: intermediate sub-goals are waypoints we pass THROUGH, not
+      // places to stop. Only the ultimate destination ends the task.
+      this.actionsSinceGoalCheck += 1;
+      const every = Math.max(1, d.goalCheckEvery ?? 1);
+      // Read as a plain string: executeAction above may set the status to
+      // 'failed' (scroll-storm / navigate-fail), which TS's flow-narrowing on
+      // `this.state.status` doesn't track here. The guard still applies at
+      // runtime - we just can't let TS prove it away.
+      const status: string = this.state.status;
+      if (
+        d.confirmGoal &&
+        status !== 'failed' &&
+        status !== 'stopped' &&
+        this.actionsSinceGoalCheck >= every
+      ) {
+        this.actionsSinceGoalCheck = 0;
+        // Shortcut: the deterministic backstop already proved every item is on
+        // this page - no VLM call needed.
+        if (this.checklist.length > 0 && this.checklist.every((c) => c.done)) {
+          this.log('✅ All checklist items done (backstop) - stopping early');
+          break;
+        }
+        const goalItem: ChecklistItem = this.checklist.length
+          ? this.checklist[this.checklist.length - 1]
+          : { id: 'task', description: d.task, done: false };
+        if (!goalItem.done) {
+          try {
+            const v = await d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: [goalItem] });
+            if (v?.confirmed) {
+              const g = this.checklist.find((c) => c.id === goalItem.id);
+              if (g) g.done = true;
+              this.log(`✅ VLM confirmed final goal on screen after ${action.type} - stopping early (${v.detail ?? 'on-device'})`);
+              break;
+            } else if (v) {
+              // Model ran and looked at the screen, but the goal is NOT there
+              // yet - keep going. Logged so a human can see the VLM actively
+              // checking (and saying no) rather than the loop just guessing.
+              this.log(`🔎 VLM checked screen after ${action.type}: goal not on screen yet (${v.detail ?? 'not visible'}) - continuing`);
+            } else {
+              // null = the on-device model was unavailable (not downloaded /
+              // WebGPU init pending / capture failed). The loop carries on on
+              // the deterministic backstop, but say it out loud so "VLM never
+              // ran" is not mistaken for "VLM checked and said no".
+              this.log(`🔎 VLM check after ${action.type}: on-device model unavailable this step - continuing on backstop`);
+            }
+          } catch {
+            this.log(`🔎 VLM check after ${action.type} threw - continuing on backstop`);
+          }
+        }
+      }
 
       // #70: a Stop pressed during the inter-step delay is honored in 100ms
       // slices. Bug E: the settle is 300ms (was 800) - the next EXTRACT is
