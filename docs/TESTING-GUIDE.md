@@ -16,17 +16,21 @@
 
 ### Unit Tests
 ```
-240/240 passing
+303/303 passing (21 test files)
 - PAN detection: ✓
 - Email detection: ✓
 - Credit card Luhn validation: ✓
 - Phone regex: ✓
+- Cross-page task checklist (mergeChecklist, sticky-done, DONE gate): ✓
+- Port retry (withPortRetry transient drop): ✓
+- Loop detection (real module): ✓
+- WAIT primitive honors duration: ✓
 ```
 
 ### Build Status
 ```
-Chrome MV3: 1.21 MB ✓
-Firefox MV2: 1.21 MB ✓
+Chrome MV3: 1.22 MB ✓
+Firefox MV2: 1.22 MB ✓
 No errors ✓
 ```
 
@@ -68,6 +72,28 @@ After running the agent:
 - Should see clean cards, not dot grids
 - Each card shows type, count, confidence
 - Click card to highlight elements
+
+### 5. Multi-page autonomy (live E2E)
+Driver: `node scripts/run_bug_c_e2e.mjs` — kicks the task off through the real
+popup UI, then watches the persisted `browser.storage.local` log
+(`sih_agent_task_state`). Robust to the agent clobbering the popup-as-a-tab.
+`scripts/run_autonomy_live.mjs` is the older DOM-scraping variant; it now
+discovers the live extension id from all `chrome-extension://` CDP targets.
+
+Sample task: *search "Web browser" → open it → search "Progressive web app" →
+open it; COMPLETE only when the PWA article is on screen.* Pass criteria:
+`status: complete`, tab lands on the PWA article, DONE is checklist-gated
+("N/N done"), not a bare LLM blurt.
+
+**Planner contract smoke-test** (from the live re-run session):
+`POST /plan` → assert `degraded: false` **and** that `checklist` echoes back.
+The flaky small model occasionally drops the `checklist`/JSON field →
+"Planner degraded: Conservative fallback" — that path is non-fatal and the
+agent does not type blind test data into the live page.
+
+### 6. Vision pipeline verification
+`node scripts/verify_florence2.mjs` — loads the model, runs a grounding pass,
+and writes `scripts/.florence-verify.png` (SoM overlay) for a visual check.
 
 ## Known Limitations
 

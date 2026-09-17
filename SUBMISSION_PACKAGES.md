@@ -1,5 +1,9 @@
 # SIH2026 PS171 - Final Submission Package
 
+> **⏱ Submission snapshot (2026-09-02):** 240 tests / 1.21 MB. Current repo state is
+> **303/303 tests / 1.22 MB** (post-deadline hardening: autonomy #84–#86, planner
+> checklist #99, port-retry #105). Figures below are the submission state.
+
 ## Project Overview
 **Browser Agent for On-Device PII Detection & Privacy Protection**
 Built for ISRO • Indian Space Research Organisation

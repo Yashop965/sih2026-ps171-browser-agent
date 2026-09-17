@@ -1,5 +1,9 @@
 # SIH2026 PS171 - Session Documentation
 
+> **⏱ Snapshot (Sep 15 build state).** The repo has since shipped the live
+> autonomy re-run + planner checklist (Sep 17): now **303/303 tests / 1.22 MB**.
+> See `docs/SESSION-2026-09-16.md` and `docs/SESSION-2026-09-17.md`.
+
 **Date:** September 15, 2026  
 **Session Duration:** ~4 hours  
 **Status:** Complete & Ready for Submission
