@@ -2,8 +2,8 @@
 ## Technical Approach & Project Report
 
 > **⏱ Submission snapshot (2026-09-02):** 240 tests · 1.21 MB build. Current repo state is
-> **303/303 tests · 1.22 MB** (post-deadline hardening: autonomy #84–#86, planner
-> checklist #99, port-retry #105). Headline numbers in this report reflect the
+> **324/324 tests · 1.23 MB** (post-deadline hardening: autonomy #84–#86, planner
+> checklist #99, port-retry #105, vision-stop #107). Headline numbers in this report reflect the
 > submission state.
 
 **On-Device Visual Perception for a Privacy-First Browser Agent**

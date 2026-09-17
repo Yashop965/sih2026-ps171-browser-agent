@@ -16,7 +16,7 @@
 
 ### Unit Tests
 ```
-303/303 passing (21 test files)
+324/324 passing (23 test files)
 - PAN detection: ✓
 - Email detection: ✓
 - Credit card Luhn validation: ✓
@@ -25,12 +25,14 @@
 - Port retry (withPortRetry transient drop): ✓
 - Loop detection (real module): ✓
 - WAIT primitive honors duration: ✓
+- Goal backstop (deterministic URL/title DONE-gate, #100): ✓
+- Vision confirm (on-device OCR gate, #107): ✓
 ```
 
 ### Build Status
 ```
-Chrome MV3: 1.22 MB ✓
-Firefox MV2: 1.22 MB ✓
+Chrome MV3: 1.23 MB ✓
+Firefox MV2: 1.23 MB ✓ (rebuilt same session; re-verify after further vision work)
 No errors ✓
 ```
 

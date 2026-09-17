@@ -525,8 +525,8 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
 
 ### 5.1 Build Status
 
-> **Note (2026-09-17):** current `dist/chrome-mv3` build is **1.22 MB**
-> (`1,222,847 B`) after the post-deadline autonomy + checklist + port-retry work.
+> **Note (2026-09-17):** current `dist/chrome-mv3` build is **1.23 MB** after the
+> post-deadline autonomy + checklist + port-retry + vision-stop (#107) work.
 > The breakdown below is the Sep-2 snapshot.
 
 ```
@@ -539,10 +539,10 @@ Total build size: 1.21 MB (Sep-2 snapshot)
 
 ### 5.2 Test Coverage Summary
 
-> **Note (2026-09-17):** the test suite has since grown to **303 tests across 21
-> files** (Chrome MV3 build **1.22 MB**). The table below is the Sep-2 snapshot
+> **Note (2026-09-17):** the test suite has since grown to **324 tests across 23
+> files** (Chrome MV3 build **1.23 MB**). The table below is the Sep-2 snapshot
 > list; the current full set adds the checklist, port-retry, loop-detection,
-> WAIT-duration, and autonomy suites.
+> WAIT-duration, autonomy, goal-backstop, and vision-confirm suites.
 
 | Test File | Tests | Status |
 |-----------|-------|--------|

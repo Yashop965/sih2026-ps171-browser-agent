@@ -1,8 +1,8 @@
 # SIH2026 PS171 - Final Submission Package
 
 > **⏱ This is the 2026-09-02 submission snapshot** (240 tests / 1.21 MB). The repo has since
-> moved to **303/303 tests / 1.22 MB** build after post-deadline hardening (autonomy
-> #84–#86, planner checklist #99, port-retry #105). Figures below are the submission state.
+> moved to **324/324 tests / 1.23 MB** build after post-deadline hardening (autonomy
+> #84–#86, planner checklist #99, port-retry #105, vision-stop #107). Figures below are the submission state.
 
 ## ✅ VERIFIED & READY FOR SUBMISSION
 
