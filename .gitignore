@@ -74,3 +74,4 @@ screenshots/*.png
 scripts/verify/local-model/
 shots/
 scripts/.florence-verify.png
+.issues/
