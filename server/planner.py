@@ -276,6 +276,7 @@ Use your full action vocabulary to act on whatever page you land on:
 15. COMPLETION CHECK (do this BEFORE scrolling): if the task is a "look up / open / go to X" style goal and the current PAGE TITLE or URL already contains X (or the page clearly shows the target), the goal is REACHED - signal DONE. Do NOT keep scrolling a content/article page that already displays the target; SCROLL is only for revealing UNFILLED form fields or the next control, never to "hunt" for a target the page title/URL already confirms is present.
 16. MAINTAIN THE TASK CHECKLIST. On your FIRST step, decompose the task into a small ordered checklist of sub-goals (e.g. for "search Web browser, then search PWA, land on the PWA article": [search Web browser, open the Web browser article, search PWA, open the PWA article]). Every step afterwards, echo the FULL checklist back in the output's "checklist" field, flipping an item to "done": true ONLY when you have genuinely reached it on the live page (confirmed by the URL/title/elements, not by assumption). NEVER mark an item done just because you typed/pressed a key - only when the resulting page state proves it. An item already "[x]" is COMPLETE - do not act on it again. Only signal DONE when every checklist item is done (or the list is empty and the goal is otherwise met).
 17. CAP TABLE AWARENESS: the element table above is capped for context size. PAGE GEOMETRY reports omittedElements = how many more interactive controls exist on this page but were NOT sent to you (0 = complete). If omittedElements > 0 and the field/control you need is not in the list, DO NOT guess an id and DO NOT signal DONE on a capped table: issue SCROLL down (or re-plan) so the next extraction reveals the remaining controls, and re-check. A "not found in the table" on a capped page is "not visible yet", not "does not exist".
+18. COLLAPSED SEARCH BOX: if the task needs a search box but there is NO visible text input (the extractor reports 0 inputs), the site likely keeps its search field collapsed behind a visible "Search" toggle/link/button. Do NOT WAIT or SCROLL looking for a box - instead CLICK the visible element whose label is "Search" (or contains "search") to expand it, then TYPE the query and press Enter. On Wikipedia specifically, article pages collapse the header search to a small "Search" link; clicking it reveals the input. A page title/URL already containing the target does NOT need a search - apply rule 15 instead.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -733,6 +734,45 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
                     degraded=True,
                     degraded_reason=reason,
                 )
+
+        # Pass 3b: collapsed search box (live diagnosis 2026-09-18). On
+        # Wikipedia article pages the #searchInput is genuinely 0x0 - it sits
+        # collapsed behind a visible "Search" <a> link (44x44, label "Search").
+        # The old fallback had no way to reach it (Pass 1/2 want a visible
+        # textbox; Pass 3 only clicks <button>s), so it WAIT-looped for ~12
+        # steps hunting for a box that only exists after the toggle is
+        # clicked. For a search-type task with NO visible textbox but a
+        # visible "Search"-labelled link/button, click the toggle: the next
+        # EXTRACT will then see the expanded input and Pass 2 types into it.
+        has_visible_textbox = any(
+            (str(el.get("role", "")).lower() in ("textbox", "input") or str(el.get("tag", "")).lower() in ("input", "textarea"))
+            and el.get("interactive", True)
+            and not el.get("isPassword", False)
+            and int(el.get("width") or 0) >= 2
+            for el in interactive_elements
+        )
+        task_words = [w for w in re.split(r"[\s,:;]+", (task_description or "")) if w]
+        is_search_task = any(w.lower().startswith(("search", "find", "look")) for w in task_words)
+        if is_search_task and not has_visible_textbox:
+            for el in interactive_elements:
+                element_id = el.get("id")
+                role = str(el.get("role", "")).lower()
+                tag = str(el.get("tag", "")).lower()
+                label = str(el.get("label", "")).lower()
+                if element_id is None or el.get("isPassword", False) or not el.get("interactive", True):
+                    continue
+                clickable = role in ("button", "link") or tag in ("button", "a")
+                if not clickable:
+                    continue
+                if int(el.get("width") or 0) >= 2 and "search" in label:
+                    return PlannerResult(
+                        success=True,
+                        action=ActionSchema(type="CLICK", targetId=element_id),
+                        confidence=0.5,
+                        reasoning=reason + " - clicking the visible Search toggle to expand the collapsed search box",
+                        degraded=True,
+                        degraded_reason=reason,
+                    )
 
         # Pass 4: nothing task-referenced is actionable. Do NOT clobber the
         # page - wait a beat so the next EXTRACT re-plans against fresh state.
