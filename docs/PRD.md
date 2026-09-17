@@ -143,11 +143,10 @@ This is fundamentally a **privacy-first agent architecture** problem. The judgin
 │                                  ▼ JSON Action                      │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  Returns: {                                                  │  │
-│  │    action: "CLICK" | "TYPE" | "SCROLL" | "SELECT",           │  │
-│  │    targetId: number,                                         │  │
-│  │    value?: string,                                           │  │
-│  │    confidence: 0.0-1.0,                                      │  │
-│  │    reasoning: "string"                                       │  │
+│  │    action: { type: "CLICK"|"TYPE"|"SCROLL"|"SELECT"|"NAVIGATE"|"WAIT"|"KEY"|"DONE", │  │
+│  │           targetId, value, url, waitMs, key, scrollDirection, scrollAmount }, │  │
+│  │    checklist: [{id, description, done}],   // cross-page memory, gates DONE │  │
+│  │    degraded: boolean, session_id, confidence, reasoning      │  │
 │  │  }                                                            │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -526,8 +525,12 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
 
 ### 5.1 Build Status
 
+> **Note (2026-09-17):** current `dist/chrome-mv3` build is **1.22 MB**
+> (`1,222,847 B`) after the post-deadline autonomy + checklist + port-retry work.
+> The breakdown below is the Sep-2 snapshot.
+
 ```
-Total build size: 1.21 MB
+Total build size: 1.21 MB (Sep-2 snapshot)
 ├── content.js: 933.18 KB (main content script)
 ├── popup-bundle: 234.68 KB (React UI)
 ├── background.js: 30.52 KB (service worker)
@@ -535,6 +538,11 @@ Total build size: 1.21 MB
 ```
 
 ### 5.2 Test Coverage Summary
+
+> **Note (2026-09-17):** the test suite has since grown to **303 tests across 21
+> files** (Chrome MV3 build **1.22 MB**). The table below is the Sep-2 snapshot
+> list; the current full set adds the checklist, port-retry, loop-detection,
+> WAIT-duration, and autonomy suites.
 
 | Test File | Tests | Status |
 |-----------|-------|--------|
@@ -696,10 +704,14 @@ main (protected)
 
 **Request Schema:**
 
+The planner accepts both a **flat root payload** (popup direct calls) and a
+nested `payload` object. A `checklist` of sub-goals may be fed back so the
+planner cannot re-do completed steps (cross-page memory, PR #99).
+
 ```typescript
 interface PlanRequest {
   // Sanitized element metadata (zero PII)
-  elements: Array<{
+  elements?: Array<{
     id: number;
     role: string;           // 'button', 'input', 'text', etc.
     label: string;          // Visible text or aria-label
@@ -707,25 +719,38 @@ interface PlanRequest {
     y: number;              // Top-left Y coordinate
     width: number;
     height: number;
-    type?: string;          // Input type (text, password, email, etc.)
-    value?: string;         // Current value (if non-sensitive)
+    type?: string;         // Input type (text, password, email, etc.)
   }>;
-  
+  url?: string;
+  title?: string;
+
   // Natural language task description
-  task: string;
-  
+  task?: string;
+
   // Current step number (for multi-step tasks)
-  step: number;
-  
+  step?: number;
+
   // Previous actions taken (context)
   history?: Array<{
     action: string;
-    targetId: number;
+    targetId: number | string;
     result: string;
   }>;
-  
-  // Optional: screenshot thumbnail (base64, low-res)
-  thumbnail?: string;
+
+  // Page geometry + scroll affordance (issue #59)
+  context?: {
+    scrollY: number;
+    scrollHeight: number;
+    moreContentBelow?: boolean;
+  };
+
+  // Cross-page task checklist (runner's "what's done / what's left" memory).
+  // Fed back to the planner so it can't re-do a completed sub-goal.
+  checklist?: Array<{
+    id: string;
+    description?: string;
+    done: boolean;
+  }>;
 }
 ```
 
@@ -733,35 +758,35 @@ interface PlanRequest {
 
 ```typescript
 interface PlanResponse {
+  success: boolean;
+
   // Action to execute
-  action: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'DONE';
-  
-  // Target element ID (for CLICK, TYPE, SELECT)
-  targetId?: number;
-  
-  // Value to type/select (for TYPE, SELECT)
-  value?: string;
-  
-  // Scroll direction and amount
-  scrollDirection?: 'up' | 'down' | 'left' | 'right';
-  scrollAmount?: number;
-  
-  // Navigation URL (for NAVIGATE)
-  url?: string;
-  
-  // Confidence score (0.0 - 1.0)
-  confidence: number;
-  
-  // Human-readable reasoning
-  reasoning: string;
-  
-  // Execution metadata
-  metadata: {
-    latency_ms: number;
-    model: string;          // Which model handled this
-    step: number;
-    timestamp: string;      // ISO 8601
+  action?: {
+    type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'KEY' | 'DONE';
+    targetId?: number | string;    // numeric registry id or stableId string
+    value?: string;                // for TYPE / SELECT / KEY
+    scrollDirection?: 'up' | 'down' | 'left' | 'right';
+    scrollAmount?: number;
+    url?: string;                  // for NAVIGATE
+    waitMs?: number;               // for WAIT (executor cap 30s)
+    key?: string;                  // for KEY ("Enter", "Tab", "Escape", ...)
   };
+
+  message: string;
+  reasoning?: string;
+  confidence: number;              // 0.0 - 1.0
+  session_id: string;
+  timestamp: number;
+
+  // Planner-maintained task checklist (may be empty). The runner gates
+  // DONE on it (sticky-done, first-seen order).
+  checklist?: Array<{ id: string; description?: string; done: boolean }>;
+
+  // True when this step was produced by a heuristic/mock fallback (no LLM
+  // reachable at init, or a runtime LLM error). A DONE emitted while
+  // degraded is NOT a genuine completion — the runner ignores it.
+  degraded?: boolean;
+  degraded_reason?: string;
 }
 ```
 
@@ -769,14 +794,19 @@ interface PlanResponse {
 
 ```json
 {
-  "elements": [
-    {"id": 1, "role": "input", "label": "Aadhaar Number", "x": 100, "y": 200, "width": 300, "height": 40, "type": "text"},
-    {"id": 2, "role": "input", "label": "Name", "x": 100, "y": 260, "width": 300, "height": 40, "type": "text"},
-    {"id": 3, "role": "button", "label": "Submit", "x": 100, "y": 350, "width": 100, "height": 40}
-  ],
+  "url": "https://example.com/form",
+  "title": "Enrollment Form",
   "task": "Fill form with test data and submit",
   "step": 1,
-  "history": []
+  "elements": [
+    {"id": 1, "role": "input", "label": "Aadhaar Number", "x": 100, "y": 200, "width": 300, "height": 40, "type": "text"},
+    {"id": 2, "role": "button", "label": "Submit", "x": 100, "y": 350, "width": 100, "height": 40}
+  ],
+  "history": [],
+  "checklist": [
+    {"id": "1", "description": "fill aadhaar", "done": false},
+    {"id": "2", "description": "submit", "done": false}
+  ]
 }
 ```
 
@@ -784,17 +814,22 @@ interface PlanResponse {
 
 ```json
 {
-  "action": "TYPE",
-  "targetId": 1,
-  "value": "123456789012",
+  "success": true,
+  "action": {
+    "type": "TYPE",
+    "targetId": 1,
+    "value": "123456789012"
+  },
+  "message": "Typed into Aadhaar Number",
+  "reasoning": "Aadhaar input detected; filling with a checksum-valid test value",
   "confidence": 0.95,
-  "reasoning": "First field is Aadhaar input; filling with test 12-digit number",
-  "metadata": {
-    "latency_ms": 850,
-    "model": "qwen2.5:1.5b",
-    "step": 1,
-    "timestamp": "2026-08-29T10:30:00Z"
-  }
+  "session_id": "a1b2c3d4",
+  "timestamp": 1758158400.123,
+  "checklist": [
+    {"id": "1", "description": "fill aadhaar", "done": true},
+    {"id": "2", "description": "submit", "done": false}
+  ],
+  "degraded": false
 }
 ```
 
@@ -874,9 +909,35 @@ interface PlanResponse {
 - [x] Comprehensive codebase audit
 - [x] Fix critical security vulnerabilities (#1, #2, #3, #4)
 - [x] Document all findings and remediation plan
-- [ ] Complete remaining high-priority fixes
-- [ ] Integrate vision pipeline fully
-- [ ] Fix memory leaks in sessionManager
+- [x] Reduce PII false positives 722 → ~15 (context-aware filtering)
+- [x] Redesign heatmap from gold dot-grids to clean emoji cards
+- [x] Create `public/pii-test-page.html` for controlled E2E testing
+- [x] E2E server on port 3000 serving the PII test page
+
+### Phase 6: Post-Deadline Autonomy & Cross-Page Memory (Sep 16-17)
+
+- [x] Multi-page autonomous task execution (NAVIGATE via background, WAIT primitive, goal-driven planner) — PR #83
+- [x] KEY primitive (press Enter/Tab/arrows so search submits) — #84, PR #87
+- [x] 429 retry/backoff + conservative task-referenced fallback (no blind "Test Data") — #85, PR #88
+- [x] Robust web-tab resolution + nav-disconnect success in EXECUTE — PR #86
+- [x] Live CDP/extension-id discovery + value-aware dedupe, doKey null-fix, DONE recognition — PR #98
+- [x] Port-retry on transient content-port drop after navigating click — PR #105 (`src/lib/portRetry.ts`)
+- [x] Planner-authored task checklist as cross-page memory; DONE gated on it — PR #99
+- [x] Live Wikipedia two-search E2E: `status: complete`, checklist-gated DONE ("4/4 done")
+
+#### Issue → Feature Map (filed post-deadline; local drafts in `.issues/`)
+
+| Issue | Feature | Status | Notes |
+|-------|---------|--------|-------|
+| #100 | Local Florence-2 / deterministic goal backstop to stop when the goal is on-screen | **In progress** (another agent) | Fast path = URL/title matching vs checklist (`src/lib/goalBackstop.ts`); optional Florence-2 OCR/VQA confirm; screenshot never leaves device |
+| #101 | Visual agent-cursor overlay (computer-use style) | Filed | Content-script overlay, `pointer-events:none`, no PII to logs |
+| #102 | Local user-profile of fixed personal constants on-device | Filed | Raw values masked to tokens before `/plan` egress |
+| #103 | Heatmap visual redesign (modern, non-expert readable) | Filed | Presentation-only, no detection change |
+| #104 | PII false-positive regression test on `pii-test-page.html` | Filed | Context-aware detection + precision benchmark |
+
+> **Dependency order for the next builds:** #100 (vision stop) → #101 (cursor overlay)
+> → #104 (PII false-positives) → #103 (heatmap, after #104 so it shows clean data)
+> → #102 (user-profile, last — touches the outbound PII firewall, needs careful masking).
 
 ### Critical Path Items
 
