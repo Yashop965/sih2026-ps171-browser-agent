@@ -393,3 +393,115 @@ describe('AgentRunner - checklist DONE-gating', () => {
     expect(sm.__calls).toContain('complete:degraded');
   });
 });
+
+// #100 proactive VLM goal-verification: after each successful action the
+// runner asks the on-device VLM "is the FINAL goal on screen?". If it
+// confirms, the loop stops BEFORE the next LLM plan call.
+describe('AgentRunner - proactive VLM goal stop (#100)', () => {
+  it('stops early when the VLM confirms the final goal after an action', async () => {
+    const steps = [
+      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '2', description: 'open article', done: false }] } },
+      { plan: { action: { type: 'DONE' } } },
+    ];
+    const sm = makeSessionManagerStub();
+    const deps: AgentRunnerDeps = {
+      extract: async () => ({
+        ok: true,
+        elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+        url: 'https://example.com',
+        title: 'Page',
+        context: null,
+      }),
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => (steps.shift() ?? { plan: { action: { type: 'DONE' } } }).plan,
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'open article',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+      confirmGoal: async () => ({ confirmed: true, detail: 'on-device' }),
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    const final = runner.getState();
+    expect(final.running).toBe(false);
+    expect(final.status).toBe('complete');
+    expect(final.degraded).toBe(false);
+    // Stopped at the first action via the VLM, not at the planner's DONE.
+    expect(final.step).toBe(1);
+    expect(final.logs.some((l) => /VLM confirmed final goal on screen/i.test(l))).toBe(true);
+  });
+
+  it('does NOT stop early when the VLM says the goal is not on screen', async () => {
+    // Two real actions while the final goal is still open (VLM says "no"
+    // each time), then a DONE that fully satisfies the checklist. The runner
+    // must keep going and only stop on the planner's DONE - proving a "no"
+    // from the VLM does not force an early stop.
+    const openArticle = { id: '2', description: 'open article', done: false };
+    const steps = [
+      { plan: { action: { type: 'CLICK', targetId: 2 } }, checklist: [{ id: '1', description: 'search', done: true }, { ...openArticle }] },
+      { plan: { action: { type: 'SCROLL', scrollDirection: 'down' } }, checklist: [{ id: '1', description: 'search', done: true }, { ...openArticle }] },
+      { plan: { action: { type: 'DONE' } }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: true }] },
+    ];
+    const sm = makeSessionManagerStub();
+    const deps: AgentRunnerDeps = {
+      extract: async () => ({
+        ok: true,
+        elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }, { id: 2, tag: 'button', role: 'button', label: 'Go' }],
+        url: 'https://example.com',
+        title: 'Page',
+        context: null,
+      }),
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => (steps.shift() ?? { plan: { action: { type: 'DONE' } } }).plan,
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'open article',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+      confirmGoal: async () => ({ confirmed: false, detail: 'not there yet' }),
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    const final = runner.getState();
+    // It performed both actions and only stopped at the planner's DONE
+    // (step 3), because the VLM never confirmed the goal on screen.
+    expect(final.step).toBe(3);
+    expect(final.status).toBe('complete');
+    expect(final.logs.some((l) => /VLM confirmed final goal/i.test(l))).toBe(false);
+  });
+
+  it('skips the VLM entirely when confirmGoal is not wired (feature off)', async () => {
+    const steps = [
+      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' } } },
+      { plan: { action: { type: 'DONE' } } },
+    ];
+    const sm = makeSessionManagerStub();
+    const deps: AgentRunnerDeps = {
+      extract: async () => ({ ok: true, elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'n' }], url: 'u', title: 't', context: null }),
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => (steps.shift() ?? { plan: { action: { type: 'DONE' } } }).plan,
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'x',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+      // No confirmGoal wired -> the runner must never attempt a VLM probe.
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    expect(runner.getState().status).toBe('complete');
+  });
+});
