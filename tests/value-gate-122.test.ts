@@ -74,13 +74,18 @@ describe('Issue #122 - TYPE value gate', () => {
         expect(result.ok).toBe(true);
     });
 
-    it('rejects a value containing control characters (but not newline/tab)', async () => {
+    it('rejects values containing control characters (CR/NUL etc.) but allows LF + tab', async () => {
         const id = inputId();
         // NUL / ESC control chars must be blocked:
         const bad = await execute({ type: 'TYPE', targetId: id, value: 'a\u0000b' });
         expect(bad.ok).toBe(false);
         expect(bad.error ?? '').toMatch(/control characters/i);
-        // Newline + tab are legitimate for textareas and are allowed. Use an
+        // CR (a lone carriage return) is also blocked - the previous blockset
+        // let it through; review of PR #125 closed that gap.
+        const cr = await execute({ type: 'TYPE', targetId: id, value: 'a\rb' });
+        expect(cr.ok).toBe(false);
+        expect(cr.error ?? '').toMatch(/control characters/i);
+        // LF + tab are legitimate for textareas and remain allowed. Use an
         // actual <textarea>: an <input> normalizes \n away per the HTML spec,
         // so only a textarea can prove the value survived the round trip.
         document.body.innerHTML = '<textarea id="ta" name="bio"></textarea>';

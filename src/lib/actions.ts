@@ -195,11 +195,12 @@ function doClick(action: Action) {
 // its output is untrusted until validated (same discipline as URL
 // sanitization for NAVIGATE). An empty value, a non-string, control
 // characters, or a runaway length never reaches the DOM - the action fails
-// and the planner re-plans instead of typing garbage. Newlines and tabs are
-// allowed (textareas legitimately need them); to clear a field the planner
-// uses KEY Backspace, not an empty TYPE.
+// and the planner re-plans instead of typing garbage. Only tab and LF are
+// allowed in typed values (textareas need them); CR and every other
+// control character is blocked. To clear a field the planner uses KEY
+// Backspace, not an empty TYPE.
 const MAX_TYPE_VALUE_CHARS = 2000;
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/;
 
 function validateTypeValue(raw: unknown): string {
     if (typeof raw !== 'string') {
