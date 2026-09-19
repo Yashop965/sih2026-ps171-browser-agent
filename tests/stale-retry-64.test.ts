@@ -20,6 +20,10 @@ import {
 vi.mock('../src/lib/dom', () => ({
   getElementById: (id: number) => (id === 7 ? getLiveButton() : undefined),
   getElementByStableId: (_id: string) => undefined,
+  // #118: no guards captured -> resolve() skips the freshness check.
+  getGuardForId: () => undefined,
+  getGuardForStableId: () => undefined,
+  verifyElementFreshness: () => true,
 }));
 
 function getLiveButton(): HTMLElement {

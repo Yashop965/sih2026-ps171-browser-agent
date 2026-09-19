@@ -20,6 +20,10 @@ import { execute, executeWithRetry, type Action } from '../src/lib/actions';
 vi.mock('../src/lib/dom', () => ({
   getElementById: () => undefined,
   getElementByStableId: () => undefined,
+  // #118: no guards captured -> resolve() skips the freshness check.
+  getGuardForId: () => undefined,
+  getGuardForStableId: () => undefined,
+  verifyElementFreshness: () => true,
 }));
 
 afterEach(() => {

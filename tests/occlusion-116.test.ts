@@ -19,6 +19,10 @@ vi.mock('../src/lib/dom', () => ({
   getElementById: (id: number) =>
     id === 1 ? liveTarget : id === 2 ? liveField : undefined,
   getElementByStableId: (_id: string) => undefined,
+  // #118: no guards captured in these tests -> resolve() skips the check.
+  getGuardForId: () => undefined,
+  getGuardForStableId: () => undefined,
+  verifyElementFreshness: () => true,
 }));
 
 const liveTarget = document.createElement('button');

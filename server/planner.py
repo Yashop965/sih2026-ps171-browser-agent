@@ -223,11 +223,15 @@ class ActionPlanner:
         context_str = "None"
         if context:
             more_below = "true" if context.get("moreContentBelow") else "false"
+            # #120: the element table is capped on-device; omitted counts the
+            # controls that exist on this page but were NOT sent (0 = complete).
+            omitted = int(context.get("omitted") or 0)
             context_str = (
                 f"scrollY={context.get('scrollY', 0)}, "
                 f"scrollHeight={context.get('scrollHeight', 0)}, "
                 f"viewport={json.dumps(context.get('viewport', {}))}, "
-                f"moreContentBelow={more_below}"
+                f"moreContentBelow={more_below}, "
+                f"omittedElements={omitted}"
             )
 
         prompt = f"""URL: {url}
@@ -271,6 +275,7 @@ Use your full action vocabulary to act on whatever page you land on:
 14. Signal DONE ONLY when the overall TASK goal is achieved (the required fields are filled/submitted, or the requested page state is reached) - NOT merely because the current form is complete. If the task requires a different page or a further step, keep going.
 15. COMPLETION CHECK (do this BEFORE scrolling): if the task is a "look up / open / go to X" style goal and the current PAGE TITLE or URL already contains X (or the page clearly shows the target), the goal is REACHED - signal DONE. Do NOT keep scrolling a content/article page that already displays the target; SCROLL is only for revealing UNFILLED form fields or the next control, never to "hunt" for a target the page title/URL already confirms is present.
 16. MAINTAIN THE TASK CHECKLIST. On your FIRST step, decompose the task into a small ordered checklist of sub-goals (e.g. for "search Web browser, then search PWA, land on the PWA article": [search Web browser, open the Web browser article, search PWA, open the PWA article]). Every step afterwards, echo the FULL checklist back in the output's "checklist" field, flipping an item to "done": true ONLY when you have genuinely reached it on the live page (confirmed by the URL/title/elements, not by assumption). NEVER mark an item done just because you typed/pressed a key - only when the resulting page state proves it. An item already "[x]" is COMPLETE - do not act on it again. Only signal DONE when every checklist item is done (or the list is empty and the goal is otherwise met).
+17. CAP TABLE AWARENESS: the element table above is capped for context size. PAGE GEOMETRY reports omittedElements = how many more interactive controls exist on this page but were NOT sent to you (0 = complete). If omittedElements > 0 and the field/control you need is not in the list, DO NOT guess an id and DO NOT signal DONE on a capped table: issue SCROLL down (or re-plan) so the next extraction reveals the remaining controls, and re-check. A "not found in the table" on a capped page is "not visible yet", not "does not exist".
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value

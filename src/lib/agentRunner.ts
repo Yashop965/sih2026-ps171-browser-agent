@@ -361,6 +361,9 @@ export class AgentRunner {
       if (pageContext?.moreContentBelow) {
         this.log(`Page has more content below the fold (scrollY=${pageContext.scrollY}/${pageContext.scrollHeight})`);
       }
+      if (pageContext?.omitted > 0) {
+        this.log(`Element table capped: ${pageContext.omitted} more control(s) on this page were omitted from the planner table - scroll / re-extract to see them`);
+      }
 
       if (elements.length === 0) {
         this.log('No interactive elements found');

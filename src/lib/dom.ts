@@ -37,6 +37,10 @@ const SELECTORS = [
 const registry = new Map<number, Element>();
 // Map of stableId -> real DOM node for persistent element tracking
 const stableIdRegistry = new Map<string, Element>();
+// #118: masked semantic guards, captured by extract() and re-checked by the
+// executor in actions.ts before acting. id / stableId -> masked scope text.
+const guardRegistry = new Map<number, string>();
+const stableGuardRegistry = new Map<string, string>();
 
 export function getElementById(id: number): Element | undefined {
     return registry.get(id);
@@ -44,6 +48,17 @@ export function getElementById(id: number): Element | undefined {
 
 export function getElementByStableId(stableId: string): Element | undefined {
     return stableIdRegistry.get(stableId);
+}
+
+// #118: the masked guard captured at extract() time for a target. Returns a
+// sentinel when the id was never registered (e.g. executor ran before the
+// first extract) - in that case the freshness check is skipped, not failed.
+export function getGuardForId(id: number): string | undefined {
+    return guardRegistry.get(id);
+}
+
+export function getGuardForStableId(stableId: string): string | undefined {
+    return stableGuardRegistry.get(stableId);
 }
 
 function isVisible(el: Element, rect: DOMRect): boolean {
@@ -205,14 +220,108 @@ function isDisabled(el: Element): boolean {
     return false;
 }
 
+// #118: semantic freshness guard. The issue: resolve() only checks
+// el.isConnected, so a React/Vue re-render that rewrites a form section in
+// place (the node survives, its context no longer is what the planner saw)
+// still passes.
+//
+// The guard is the MASKED text of the element's nearest SEMANTIC scope
+// (form / dialog / article / list item / table row), captured when the
+// element is registered (captureElementGuard) and re-read just before an
+// action executes (verifyElementFreshness); a mismatch means the context
+// changed and the decision is stale - the planner re-extracts.
+//
+// Deliberate limits:
+//  - Only semantic scopes are guarded. A top-level control with no form /
+//    dialog / row ancestor gets a scope-less guard: NOT the page. Falling
+//    back to the parent element would guard the whole document for a
+//    top-level control, and that includes the agent's own UI (the cursor
+//    overlay appends to <body> and sets label text mid-action) - every
+//    re-read would then "detect" the agent's own overlay as a page change.
+//  - PII firewall rule: only maskLabel() output ever exists in these
+//    guards. Raw scope text is masked in place; the masked string is what
+//    is stored and compared, and it is never returned, logged, or sent.
+
+const GUARD_SCOPE_SELECTOR = 'form,dialog,[role="dialog"],article,li,tr,[role="row"]';
+const GUARD_TEXT_CAP = 3000;
+
+function guardScope(el: Element): Element | null {
+    try {
+        return el.closest(GUARD_SCOPE_SELECTOR);
+    } catch {
+        return null;
+    }
+}
+
+// Reads only the nearest scope's text (a few hundred chars), not the whole
+// document - keeps the 10ms extract budget.
+function scopeInner(scope: Element | null): string {
+    if (!scope) return '';
+    let text: string;
+    try {
+        // innerText is typed on HTMLElement only; jsdom may not implement it
+        // at all (undefined) - fall back to textContent, same semantics for
+        // our purposes (rendered text of the scope).
+        const inner = (scope as HTMLElement).innerText;
+        text = (typeof inner === 'string' && inner ? inner : (scope.textContent ?? '')).trim();
+    } catch {
+        return '';
+    }
+    return text.slice(0, GUARD_TEXT_CAP);
+}
+
+export function captureElementGuard(el: Element, scopeCache?: Map<Element, string>): string {
+    const scope = guardScope(el);
+    // Read the scope the SAME way verifyElementFreshness does (scopeInner),
+    // and when a cache is supplied (extract() walk) mask the shared scope
+    // text once per scope element instead of per control. Scope-less
+    // elements get an empty scope text: their guard is still tag|role, so a
+    // role re-write on a top-level control is detected without ever
+    // spanning the whole page.
+    let masked: string;
+    if (scope && scopeCache?.has(scope)) {
+        masked = scopeCache.get(scope)!;
+    } else {
+        masked = maskLabel(scopeInner(scope));
+        if (scope && scopeCache) scopeCache.set(scope, masked);
+    }
+    return `${el.tagName}|${el.getAttribute?.('role') ?? ''}|${masked}`;
+}
+
+// Re-reads the guard for el and compares against the value captured at
+// registration. Returns true when the element and its semantic context are
+// unchanged (fresh). Only called for CLICK/SELECT/KEY targets in actions.ts.
+export function verifyElementFreshness(el: Element, capturedGuard: string): boolean {
+    const scope = guardScope(el);
+    // No semantic scope: still compare tag|role (scope text part is empty on
+    // both sides, so the comparison stays symmetric with capture).
+    const current = `${el.tagName}|${el.getAttribute?.('role') ?? ''}|${
+        scope ? maskLabel(scopeInner(scope)) : ''
+    }`;
+    return current === capturedGuard;
+}
+
 export function extract(): ExtractedElement[] {
     const started = performance.now();
     registry.clear();
     stableIdRegistry.clear();
+    guardRegistry.clear();
+    stableGuardRegistry.clear();
 
-    const nodes = Array.from(document.querySelectorAll(SELECTORS));
+    const allNodes = Array.from(document.querySelectorAll(SELECTORS));
+    // #120: cap the element table so a long ISRO form / list-heavy portal
+    // page can't bloat the planner prompt. Order is document order (the
+    // querySelectorAll walk), so the cap keeps the top-of-page controls and
+    // the planner is told how many it didn't see (omittedCount) so it can
+    // pair that with moreContentBelow and scroll.
+    const nodes = allNodes.length > EXTRACT_CAP ? allNodes.slice(0, EXTRACT_CAP) : allNodes;
+    lastOmitted = allNodes.length - nodes.length;
+
     const results: ExtractedElement[] = [];
     let nextId = 1;
+    // Masked scope text is shared per scope element: dozens of controls in
+    // one form read the same text, so read+mask it once per scope.
+    const scopeCache = new Map<Element, string>();
 
     for (const el of nodes) {
         const rect = el.getBoundingClientRect();
@@ -239,6 +348,10 @@ export function extract(): ExtractedElement[] {
 
         registry.set(id, el);
         stableIdRegistry.set(stableId, el);
+        // #118: capture the semantic guard for the executor's freshness check.
+        const guard = captureElementGuard(el, scopeCache);
+        guardRegistry.set(id, guard);
+        stableGuardRegistry.set(stableId, guard);
 
         results.push({
             id,
@@ -263,6 +376,16 @@ export function extract(): ExtractedElement[] {
     return results;
 }
 
+// #120: hard cap on the element table the planner receives.
+export const EXTRACT_CAP = 250;
+// How many matching controls were on the page but cut off by EXTRACT_CAP in
+// the last extract() call. 0 until extract() has run (and while the page has
+// fewer than the cap).
+let lastOmitted = 0;
+export function getOmittedCount(): number {
+    return lastOmitted;
+}
+
 export interface PageContext {
     url: string;
     title: string;
@@ -274,6 +397,14 @@ export interface PageContext {
     // fields". Without it the model only ever sees visible elements and has no
     // idea the form continues (issue #59).
     moreContentBelow: boolean;
+    // #120: how many matching interactive controls on the page were cut off
+    // by extract()'s 250-element cap, so they are NOT in the element table.
+    // 0 = the table is complete. When > 0 the planner should pair this with
+    // moreContentBelow and scroll / re-extract instead of assuming the table
+    // is the whole page. Carried on PageContext because that is the channel
+    // that already reaches the planner (elements are capped; this is the
+    // counter that says how much was left behind).
+    omitted: number;
 }
 
 export function getPageContext(): PageContext {
@@ -291,5 +422,6 @@ export function getPageContext(): PageContext {
             height: window.innerHeight,
         },
         moreContentBelow: bottom < height - 4,
+        omitted: getOmittedCount(),
     };
 }
