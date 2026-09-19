@@ -54,6 +54,19 @@ function isVisible(el: Element, rect: DOMRect): boolean {
     if (style.visibility === 'hidden') return false;
     if (parseFloat(style.opacity) < 0.05) return false;
 
+    // #117: visually-present controls inside aria-hidden="true" or inert
+    // subtrees are semantically off-limits (decorative mirrors, disabled
+    // sections, hidden drawers). They still pass the display/opacity checks
+    // above and become trap targets, so exclude them. An unknown attribute
+    // in the selector simply matches nothing on browsers without `inert`
+    // support (Firefox < 112), so this degrades to a no-op there.
+    try {
+        if (el.closest('[aria-hidden="true"],[inert]')) return false;
+    } catch {
+        // closest() can only throw in a broken DOM state; never block
+        // extraction on that.
+    }
+
     // Fully outside the viewport
     if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
     if (rect.right < 0 || rect.left > window.innerWidth) return false;
@@ -127,7 +140,10 @@ function getLabel(el: Element): string {
     }
 
     if (el.id) {
-        const forLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        // CSS.escape is absent in some DOM implementations (notably jsdom);
+        // fall back to the raw id so a label reference still resolves there.
+        const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(el.id) : el.id;
+        const forLabel = document.querySelector(`label[for="${escaped}"]`);
         if (forLabel?.textContent) return clean(forLabel.textContent);
     }
 
