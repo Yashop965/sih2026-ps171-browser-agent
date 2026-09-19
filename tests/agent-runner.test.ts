@@ -649,3 +649,107 @@ describe('AgentRunner - per-page memory scoping + 0-element stall (#114 live fin
     expect(sm.__calls).toContain('failSession:stalled: no interactive elements, task incomplete');
   });
 });
+
+describe('AgentRunner - log-before-observe discipline (#121 audit)', () => {
+  it('a failed post-action observe retains the executed step and never re-executes the mutation', async () => {
+    // #121 audit (jev-ultrafast discipline): execution is logged to history
+    // BEFORE the post-action observe; a stale/failed observation must never
+    // erase or replay the action. Our exact guarantees:
+    //   - recentActionHistory / filledIds are written INSIDE executeAction
+    //     (before the next iteration's d.extract()), so no observe path can
+    //     remove them;
+    //   - a hard extract failure (!ok) marks the task "unknown page state"
+    //     (status failed, 'extract failed') and terminates - it does NOT
+    //     re-plan onto the same step, so the CLICK is executed exactly once.
+    const sm = makeSessionManagerStub();
+    let extractCall = 0;
+    let executeCalls = 0;
+    let planCall = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => {
+        extractCall++;
+        // First read (before the click) is fine; the post-action observe
+        // (top of the next iteration) fails - the #121 injection point.
+        return extractCall === 1
+          ? { ok: true, elements: [{ id: 3, tag: 'a', role: 'link', label: 'article' }], url: 'https://x.test/a', title: 'A', context: null }
+          : { ok: false, error: 'mid-navigation - page dead' };
+      },
+      execute: async () => {
+        executeCalls++;
+        return { ok: true };
+      },
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => {
+        planCall++;
+        return planCall === 1 ? { action: { type: 'CLICK', targetId: 3 } } : { action: { type: 'DONE' } };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'open the article',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    const final = runner.getState();
+
+    // The executed step survives in the log (history was written before the
+    // failing observe) - nothing downstream rewrote it away.
+    expect(final.logs.some((l) => /Clicking element #3/.test(l))).toBe(true);
+    expect(final.logs.some((l) => /Clicked successfully/.test(l))).toBe(true);
+    // The observe failure is reported as unknown state (extract failed),
+    // and the mutation was NOT replayed: exactly one execute call, ever.
+    expect(final.status).toBe('failed');
+    expect(final.logs.some((l) => /Failed to extract elements: mid-navigation - page dead/.test(l))).toBe(true);
+    expect(executeCalls).toBe(1);
+    expect(sm.__calls).toContain('failSession:extract failed');
+    // Planner was called for the pre-action step only - the failing observe
+    // never triggered a re-plan on the same step.
+    expect(planCall).toBe(1);
+  });
+
+  it('a repeated CLICK on the same target is skipped, not re-executed (history survives re-observation)', async () => {
+    // The other half of the discipline: after the observe + re-plan cycle,
+    // the planner re-issues the same CLICK (same target+type). recentAction
+    // history - written at execute time, unaffected by any observe outcome -
+    // must cause the executor to SKIP it instead of running the mutation
+    // twice.
+    const sm = makeSessionManagerStub();
+    let executeCalls = 0;
+    let planCall = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => ({ ok: true, elements: [{ id: 3, tag: 'a', role: 'link', label: 'article' }], url: 'https://x.test/a', title: 'A', context: null }),
+      execute: async () => {
+        executeCalls++;
+        return { ok: true };
+      },
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => {
+        planCall++;
+        // Step 1: CLICK #3 (executed). Step 2: the planner re-issues the
+        // same CLICK #3 (must be skipped by loop detection). Step 3: DONE.
+        if (planCall === 1) return { action: { type: 'CLICK', targetId: 3 } };
+        if (planCall === 2) return { action: { type: 'CLICK', targetId: 3 } };
+        return { action: { type: 'DONE' } };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'open the article',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    const final = runner.getState();
+    expect(final.logs.some((l) => /Skipping repeated action on element #3/.test(l))).toBe(true);
+    // Exactly one real click executed - the repeat was skipped, not replayed.
+    expect(executeCalls).toBe(1);
+    expect(final.status).toBe('complete');
+  });
+});
