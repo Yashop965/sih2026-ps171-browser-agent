@@ -73,7 +73,12 @@ class CustomEndpointClient(BaseLLMClient):
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,  # Low temperature for deterministic output
-            "max_tokens": 500,
+            # Reasoning models (e.g. agnes-2.5-flash) spend their token budget
+            # on hidden chain-of-thought BEFORE the JSON answer - observed
+            # 200-850 reasoning_tokens per call. 500 truncated the JSON
+            # mid-object ("Malformed JSON: line 1 column 327" -> degraded
+            # planner), so the cap must cover reasoning + the full response.
+            "max_tokens": 2000,
         }
         
         def _post(client: httpx.AsyncClient) -> "httpx.Response":

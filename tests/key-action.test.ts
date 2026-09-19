@@ -126,4 +126,42 @@ describe('KEY action (issue #84)', () => {
     expect(result.ok).toBe(true);
     expect(result.error ?? '').not.toMatch(/unknown action type/i);
   });
+
+  it('#114: Enter on an input inside a <form> actually submits the form', async () => {
+    // Live bug (2026-09-19 3-hop run): the planner issued KEY Enter on the
+    // Wikipedia search box after typing, and doKey only dispatched synthetic
+    // KeyboardEvents - which are untrusted and do NOT trigger native form
+    // submission in Chromium. The form sat unsubmitted and the agent looped
+    // re-typing for 10 steps. doKey must now call form.requestSubmit() when
+    // the key is Enter and the target is inside a <form>.
+    const form = document.createElement('form');
+    const input = document.createElement('input');
+    form.appendChild(input);
+    document.body.appendChild(form);
+
+    let submitted = 0;
+    const submitHandler = (ev: Event) => {
+      ev.preventDefault();
+      submitted += 1;
+    };
+    form.addEventListener('submit', submitHandler);
+
+    input.focus();
+    const result = await execute({ type: 'KEY', key: 'Enter', targetId: null as unknown as number });
+    expect(result.ok).toBe(true);
+    expect(submitted).toBe(1);
+
+    form.removeEventListener('submit', submitHandler);
+    form.remove();
+  });
+
+  it('#114: Enter with no enclosing form does not throw (no form to submit)', async () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    const result = await execute({ type: 'KEY', key: 'Enter' });
+    expect(result.ok).toBe(true);
+    expect(result.error ?? '').not.toMatch(/unknown|not found/i);
+    input.remove();
+  });
 });

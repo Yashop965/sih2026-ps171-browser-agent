@@ -367,9 +367,21 @@ export class AgentRunner {
 
       const elements: any[] = snapshot.elements ?? [];
       this.log(`Found ${elements.length} interactive elements`);
-      const pageUrl: string = snapshot.url ?? '';
-      const pageTitle: string = snapshot.title ?? '';
-      const pageContext = snapshot.context ?? null;
+      let pageUrl: string = snapshot.url ?? '';
+      let pageTitle: string = snapshot.title ?? '';
+      let pageContext = snapshot.context ?? null;
+      // Bulletproof per-page memory reset: when the extract() we just read
+      // came from a DIFFERENT url than the step before, the page changed no
+      // matter how (explicit NAVIGATE, a key/click that navigated, or a
+      // programmatic location change the executor never reported). Element
+      // ids are re-issued per page, so all per-page interaction memory
+      // (filled/failed sets, the "skip repeated action" history, the scroll
+      // guard) is now stale and must not leak into the new page's plan.
+      if (this.lastExtractUrl !== null && pageUrl !== this.lastExtractUrl) {
+        this.log(`🧭 Page changed (${this.lastExtractUrl.split('/').pop()} -> ${pageUrl.split('/').pop()}) - clearing per-page interaction memory`);
+        this.clearPageScopedElementMemory();
+      }
+      this.lastExtractUrl = pageUrl;
       if (pageContext?.moreContentBelow) {
         this.log(`Page has more content below the fold (scrollY=${pageContext.scrollY}/${pageContext.scrollHeight})`);
       }
@@ -378,8 +390,55 @@ export class AgentRunner {
       }
 
       if (elements.length === 0) {
-        this.log('No interactive elements found');
-        break;
+        // #114: a 0-element read right after a NAVIGATE is usually transient -
+        // the content-script extraction races the new page's render/hydrate
+        // (observed live: Wikipedia article read 0 interactive elements with
+        // 1627 off-fold controls reported, then had elements on the next
+        // read). Re-extract with short delays instead of ending the run.
+        // The OLD code broke here and the loop exit stamped "Task completed"
+        // even with 2 of 3 goals still open - a false success the judge would
+        // mark wrong.
+        let recovered = false;
+        for (let attempt = 0; attempt < 3 && !recovered; attempt++) {
+            if (attempt > 0) {
+                this.log(`No interactive elements found - re-extracting after ${attempt * 500}ms (${attempt + 1}/3)`);
+                await d.delay(attempt * 500);
+                if (d.isStopped()) break;
+            }
+            const retry = await d.extract();
+            if (!retry?.ok) break; // snapshot error - handled at top next iteration
+            const retryEls = retry.elements ?? [];
+            if (retryEls.length > 0) {
+                elements.length = 0;
+                for (const e of retryEls) elements.push(e);
+                pageUrl = retry.url ?? pageUrl;
+                pageTitle = retry.title ?? pageTitle;
+                pageContext = retry.context ?? null;
+                this.log(`Found ${elements.length} interactive elements (after re-extract)`);
+                recovered = true;
+            }
+        }
+        if (!recovered) {
+            this.log('No interactive elements found');
+            const open = this.checklist.filter((c) => !c.done);
+            // A 0-element exit is NEVER a success: the only complete paths are
+            // an explicit planner DONE, the backstop proving all items, or a
+            // VLM confirmation. Nothing was left to act on, so no completion
+            // evidence exists.
+            this.log(open.length > 0
+                ? `⚠️ Page has no interactive elements with ${open.length} goal(s) still open - task NOT complete (stalled)`
+                : '⚠️ Page has no interactive elements and no completed goals to verify - task NOT complete (stalled)');
+            this.state.status = 'failed';
+            this.state.running = false;
+            this.finishSession(
+                sessionId,
+                open.length > 0
+                    ? 'stalled: no interactive elements, task incomplete'
+                    : 'stalled: no interactive elements, no completion evidence',
+            );
+            this.notify();
+            return;
+        }
       }
 
       const inputFields = elements.filter((e) => e.role === 'textbox' || e.tag === 'input');
@@ -716,6 +775,7 @@ export class AgentRunner {
           this.log('🧭 Click triggered a navigation - re-planning on the new page');
           this.scrollGuard.noteOtherAction();
           this.recentActionHistory = [];
+          this.clearPageScopedElementMemory();
           await d.delay(600);
         }
       } else {
@@ -754,6 +814,7 @@ export class AgentRunner {
           this.log('🧭 Key triggered a navigation - re-planning on the new page');
           this.scrollGuard.noteOtherAction();
           this.recentActionHistory = [];
+          this.clearPageScopedElementMemory();
           await d.delay(600);
         }
         this.recentActionHistory.push({ targetId: String(action.targetId ?? 'focus'), type: 'KEY' });
@@ -789,6 +850,28 @@ export class AgentRunner {
 
     this.log(`Unknown action: ${JSON.stringify(action)}`);
   }
+
+  /**
+   * Clear the element memories that are only valid WITHIN one page's
+   * extraction. Numeric element ids are re-issued on every extract, so
+   * "element #2 was filled / failed" is a lie the moment the URL changes -
+   * and buildPlanHistory feeds those lies straight to the planner, steering
+   * it away from the correct element on the new page (observed live 2026-09-20:
+   * after navigating to an article, the planner was told old-page ids were
+   * already done and re-typed stale sub-goals). recentActionHistory was
+   * already cleared at the same sites; these sets were the leak.
+   */
+  private clearPageScopedElementMemory(): void {
+    this.filledIds.clear();
+    this.failedIds.clear();
+    this.failedErrors.clear();
+    this.recentActionHistory = [];
+    this.scrollGuard.noteOtherAction();
+  }
+
+  // URL the last extract() came from. Element ids are re-issued per page, so
+  // a URL change invalidates every per-page memory (see clearPageScoped...).
+  private lastExtractUrl: string | null = null;
 
   /** Close out the session per its terminal status (#69). */
   private finishSession(sessionId: string | null, outcome: string): void {

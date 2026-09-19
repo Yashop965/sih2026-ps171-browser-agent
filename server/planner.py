@@ -277,6 +277,7 @@ Use your full action vocabulary to act on whatever page you land on:
 16. MAINTAIN THE TASK CHECKLIST. On your FIRST step, decompose the task into a small ordered checklist of sub-goals (e.g. for "search Web browser, then search PWA, land on the PWA article": [search Web browser, open the Web browser article, search PWA, open the PWA article]). Every step afterwards, echo the FULL checklist back in the output's "checklist" field, flipping an item to "done": true ONLY when you have genuinely reached it on the live page (confirmed by the URL/title/elements, not by assumption). NEVER mark an item done just because you typed/pressed a key - only when the resulting page state proves it. An item already "[x]" is COMPLETE - do not act on it again. Only signal DONE when every checklist item is done (or the list is empty and the goal is otherwise met).
 17. CAP TABLE AWARENESS: the element table above is capped for context size. PAGE GEOMETRY reports omittedElements = how many more interactive controls exist on this page but were NOT sent to you (0 = complete). If omittedElements > 0 and the field/control you need is not in the list, DO NOT guess an id and DO NOT signal DONE on a capped table: issue SCROLL down (or re-plan) so the next extraction reveals the remaining controls, and re-check. A "not found in the table" on a capped page is "not visible yet", not "does not exist".
 18. COLLAPSED SEARCH BOX: if the task needs a search box but there is NO visible text input (the extractor reports 0 inputs), the site likely keeps its search field collapsed behind a visible "Search" toggle/link/button. Do NOT WAIT or SCROLL looking for a box - instead CLICK the visible element whose label is "Search" (or contains "search") to expand it, then TYPE the query and press Enter. On Wikipedia specifically, article pages collapse the header search to a small "Search" link; clicking it reveals the input. A page title/URL already containing the target does NOT need a search - apply rule 15 instead.
+19. EMPTY-LOOKING PAGE AFTER NAVIGATION: if the element table has 0-2 elements and the previous step was a NAVIGATE or CLICK that changed the page, the page is likely still rendering. Issue WAIT (~1000ms) instead of DONE or re-typing the last query, then re-check. The runner re-extracts automatically - it will recover the elements on the next step.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -356,10 +357,33 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
 
         target_id = data.get("targetId")
         if target_id is not None:
-            try:
-                target_id = int(target_id)
-            except (ValueError, TypeError):
-                target_id = None
+            # The model sometimes returns targetId as a string - either a
+            # numeric id ("3") or, per the prompt's "numeric ID or stableId"
+            # contract, a stableId ("searchInput"). int("searchInput") used to
+            # throw and drop the target entirely (target-less actions -> the
+            # agent drifting into WAIT loops). Resolve strings explicitly:
+            # numeric strings -> int, stableIds -> the element's numeric id.
+            if isinstance(target_id, str):
+                s = target_id.strip()
+                if s.isdigit():
+                    target_id = int(s)
+                else:
+                    stable_to_id = {
+                        str(el.get("stableId")): el.get("id")
+                        for el in interactive_elements
+                        if el.get("stableId")
+                    }
+                    target_id = stable_to_id.get(s)
+                    if target_id is None:
+                        logger.warning(
+                            f"targetId '{s}' is not a numeric id nor a known "
+                            f"stableId; dropping the target"
+                        )
+            else:
+                try:
+                    target_id = int(target_id)
+                except (ValueError, TypeError):
+                    target_id = None
 
         value = data.get("value")
         if value is not None:

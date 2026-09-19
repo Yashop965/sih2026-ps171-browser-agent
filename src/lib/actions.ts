@@ -381,6 +381,22 @@ function doKey(action: Action) {
         target.dispatchEvent(new KeyboardEvent('keypress', base));
     }
     target.dispatchEvent(new KeyboardEvent('keyup', base));
+
+    // #114: synthetic (untrusted) key events do NOT trigger native form
+    // submission in Chromium - an Enter dispatched via KeyboardEvent makes
+    // Wikipedia's search form sit there, so the agent typed the query,
+    // "pressed Enter", and the page never navigated (observed live 2026-09-19:
+    // steps 5-12 looping on the unsubmitted box). When the key is Enter and
+    // the target sits in a form, submit the form the way a real keypress
+    // would: requestSubmit() fires the submit event, runs default handlers,
+    // and navigates. Fallback for targets without a form (e.g. body): plain
+    // key dispatch already ran above, nothing more to do.
+    if (name === 'Enter') {
+        const form = target instanceof Element ? target.closest('form') : null;
+        if (form && typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+        }
+    }
 }
 
 // #119: event-aware post-action settle.

@@ -505,3 +505,147 @@ describe('AgentRunner - proactive VLM goal stop (#100)', () => {
     expect(runner.getState().status).toBe('complete');
   });
 });
+
+
+describe('AgentRunner - per-page memory scoping + 0-element stall (#114 live findings)', () => {
+  it('clears filled/failed element memory when the URL changes between extracts', async () => {
+    // Live bug (2026-09-20 3-hop run): element ids are re-issued per page,
+    // but filledIds/failedIds survived a navigation, so buildPlanHistory
+    // told the planner "element #N already done" on the NEW page - steering
+    // it off the correct element. The URL-change check at the top of each
+    // step must clear all per-page memory.
+    const sm = makeSessionManagerStub();
+    const histories: unknown[] = [];
+    let extractCall = 0;
+    let planCall = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => {
+        extractCall++;
+        const onA = extractCall === 1;
+        return {
+          ok: true,
+          elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+          url: onA ? 'https://x.test/a' : 'https://x.test/b',
+          title: onA ? 'A' : 'B',
+          context: null,
+        };
+      },
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async (payload) => {
+        histories.push((payload as { history?: unknown[] }).history ?? []);
+        planCall++;
+        return planCall === 1
+          ? { action: { type: 'TYPE', targetId: 1, value: 'q' } }
+          : { action: { type: 'DONE' } };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'search two pages',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+
+    // Step 1 (page /a) filled #1. Step 2's extract came from /b -> the
+    // URL-change clear must have wiped it, so the history sent to fetchPlan
+    // #2 carries NO page-A ids.
+    const pageBIds = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
+    expect(pageBIds).not.toContain('1');
+    expect(runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))).toBe(true);
+    expect(runner.getState().status).toBe('complete');
+  });
+
+  it('recovers a transient 0-element read by re-extracting instead of ending the run', async () => {
+    // Live bug: after NAVIGATE the article read 0 elements mid-render and
+    // the old code broke out of the loop -> false "Task completed". The
+    // re-extract must recover the settled page and let the run continue to
+    // a real terminal state.
+    const sm = makeSessionManagerStub();
+    let extractCall = 0;
+    let planCall = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => {
+        extractCall++;
+        // First read transiently empty (render race); retries see the settled page.
+        return extractCall === 1
+          ? { ok: true, elements: [], url: 'https://x.test/a', title: 'A', context: null }
+          : { ok: true, elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }], url: 'https://x.test/a', title: 'A', context: null };
+      },
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => {
+        planCall++;
+        return planCall === 1
+          ? { action: { type: 'WAIT', waitMs: 100 }, checklist: [{ id: '1', description: 'first goal', done: false }] }
+          : { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'first goal', done: true }] };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'open a goal',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    const final = runner.getState();
+    // Recovered on the re-extract -> proceeded to the planner's DONE -> complete.
+    expect(final.status).toBe('complete');
+    expect(final.logs.some((l) => /after re-extract/i.test(l))).toBe(true);
+    expect(sm.__calls).toContain('complete:complete');
+  });
+
+  it('marks the task FAILED (never complete) when the page stays empty and goals are open', async () => {
+    // The false-success worst case from the live run: goal 2 still open, the
+    // navigated-to page persistently unreadable (0 elements through all
+    // re-extract attempts). Terminal state must be a stall/failure - "Task
+    // completed" here is exactly what the old code produced.
+    const sm = makeSessionManagerStub();
+    let extractCall = 0;
+    let planCall = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => {
+        extractCall++;
+        // Page A has an element; the navigated-to page B stays empty.
+        return extractCall === 1
+          ? { ok: true, elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }], url: 'https://x.test/a', title: 'A', context: null }
+          : { ok: true, elements: [], url: 'https://x.test/b', title: 'B', context: null };
+      },
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => {
+        planCall++;
+        return planCall === 1
+          ? {
+              action: { type: 'NAVIGATE', url: 'https://x.test/b' },
+              checklist: [
+                { id: '1', description: 'first goal', done: true },
+                { id: '2', description: 'second goal', done: false },
+              ],
+            }
+          : { action: { type: 'DONE' } };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'two goals',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps);
+    await runner.run();
+    const final = runner.getState();
+    expect(final.status).toBe('failed');
+    expect(final.logs.some((l) => /task NOT complete \(stalled\)/i.test(l))).toBe(true);
+    expect(sm.__calls).toContain('failSession:stalled: no interactive elements, task incomplete');
+  });
+});
