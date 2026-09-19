@@ -13,7 +13,7 @@
  * what keeps the rest of the suite green.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { execute, executeWithRetry } from '../src/lib/actions';
+import { execute, executeWithRetry, executeWithResilience } from '../src/lib/actions';
 
 vi.mock('../src/lib/dom', () => ({
   getElementById: (id: number) =>
@@ -125,5 +125,15 @@ describe('Issue #116 - occlusion hit-test', () => {
     // No 400ms retry delay was incurred - one attempt, then the planner
     // must dismiss the overlay and re-extract.
     expect(delays).not.toContain(400);
+  });
+
+  it('short-circuits executeWithResilience on a covered target (no backoff ladder)', async () => {
+    hitReport = overlay;
+    const result = await executeWithResilience({ type: 'CLICK', targetId: 1 }, 3);
+    expect(result.ok).toBe(false);
+    expect(result.covered).toBe(true);
+    // The loop broke on the first covered result: no 200/400ms backoff ran,
+    // so the whole call resolves fast (single attempt + 50ms settle).
+    expect(result.durationMs ?? 0).toBeLessThan(1000);
   });
 });
