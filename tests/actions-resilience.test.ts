@@ -11,6 +11,10 @@ const mockStableIds = new Map<string, Element>();
 vi.mock('../src/lib/dom', () => ({
   getElementById: (id: number) => mockElements.get(id),
   getElementByStableId: (id: string) => mockStableIds.get(id),
+  // #118: no guards captured in these tests -> resolve() skips the check.
+  getGuardForId: () => undefined,
+  getGuardForStableId: () => undefined,
+  verifyElementFreshness: () => true,
 }));
 
 describe('executeWithResilience', () => {

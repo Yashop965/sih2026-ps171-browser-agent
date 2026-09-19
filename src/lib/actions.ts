@@ -1,7 +1,13 @@
 // src/lib/actions.ts
 // Takes an action from the planner server and performs it on the page.
 
-import { getElementById, getElementByStableId } from './dom';
+import {
+    getElementById,
+    getElementByStableId,
+    getGuardForId,
+    getGuardForStableId,
+    verifyElementFreshness,
+} from './dom';
 import { showCursor, hideCursor, type CursorActionKind } from './agentCursor';
 
 export interface Action {
@@ -65,6 +71,22 @@ function resolve(targetId: number | string | undefined): Element {
         console.warn(`[agent] Element ${targetId} is stale (not connected to DOM)`);
         throw new Error(`element ${targetId} is stale — page changed since extract()`);
     }
+
+    // #118: semantic freshness. isConnected only proves the NODE survived; a
+    // re-render that rewrites the surrounding context (the form section the
+    // planner saw) leaves a live node that now means something else. The
+    // masked guard captured at extract() time is re-read just before acting,
+    // and a mismatch is reported as stale - the planner re-extracts. Skipped
+    // (not failed) when no guard was ever captured for this target.
+    const capturedGuard =
+        typeof targetId === 'number'
+            ? getGuardForId(targetId)
+            : getGuardForStableId(targetId);
+    if (capturedGuard !== undefined && !verifyElementFreshness(el, capturedGuard)) {
+        console.warn(`[agent] Element ${targetId} is stale (semantic context changed since extract())`);
+        throw new Error(`element ${targetId} is stale — page changed since extract()`);
+    }
+
     return el;
 }
 
@@ -169,9 +191,38 @@ function doClick(action: Action) {
     }
 }
 
+// #122: strict gate on the planner's TYPE payload. The planner is a model;
+// its output is untrusted until validated (same discipline as URL
+// sanitization for NAVIGATE). An empty value, a non-string, control
+// characters, or a runaway length never reaches the DOM - the action fails
+// and the planner re-plans instead of typing garbage. Only tab and LF are
+// allowed in typed values (textareas need them); CR and every other
+// control character is blocked. To clear a field the planner uses KEY
+// Backspace, not an empty TYPE.
+const MAX_TYPE_VALUE_CHARS = 2000;
+const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/;
+
+function validateTypeValue(raw: unknown): string {
+    if (typeof raw !== 'string') {
+        throw new Error(
+            `invalid TYPE value: expected string, got ${raw === undefined ? 'undefined' : typeof raw} - nothing typed`,
+        );
+    }
+    if (raw.trim().length === 0) {
+        throw new Error('invalid TYPE value: empty - nothing typed (use KEY Backspace to clear a field)');
+    }
+    if (raw.length > MAX_TYPE_VALUE_CHARS) {
+        throw new Error(`invalid TYPE value: ${raw.length} chars exceeds the ${MAX_TYPE_VALUE_CHARS} cap - nothing typed`);
+    }
+    if (CONTROL_CHARS.test(raw)) {
+        throw new Error('invalid TYPE value: contains control characters - nothing typed');
+    }
+    return raw;
+}
+
 function doType(action: Action) {
     const el = resolve(action.targetId);
-    const value = action.value ?? '';
+    const value = validateTypeValue(action.value);
 
     scrollIntoView(el);
     // Check before focus: a covered field must not steal focus from the
@@ -536,6 +587,14 @@ function isCoveredError(message: string): boolean {
     return message.toLowerCase().includes('covered by another element');
 }
 
+// #122: true when the failure is a rejected TYPE value (empty / non-string /
+// over-long / control characters). It is deterministic - re-acting the same
+// action with the same value will fail identically, so the retry loops must
+// not burn their backoff on it; the planner re-plans a correct value instead.
+function isInvalidValueError(message: string): boolean {
+    return message.toLowerCase().includes('invalid TYPE value');
+}
+
 export async function executeWithRetry(action: Action): Promise<ActionResult> {
     const first = await execute(action);
     // NAVIGATE leaves the page (retries would re-run a navigation), DONE is a
@@ -555,6 +614,12 @@ export async function executeWithRetry(action: Action): Promise<ActionResult> {
     // same element will keep hitting the same overlay - return immediately so
     // the planner dismisses the overlay and re-extracts.
     if (first.covered) {
+        return first;
+    }
+    // #122: a rejected value is deterministic - re-typing the same junk will
+    // fail the same way. Return immediately so the planner re-plans instead of
+    // retrying into the same rejection.
+    if (isInvalidValueError(first.error ?? '')) {
         return first;
     }
     await new Promise((r) => setTimeout(r, 400));
@@ -591,6 +656,13 @@ export async function executeWithResilience(
         // a stale one is hopeless - re-acting on the same id keeps hitting the
         // same overlay. Stop and let the planner dismiss it and re-extract.
         if (result.covered) {
+            break;
+        }
+
+        // #122: a rejected TYPE value is deterministic - re-typing the same
+        // value fails the same way. Stop the backoff so the planner can
+        // re-plan instead of retrying into the same rejection.
+        if (isInvalidValueError(result.error ?? '')) {
             break;
         }
 

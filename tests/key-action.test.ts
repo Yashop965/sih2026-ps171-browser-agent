@@ -19,6 +19,10 @@ import { execute, executeWithRetry } from '../src/lib/actions';
 vi.mock('../src/lib/dom', () => ({
   getElementById: (id: number) => undefined,
   getElementByStableId: (id: string) => undefined,
+  // #118: no guards captured -> resolve() skips the freshness check.
+  getGuardForId: () => undefined,
+  getGuardForStableId: () => undefined,
+  verifyElementFreshness: () => true,
 }));
 
 // Capture the keydown/keypress/keyup events that doKey dispatches.
