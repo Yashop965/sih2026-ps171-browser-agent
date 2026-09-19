@@ -301,6 +301,16 @@ export function verifyElementFreshness(el: Element, capturedGuard: string): bool
     return current === capturedGuard;
 }
 
+// #120: hard cap on the element table the planner receives.
+export const EXTRACT_CAP = 250;
+// How many matching controls were on the page but cut off by EXTRACT_CAP in
+// the last extract() call. 0 until extract() has run (and while the page has
+// fewer than the cap).
+let lastOmitted = 0;
+export function getOmittedCount(): number {
+    return lastOmitted;
+}
+
 export function extract(): ExtractedElement[] {
     const started = performance.now();
     registry.clear();
@@ -374,16 +384,6 @@ export function extract(): ExtractedElement[] {
     }
 
     return results;
-}
-
-// #120: hard cap on the element table the planner receives.
-export const EXTRACT_CAP = 250;
-// How many matching controls were on the page but cut off by EXTRACT_CAP in
-// the last extract() call. 0 until extract() has run (and while the page has
-// fewer than the cap).
-let lastOmitted = 0;
-export function getOmittedCount(): number {
-    return lastOmitted;
 }
 
 export interface PageContext {
