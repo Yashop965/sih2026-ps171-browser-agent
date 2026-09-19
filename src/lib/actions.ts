@@ -31,6 +31,11 @@ export interface ActionResult {
     // on the same id can never succeed - the caller must re-extract to
     // re-register elements instead of retrying the dead id.
     stale?: boolean;
+    // #116: true when the target existed but was covered by another element
+    // (cookie banner, sticky header, modal) at the moment of the hit-test,
+    // so no input was dispatched. Like `stale`, re-acting on the same id
+    // cannot fix it - the planner must dismiss the overlay and re-extract.
+    covered?: boolean;
 }
 
 const ACTION_TIMEOUT_MS = 5000;
@@ -74,6 +79,46 @@ function scrollIntoView(el: Element) {
     }
 }
 
+// #116: hit-test the target's center against whatever actually paints there.
+// A cookie banner, sticky header, or modal that covers the target must be
+// rejected BEFORE any input is dispatched - dispatching at the element's
+// registry node otherwise lands on the overlay and silently does nothing.
+//
+// The check is deliberately conservative and degrades to "not covered" in
+// any environment where it cannot decide:
+//   - no elementFromPoint (very old engines / stripped test DOMs),
+//   - zero-geometry rects (jsdom has no layout, so every rect is 0x0),
+//   - a null hit result (point outside the document's paintable area).
+// Flagging an indeterminate case as covered would break every action in
+// jsdom-based tests and on geometry-less pages, so ambiguity = proceed.
+function isCovered(el: Element): boolean {
+    const doc = document as Document & { elementFromPoint?: (x: number, y: number) => Element | null };
+    if (typeof doc.elementFromPoint !== 'function') return false;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    let hit: Element | null;
+    try {
+        hit = doc.elementFromPoint(x, y);
+    } catch {
+        return false;
+    }
+    if (hit === null || hit === undefined) return false;
+    // Covered when the topmost node at the center is NOT inside this element.
+    // An ancestor hit counts as covered: if an ancestor paints on top at that
+    // pixel, this element is behind it (clicking the ancestor is the safe
+    // thing anyway, and the planner will target it on re-extract).
+    return !el.contains(hit);
+}
+
+function rejectIfCovered(el: Element, action: Action) {
+    if (isCovered(el)) {
+        const id = action.targetId === undefined ? '(focused)' : String(action.targetId);
+        throw new Error(`element ${id} is covered by another element - no input dispatched`);
+    }
+}
+
 // React (and Vue) keep their own copy of an input's value. Setting
 // element.value directly updates the DOM but React never notices, so the
 // field looks filled while React still thinks it is empty and submit fails.
@@ -96,6 +141,7 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
 function doClick(action: Action) {
     const el = resolve(action.targetId);
     scrollIntoView(el);
+    rejectIfCovered(el, action);
 
     if (el instanceof HTMLElement) {
         el.focus();
@@ -103,7 +149,11 @@ function doClick(action: Action) {
 
     // Real mouse sequence — some sites listen for mousedown, not click.
     // dispatchEvent works on any Element, including SVG.
-    const opts = { bubbles: true, cancelable: true, view: window };
+    // NOTE: no `view` in the init — jsdom (and some embedded webviews) reject
+    // a MouseEventInit whose `view` is not their own Window object, and `view`
+    // defaults to the event's window in every real engine anyway. Same reason
+    // doKey drops `view` from its KeyboardEvent inits.
+    const opts = { bubbles: true, cancelable: true };
     el.dispatchEvent(new MouseEvent('mousedown', opts));
     el.dispatchEvent(new MouseEvent('mouseup', opts));
 
@@ -124,6 +174,9 @@ function doType(action: Action) {
     const value = action.value ?? '';
 
     scrollIntoView(el);
+    // Check before focus: a covered field must not steal focus from the
+    // overlay that's actually on top of it.
+    rejectIfCovered(el, action);
 
     if (el instanceof HTMLElement && el.isContentEditable) {
         el.focus();
@@ -279,6 +332,79 @@ function doKey(action: Action) {
     target.dispatchEvent(new KeyboardEvent('keyup', base));
 }
 
+// #119: event-aware post-action settle.
+//
+// The old executor slept a blanket 120ms after every non-WAIT action. That is
+// too slow for plain clicks/scrolls and too short to catch a combobox's
+// autocomplete list, which may not exist yet when we re-extract. So:
+//   - after TYPE into a combobox, poll (bounded) until a visible
+//     [role="option"] appears in the field's aria-controls/aria-owns root;
+//   - every other action settles for a short 50ms.
+// The combobox poll is capped so a runaway wait can't wedge a run.
+//
+// Geometry guard: jsdom has no layout, so [role=option] rects read 0x0 and the
+// poll can never "see" a suggestion there. That is fine - in jsdom we simply
+// fall through the cap and settle, which is the safe behaviour for tests.
+
+// Short settle used for every non-combobox action (was 120ms blanket).
+const SETTLE_MS = 50;
+// Cap on the combobox autocomplete poll.
+const SUGGESTION_CAP_MS = 200;
+
+// True when this element is a field that drives an autocomplete/suggestion
+// list: an explicit role="combobox" input, or a field that points at a
+// controlled list via aria-controls/aria-owns.
+function isComboboxField(el: Element): boolean {
+    if (el.getAttribute?.('role') === 'combobox') return true;
+    const owner =
+        el.getAttribute?.('aria-controls') || el.getAttribute?.('aria-owns');
+    return typeof owner === 'string' && owner.trim() !== '';
+}
+
+// Find a visible [role=option] under the field's controlled root(s).
+// Visible = a non-zero geometry rect (jsdom reads 0x0, so this is false there).
+function hasVisibleSuggestion(el: Element): boolean {
+    const controls = (el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '')
+        .split(/\s+/).filter(Boolean);
+    const roots: ParentNode[] = [document];
+    for (const id of controls) {
+        const root = document.getElementById(id);
+        if (root) roots.push(root);
+    }
+    for (const root of roots) {
+        const options = root.querySelectorAll('[role="option"]');
+        for (const opt of Array.from(options)) {
+            const r = opt.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) return true;
+        }
+    }
+    return false;
+}
+
+async function settleFor(action: Action): Promise<void> {
+    if (action.type === 'TYPE' && action.targetId !== undefined && action.targetId !== null) {
+        const target = action.targetId;
+        let el: Element | undefined;
+        try {
+            el = typeof target === 'number'
+                ? getElementById(target)
+                : getElementByStableId(target);
+        } catch {
+            el = undefined;
+        }
+        if (el && isComboboxField(el)) {
+            // Poll until the suggestion list is visible or the cap is hit.
+            const deadline = Date.now() + SUGGESTION_CAP_MS;
+            while (Date.now() < deadline) {
+                if (hasVisibleSuggestion(el)) return;
+                await delay(20);
+            }
+            return;
+        }
+    }
+    await delay(SETTLE_MS);
+}
+
 // WAIT: let the page settle (content loading, a spinner finishing, a modal
 // opening) before the agent re-extracts and re-plans. This is what turns the
 // agent from a blind one-shot form filler into something that can operate on
@@ -343,10 +469,12 @@ export async function execute(action: Action): Promise<ActionResult> {
             default:
                 throw new Error(`unknown action type: ${(action as Action).type}`);
         }
-        // Let the page react before we report success. WAIT already yielded
-        // for its full duration, so skip the extra settle for it.
+        // #119: let the page react before we report success. Event-aware:
+        // combobox typing polls for the suggestion list (bounded), everything
+        // else gets a short 50ms settle instead of the old blanket 120ms.
+        // WAIT already yielded for its full duration, so it settles itself.
         if (action.type !== 'WAIT') {
-            await new Promise((r) => setTimeout(r, 120));
+            await settleFor(action);
         }
     };
 
@@ -378,6 +506,7 @@ export async function execute(action: Action): Promise<ActionResult> {
             error,
             durationMs: performance.now() - started,
             stale: isStaleElementError(error),
+            covered: isCoveredError(error),
         };
     } finally {
         // Without this every action leaves a live 5s timer behind.
@@ -399,6 +528,14 @@ function isStaleElementError(message: string): boolean {
     );
 }
 
+// #116: true when the failure is an overlay covering the target (hit-test
+// rejected it before any input). Like a stale element, re-acting on the same
+// id cannot fix a covered target - the planner must dismiss the overlay and
+// re-extract, so the retry loops short-circuit on it.
+function isCoveredError(message: string): boolean {
+    return message.toLowerCase().includes('covered by another element');
+}
+
 export async function executeWithRetry(action: Action): Promise<ActionResult> {
     const first = await execute(action);
     // NAVIGATE leaves the page (retries would re-run a navigation), DONE is a
@@ -412,6 +549,12 @@ export async function executeWithRetry(action: Action): Promise<ActionResult> {
     // Issue #64: a stale / not-found target can't be fixed by re-acting on the
     // same id. Return immediately (with stale=true) so the caller re-extracts.
     if (first.stale) {
+        return first;
+    }
+    // #116: a covered target is blocked by an overlay. Re-clicking/typing the
+    // same element will keep hitting the same overlay - return immediately so
+    // the planner dismisses the overlay and re-extracts.
+    if (first.covered) {
         return first;
     }
     await new Promise((r) => setTimeout(r, 400));
@@ -444,6 +587,13 @@ export async function executeWithResilience(
             break;
         }
 
+        // #116: a covered target is blocked by an overlay for the same reason
+        // a stale one is hopeless - re-acting on the same id keeps hitting the
+        // same overlay. Stop and let the planner dismiss it and re-extract.
+        if (result.covered) {
+            break;
+        }
+
         // Exponential backoff: 200ms, 400ms, 800ms
         await delay(Math.pow(2, i) * 200);
     }
@@ -455,6 +605,7 @@ export async function executeWithResilience(
         error: lastError ?? 'Max retries exceeded',
         durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
         stale: results.some((r) => r.stale),
+        covered: results.some((r) => r.covered),
     };
 }
 
