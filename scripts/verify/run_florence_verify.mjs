@@ -35,12 +35,15 @@ modelPage.on('console', (m) => console.log('  [page]', m.text()));
 await modelPage.goto(
   `${ROOT}/scripts/verify/florence-page.html?img=${SHOT}&query=${encodeURIComponent(QUERY)}&local=1`,
 );
-console.log('[2] waiting for on-device inference (first run downloads the q4 model)...');
-const result = await modelPage.waitForFunction(
-  () => window.__result !== undefined,
-  undefined,
-  { timeout: 600000, polling: 1000 },
-).then((h) => h.jsonValue());
+console.log('[2] waiting for on-device inference (model loads from the local 8123 mirror)...');
+// The predicate only signals completion - it returns a boolean. Fetch the
+// actual __result object separately, otherwise jsonValue() gives `true`, not
+// the result.
+await modelPage.waitForFunction(() => window.__result !== undefined, undefined, {
+  timeout: 600000,
+  polling: 1000,
+});
+const result = await modelPage.evaluate(() => window.__result);
 
 console.log('\n=== RESULT ===');
 console.log('device:', result.device);

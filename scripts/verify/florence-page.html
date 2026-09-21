@@ -92,14 +92,16 @@ async function runTask(task, image, query) {
   return { generated_text, result };
 }
 
-// Decode the PNG screenshot into an <img> the processor can consume.
-const shotImage = new Image();
-const dataUrl = 'data:image/png;base64,' + btoa(String.fromCharCode(...new Uint8Array(shot)));
-shotImage.src = dataUrl;
-await shotImage.decode();
+// Decode the PNG screenshot into a RawImage the Florence-2 processor
+// consumes. transformers.js 3.8.1's Florence-2 processor calls .rgb() on
+// its input, so a raw <img>/string fails ("image.rgb is not a function") -
+// it must be a RawImage (width/height/data/.rgb()).
+const shotImage = await RawImage.fromBlob(new Blob([shot], { type: 'image/png' }));
+// In 3.8.1 RawImage.size is a read-only getter returning [width, height] -
+// the exact order post_process_generation's box scaler expects
+// (image_size[i % 2]: x<-width, y<-height). Do NOT reassign it.
 const image = shotImage;
-image.size = [image.height, image.width]; // Florence's <OD> post-processing scales boxes by image size
-log('image decoded: ' + image.width + 'x' + image.height);
+log('image decoded: ' + shotImage.width + 'x' + shotImage.height);
 
 try {
   // 2. grounding: does the target phrase appear in-frame?

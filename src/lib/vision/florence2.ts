@@ -56,6 +56,17 @@ export interface VisionModelConfig {
   modelId: string;
   backend: 'webgpu' | 'wasm';
   dtype: 'fp32' | 'fp16' | 'q4';
+  /**
+   * #113: absolute base URL of a local CORS server that serves the
+   * gitignored Florence-2 ONNX mirror (scripts/verify/local-model), e.g.
+   * http://127.0.0.1:8123. When set, the model files are fetched from THIS
+   * base (transformers.js pathJoin(localModelPath, repoPath)) instead of
+   * downloading from Hugging Face - so a validation machine can bring the
+   * on-device VLM online without a 150MB network download per profile.
+   * The content script runs cross-origin (on en.wikipedia.org), so the base
+   * must be absolute + CORS-`*`; the verify server binds 127.0.0.1 only.
+   */
+  localBaseUrl?: string;
 }
 
 class Florence2Pipeline {
@@ -100,8 +111,25 @@ class Florence2Pipeline {
         const { env, Florence2ForConditionalGeneration, AutoProcessor } =
           await import('@huggingface/transformers');
 
-        // Configure environment
-        env.allowLocalModels = false;
+        // #113: when a local CORS server is configured, fetch the ONNX files
+        // from it instead of Hugging Face (no 150MB download per profile).
+        // Keep modelId as the HF repo id; point env.localModelPath at the
+        // server base so transformers.js fetches <base>/<repoId>/<file>
+        // cross-origin (our server tail-matches the repo-nested path to the
+        // mirror root). This is the exact shape getModelFile() builds when
+        // allowLocalModels=true, so the local fetch precedes any HF download.
+        if (config.localBaseUrl) {
+            env.allowLocalModels = true;
+            env.localModelPath = config.localBaseUrl;
+            // The ORT WebGPU/WASM runtime fetches its .wasm binary from
+            // wasmPaths. Point it at the local server too so a WASM fallback
+            // (no WebGPU) also works fully offline.
+            if (config.backend === 'wasm' && env.backends?.onnx?.wasm) {
+                env.backends.onnx.wasm.wasmPaths = config.localBaseUrl + '/node_modules/onnxruntime-web/dist/';
+            }
+        } else {
+            env.allowLocalModels = false;
+        }
         env.useBrowserCache = true;
         env.logLevel = 'error';
 
@@ -210,20 +238,53 @@ class Florence2Pipeline {
 
   /** One Florence call: task prefix (+ optional query) -> raw text -> parsed.
    *  Mirrors the official onnx-community model-card recipe. */
+  /**
+   * Convert an accepted image source (captureVisibleTab data URL, a canvas,
+   * or an <img>) into a transformers.js RawImage. The Florence-2 processor in
+   * @huggingface/transformers 3.8.1 calls `.rgb()` on its input, so a raw
+   * string/<img>/canvas fails with "image.rgb is not a function" - it must be
+   * a RawImage (width/height/data/.rgb()). #113 live finding, 2026-09-20.
+   */
+  private async toRawImage(image: HTMLCanvasElement | HTMLImageElement | string): Promise<any> {
+    const { RawImage } = await import('@huggingface/transformers');
+    let raw: any;
+    if (typeof image === 'string') {
+      if (image.startsWith('data:')) {
+        // captureVisibleTab returns a base64 data URL - decode to a Blob.
+        const blob = await (await fetch(image)).blob();
+        raw = await RawImage.fromBlob(blob);
+      } else {
+        raw = await RawImage.fromURL(image);
+      }
+    } else if (image instanceof HTMLCanvasElement) {
+      raw = RawImage.fromCanvas(image);
+    } else {
+      // HTMLImageElement (or <video>) - rasterize to a canvas first.
+      const c = document.createElement('canvas');
+      c.width = image.width;
+      c.height = image.height;
+      c.getContext('2d')!.drawImage(image as HTMLImageElement, 0, 0);
+      raw = RawImage.fromCanvas(c);
+    }
+    // In 3.8.1 RawImage.size is a read-only getter returning [width, height]
+    // - the exact order post_process_generation's box scaler expects
+    // (image_size[i % 2]: x<-width, y<-height). Do NOT reassign it; runTask
+    // passes raw.size through to post_process_generation.
+    return raw;
+  }
+
   private async runTask(
     image: HTMLCanvasElement | HTMLImageElement | string,
     task: string,
     query?: string,
   ): Promise<unknown> {
     if (!this.model || !this.processor) throw new Error('Pipeline not initialized');
-    // Florence expects an image with a .size ([h, w]) for <OD> box scaling.
-    const img: any = image;
-    if (img && !img.size && img.width) img.size = [img.height, img.width];
+    const raw = await this.toRawImage(image);
     const prompts = this.processor.construct_prompts(query ? `${task} ${query}` : task);
-    const inputs = await this.processor(img, prompts);
+    const inputs = await this.processor(raw, prompts);
     const generated_ids = await this.model.generate({ ...inputs, max_new_tokens: 128 });
     const generated_text = this.processor.batch_decode(generated_ids, { skip_special_tokens: false })[0];
-    return this.processor.post_process_generation(generated_text, task, img.size);
+    return this.processor.post_process_generation(generated_text, task, raw.size);
   }
 
   private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | string, query?: string): Promise<unknown> {

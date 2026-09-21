@@ -67,6 +67,42 @@ export default defineContentScript({
             };
         }
 
+        // #113: optional local model source. The Florence-2 ONNX mirror is
+        // gitignored (scripts/verify/local-model) and served on 127.0.0.1 by
+        // scripts/verify/local_model_server.mjs with CORS:*. When the
+        // validation flow sets sih_vlm_local_model_url in chrome.storage.local,
+        // the content script loads the model from that absolute URL instead of
+        // downloading from Hugging Face - bringing the on-device VLM online in
+        // a fresh profile with no 150MB network download. Production leaves
+        // the key unset, so behavior is unchanged.
+        async function visionLocalBaseUrl(): Promise<string | undefined> {
+            try {
+                const { sih_vlm_local_model_url } = await browser.storage.local.get([
+                    'sih_vlm_local_model_url',
+                ]);
+                return typeof sih_vlm_local_model_url === 'string' && sih_vlm_local_model_url
+                    ? sih_vlm_local_model_url
+                    : undefined;
+            } catch {
+                return undefined;
+            }
+        }
+        async function initVision(): Promise<void> {
+            if (visionPipeline.isInitialized()) return;
+            // Mirror Florence2Pipeline.isWebGPUSupported(): WebGPU when the
+            // browser exposes a gpu adapter, else the WASM fallback.
+            const backend: 'webgpu' | 'wasm' =
+                typeof navigator !== 'undefined' && 'gpu' in navigator && (navigator as unknown as { gpu: unknown }).gpu
+                    ? 'webgpu'
+                    : 'wasm';
+            await visionPipeline.initialize({
+                modelId: visionPipeline.getModelId(),
+                backend,
+                dtype: 'q4',
+                localBaseUrl: await visionLocalBaseUrl(),
+            });
+        }
+
         /**
          * Extract DOM elements + run vision inference if DOM has few elements.
          * Falls back to DOM-only when vision is unavailable.
@@ -100,7 +136,7 @@ export default defineContentScript({
                 // Initialize vision pipeline if not already done
                 if (!visionPipeline.isInitialized()) {
                     try {
-                        await visionPipeline.initialize();
+                        await initVision();
                     } catch (initErr) {
                         console.warn('[vision] Failed to initialize vision pipeline:', initErr);
                         return { ok: true, elements: domElements, context, vision: { used: false } };
@@ -158,7 +194,7 @@ export default defineContentScript({
                 }
                 if (!visionPipeline.isInitialized()) {
                     try {
-                        await visionPipeline.initialize();
+                        await initVision();
                     } catch (initErr) {
                         return { ok: false, error: 'vision init failed: ' + String(initErr) };
                     }
