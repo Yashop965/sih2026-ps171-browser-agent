@@ -17,6 +17,7 @@ import {
   isRepeatedAction,
   emptyTaskState,
   mergeChecklist,
+  pageContentSignature,
   type AgentRunnerDeps,
   type ChecklistItem,
 } from '../src/lib/agentRunner';
@@ -751,5 +752,124 @@ describe('AgentRunner - log-before-observe discipline (#121 audit)', () => {
     // Exactly one real click executed - the repeat was skipped, not replayed.
     expect(executeCalls).toBe(1);
     expect(final.status).toBe('complete');
+  });
+});
+
+// #128: same-URL re-render. Element ids are re-issued per extract(), and the
+// old URL-only reset predicate missed same-URL re-renders (SPA wizard step,
+// submit that stays on the URL, framework re-mount) - so the previous page's
+// filled ids leaked into the new page's /plan as fake "already done" entries.
+describe('AgentRunner - same-URL re-render content signature (#128)', () => {
+  function makeSignatureRunner(opts: {
+    contexts: Array<{ scrollY?: number; scrollHeight?: number; omitted?: number } | null>;
+  }) {
+    const sm = makeSessionManagerStub();
+    const histories: unknown[] = [];
+    let extractCall = 0;
+    let planCall = 0;
+    const deps: AgentRunnerDeps = {
+      extract: async () => {
+        extractCall++;
+        return {
+          ok: true,
+          // Same element shape every read - only the CONTENT (context) differs.
+          elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+          url: 'https://x.test/page', // never changes - that's the point
+          title: 'Page',
+          context: opts.contexts[extractCall - 1] ?? null,
+        };
+      },
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async (payload) => {
+        histories.push((payload as { history?: unknown[] }).history ?? []);
+        planCall++;
+        return planCall === 1
+          ? { action: { type: 'TYPE', targetId: 1, value: 'q' } }
+          : { action: { type: 'DONE' } };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 'fill the field',
+      startUrl: '',
+      onProgress: () => {},
+      isStopped: () => false,
+    };
+    const runner = new AgentRunner(deps);
+    return { runner, histories };
+  }
+
+  it('clears per-page memory on a same-URL re-render (document height changed)', async () => {
+    const { runner, histories } = makeSignatureRunner({
+      contexts: [
+        { scrollHeight: 1000, omitted: 0 }, // step 1: original document
+        { scrollHeight: 1600, omitted: 0 }, // step 2: same URL, re-rendered taller
+      ],
+    });
+    await runner.run();
+
+    // Step 1 filled #1; step 2 is the SAME URL but a rebuilt document, so the
+    // per-page clear must have fired on the content signature - step 2's plan
+    // carries NO stale ids from the pre-render read.
+    const step2 = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
+    expect(step2).not.toContain('1');
+    expect(runner.getState().logs.some((l) => /content re-rendered/i.test(l))).toBe(true);
+    expect(runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))).toBe(true);
+    expect(runner.getState().status).toBe('complete');
+  });
+
+  it('does NOT clear on a plain scroll (height invariant) - #62 persistence preserved', async () => {
+    // Scrolling shifts scrollY but keeps the document's total height + cap
+    // constant. The signature must stay invariant, so cross-scroll "already
+    // filled" tracking (issue #62) survives - clearing here would regress it.
+    const { runner, histories } = makeSignatureRunner({
+      contexts: [
+        { scrollY: 0, scrollHeight: 1000, omitted: 0 },
+        { scrollY: 500, scrollHeight: 1000, omitted: 0 }, // plain scroll, same document
+      ],
+    });
+    await runner.run();
+
+    // Step 1 filled #1; step 2 is the same document scrolled - the history
+    // sent to /plan MUST still carry "1" as already filled.
+    const step2 = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
+    expect(step2).toContain('1');
+    expect(runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))).toBe(false);
+    expect(runner.getState().status).toBe('complete');
+  });
+
+  it('fires when a cap-omitted change happens on the same URL (long page grows past the 250 cap)', async () => {
+    const { runner, histories } = makeSignatureRunner({
+      contexts: [
+        { scrollHeight: 900, omitted: 0 },
+        { scrollHeight: 900, omitted: 23 }, // same height, but new section crossed the cap
+      ],
+    });
+    await runner.run();
+    const step2 = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
+    expect(step2).not.toContain('1');
+    expect(runner.getState().logs.some((l) => /content re-rendered/i.test(l))).toBe(true);
+  });
+});
+
+describe('pageContentSignature (pure helper, #128)', () => {
+  it('is invariant under scroll position (scrollY is deliberately excluded)', () => {
+    expect(pageContentSignature({ scrollY: 0, scrollHeight: 1000, omitted: 0 }))
+      .toBe(pageContentSignature({ scrollY: 9999, scrollHeight: 1000, omitted: 0 }));
+  });
+
+  it('changes when document height or omitted-cap count changes', () => {
+    const base = pageContentSignature({ scrollHeight: 1000, omitted: 0 });
+    expect(pageContentSignature({ scrollHeight: 1600, omitted: 0 })).not.toBe(base);
+    expect(pageContentSignature({ scrollHeight: 1000, omitted: 23 })).not.toBe(base);
+  });
+
+  it('degrades to a stable zero-signature for a missing context (no false clears between two nulls)', () => {
+    expect(pageContentSignature(null)).toBe('0/0');
+    expect(pageContentSignature({})).toBe('0/0');
+    // Two null-context steps must NOT clear memory (invariant signature).
+    expect(pageContentSignature(null)).toBe(pageContentSignature(null));
   });
 });

@@ -142,6 +142,39 @@ export {
   type RecentAction,
 } from './loopDetection';
 
+/**
+ * #128: content signature for per-page memory scoping.
+ *
+ * Element ids are re-issued on EVERY extract(). The old reset predicate was
+ * URL-only (lastExtractUrl), so a same-URL re-render — a SPA wizard step, a
+ * submit that stays on the URL, a framework re-mount that re-bakes the control
+ * tree — re-issued ids and leaked the previous extract's filled/failed ids
+ * into the new extract's /plan history as fake "already done" entries,
+ * steering the planner off the field that actually needs filling. (Same failure
+ * class as #114, which fixed the navigating-URL variant only.)
+ *
+ * The signature is a DOCUMENT-LEVEL invariant: full document height
+ * (scrollHeight) + how many controls the 250-cap omitted. It is deliberately
+ * NOT built from the visible element sample or labels, because a plain scroll
+ * shifts the visible subset (and the numeric id↔stableId mapping) WITHOUT the
+ * page changing - and clearing per-page memory on that would regress the #62
+ * cross-scroll "already filled" persistence. A genuine re-render that adds /
+ * removes content or crosses the cap changes scrollHeight and/or omitted, so
+ * the same-URL case now fires the reset where the URL-only check did not.
+ *
+ * PII-safe by construction: two numbers, no labels, no raw page text.
+ *
+ * Pure + unit-tested. Limitation (documented, backstopped by the #118 per-node
+ * semantic guard): an in-place re-render that preserves BOTH document height
+ * and total control count is not detected here - it is caught action-by-action
+ * by verifyElementFreshness instead.
+ */
+export function pageContentSignature(
+  context: { scrollHeight?: number; omitted?: number } | null | undefined,
+): string {
+  return `${context?.scrollHeight ?? 0}/${context?.omitted ?? 0}`;
+}
+
 export interface AgentActionLike {
   type: string;
   targetId?: number | string;
@@ -370,18 +403,6 @@ export class AgentRunner {
       let pageUrl: string = snapshot.url ?? '';
       let pageTitle: string = snapshot.title ?? '';
       let pageContext = snapshot.context ?? null;
-      // Bulletproof per-page memory reset: when the extract() we just read
-      // came from a DIFFERENT url than the step before, the page changed no
-      // matter how (explicit NAVIGATE, a key/click that navigated, or a
-      // programmatic location change the executor never reported). Element
-      // ids are re-issued per page, so all per-page interaction memory
-      // (filled/failed sets, the "skip repeated action" history, the scroll
-      // guard) is now stale and must not leak into the new page's plan.
-      if (this.lastExtractUrl !== null && pageUrl !== this.lastExtractUrl) {
-        this.log(`🧭 Page changed (${this.lastExtractUrl.split('/').pop()} -> ${pageUrl.split('/').pop()}) - clearing per-page interaction memory`);
-        this.clearPageScopedElementMemory();
-      }
-      this.lastExtractUrl = pageUrl;
       if (pageContext?.moreContentBelow) {
         this.log(`Page has more content below the fold (scrollY=${pageContext.scrollY}/${pageContext.scrollHeight})`);
       }
@@ -440,6 +461,38 @@ export class AgentRunner {
             return;
         }
       }
+
+      // Bulletproof per-page memory reset. Element ids are re-issued on every
+      // extract(), so when the page CHANGED since the step before - either the
+      // URL moved (#114: explicit NAVIGATE, a navigating key/click, or a
+      // programmatic location change) OR a same-URL re-render rebuilt the
+      // document (#128: SPA wizard step, submit that stays on the URL,
+      // framework re-mount) - all per-page interaction memory (filled/failed
+      // sets, the "skip repeated action" history, the scroll guard) is stale
+      // and must not leak into the new page's plan.
+      //
+      // #128: this runs AFTER the 0-element recovery above, so it compares
+      // the SETTLED read (or the recovered one), not a transient empty read.
+      // A URL change always fires; a SAME-URL change fires when the
+      // document-level content signature (scrollHeight + omitted-cap, see
+      // pageContentSignature) differs. A plain scroll keeps both invariant,
+      // so the #62 cross-scroll "already filled" persistence is preserved -
+      // only a genuine re-render clears the memory.
+      const signature = pageContentSignature(pageContext);
+      const urlChanged = this.lastExtractUrl !== null && pageUrl !== this.lastExtractUrl;
+      const contentChanged =
+        this.lastExtractSignature !== null && signature !== this.lastExtractSignature;
+      if (urlChanged || contentChanged) {
+        const why = urlChanged && contentChanged
+          ? `url ${this.lastExtractUrl?.split('/').pop()} -> ${pageUrl.split('/').pop()} + content`
+          : urlChanged
+            ? `url ${this.lastExtractUrl?.split('/').pop()} -> ${pageUrl.split('/').pop()}`
+            : `content re-rendered (height ${this.lastExtractSignature} -> ${signature})`;
+        this.log(`🧭 Page changed (${why}) - clearing per-page interaction memory`);
+        this.clearPageScopedElementMemory();
+      }
+      this.lastExtractUrl = pageUrl;
+      this.lastExtractSignature = signature;
 
       const inputFields = elements.filter((e) => e.role === 'textbox' || e.tag === 'input');
       const buttons = elements.filter((e) => e.role === 'button' || e.tag === 'button');
@@ -872,6 +925,10 @@ export class AgentRunner {
   // URL the last extract() came from. Element ids are re-issued per page, so
   // a URL change invalidates every per-page memory (see clearPageScoped...).
   private lastExtractUrl: string | null = null;
+  // #128: document-level content signature of the last extract() (see
+  // pageContentSignature). Catches same-URL re-renders that re-issue element
+  // ids - the URL-only check above misses them.
+  private lastExtractSignature: string | null = null;
 
   /** Close out the session per its terminal status (#69). */
   private finishSession(sessionId: string | null, outcome: string): void {
