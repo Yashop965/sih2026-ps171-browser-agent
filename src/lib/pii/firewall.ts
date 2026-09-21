@@ -85,14 +85,14 @@ const FIREWALL_PATTERNS: FirewallPattern[] = [
   // Indian phone: only block when format validates
   {
     type: 'PHONE',
-    regex: /\b(\+?91[\s\-]?[6-9]\d{9}|[6-9]\d{9})\b/g,
+    regex: /\b(\+?91[\s-]?[6-9]\d{9}|[6-9]\d{9})\b/g,
     highPrecision: false,
     validator: validatePhone,
   },
   // UPI VPA: block on validator pass
   {
     type: 'UPI',
-    regex: /\b[a-zA-Z0-9._\-]+@[a-zA-Z0-9]+\b/g,
+    regex: /\b[a-zA-Z0-9._-]+@[a-zA-Z0-9]+\b/g,
     highPrecision: false,
     validator: validateUPI,
   },

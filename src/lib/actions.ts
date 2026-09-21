@@ -200,6 +200,9 @@ function doClick(action: Action) {
 // control character is blocked. To clear a field the planner uses KEY
 // Backspace, not an empty TYPE.
 const MAX_TYPE_VALUE_CHARS = 2000;
+// Intentional: this IS the control-character detector (TYPE value gate,
+// issue #122) - it must match \u0000-\u0008 / \u000B-\u001F / \u007F.
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/;
 
 function validateTypeValue(raw: unknown): string {

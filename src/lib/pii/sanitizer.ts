@@ -69,21 +69,21 @@ const PATTERNS: PatternDef[] = [
   // Email
   {
     type: 'EMAIL',
-    regex: /\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b/g,
+    regex: /\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/g,
     baseConfidence: 0.95,
     validator: validateEmail,
   },
   // Indian phone: 10 digits, optionally with +91 / 0 prefix
   {
     type: 'PHONE',
-    regex: /\b(\+?91[\s\-]?[6-9]\d{9}|0[6-9]\d{9}|[6-9]\d{9})\b/g,
+    regex: /\b(\+?91[\s-]?[6-9]\d{9}|0[6-9]\d{9}|[6-9]\d{9})\b/g,
     baseConfidence: 0.70,
     validator: validatePhone,
   },
   // UPI VPA
   {
     type: 'UPI',
-    regex: /\b([a-zA-Z0-9._\-]+@[a-zA-Z0-9]+)\b/g,
+    regex: /\b([a-zA-Z0-9._-]+@[a-zA-Z0-9]+)\b/g,
     baseConfidence: 0.75,
     validator: validateUPI,
   },

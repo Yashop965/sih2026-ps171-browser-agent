@@ -412,7 +412,7 @@ export default defineBackground({
             // also reference it when logging a navigation-triggered disconnect.
             // resolveWebTab always targets a real http(s) tab - never the
             // extension's own pages.
-            let tabId = await resolveWebTab(sender);
+            const tabId = await resolveWebTab(sender);
             if (!tabId) { sendResponse({ error: 'No web tab found', ok: false }); return; }
             try {
               const action = message.action;
@@ -469,7 +469,7 @@ export default defineBackground({
           (async () => {
             try {
               // Target a real web tab, never the extension's own pages.
-              let tabId = await resolveWebTab(sender);
+              const tabId = await resolveWebTab(sender);
               if (!tabId) { sendResponse({ ok: false, error: 'No web tab found' }); return; }
               const target = message.url;
               // Only http(s) - refuse javascript: and other dangerous schemes.
