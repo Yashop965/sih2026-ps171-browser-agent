@@ -1,0 +1,5 @@
+[1] key=http://127.0.0.1:8123
+[2] VISION_OCR: {}
+[3] mirror fetches this run:
+(none)
+[3] .onnx files fetched: 0
