@@ -1,95 +1,77 @@
 """
-FastAPI Planner Tests
-=====================
-Tests for the hardened server/main.py planner.
+FastAPI Planner Tests (rewritten 2026-09-21 against the post-split server API)
+==============================================================================
+This file was originally written against the monolithic pre-refactor
+``server/main.py`` (parse_and_validate_action, validate_action, heuristic_action,
+_extract_json, _check_payload_pii, _contains_raw_pii, AgentAction,
+ActionValidationError, LLMParseError). That surface was split into
+``server/planner.py`` + ``server/action_executor.py`` and the PII payload-gate
+moved CLIENT-side (src/lib/pii/firewall.ts, outboundGuard.ts, redactor.ts —
+covered by the vitest pii-* suites), so those names no longer exist in
+server/. Every still-valid edge case is ported to the current API below:
 
-Covers:
-  - Valid action accepted
-  - Malformed LLM JSON handled (fallback to heuristic)
-  - Invalid action type rejected
-  - Nonexistent targetId rejected
-  - Ollama timeout → heuristic fallback
-  - Empty elements → COMPLETE
-  - Privacy violation → blocked
-  - JSON extraction from prose
-  - URL safety validation
-  - Action validation (SCROLL, NAVIGATE, TYPE)
-  - Audit log endpoint
-  - Health check
-  - Session endpoint
+  - JSON extraction        -> ActionPlanner._extract_json_substring
+  - LLM-output parsing     -> ActionPlanner.parse_llm_output
+  - heuristic_action       -> ActionPlanner._fallback_action (conservative,
+                              issue #85 - only task-referenced fields)
+  - action validation      -> the type/target gates inside parse_llm_output
+  - AgentAction schema     -> valid action-type set + string/stableId
+                               targetId resolution in parse_llm_output
+  - /plan endpoint         -> current PlanRequest flat payload (no more
+                              nested ``payload`` key, no /audit endpoint)
 
-Run: python -m pytest tests/test_main.py -v
-Or:  python -m pytest tests/test_main.py -v --tb=short
+Dropped sections (coverage now lives elsewhere):
+  - TestContainsRawPII / TestCheckPayloadPII / audit-log PII assertions ->
+    the server-side PII gate was moved to the client firewall (issue #61):
+    src/lib/pii/firewall.ts + outboundGuard.ts, tested by the vitest
+    pii-* suites.
+  - TestAgentActionSchema javascript: URL 422 -> the server no longer
+    validates URL schemes; scheme safety is enforced client-side
+    (planner prompt + executor).
+
+Run: server/.venv/Scripts/python -m pytest tests/test_main.py -v
 """
 
-import pytest
-import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-
-# Import the FastAPI app from the server module.
-# This works when run from the repo root.
-import sys
+import json
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import sys
 
-from server.main import (
-    app,
-    parse_and_validate_action,
-    validate_action,
-    heuristic_action,
-    _extract_json,
-    _check_payload_pii,
-    _contains_raw_pii,
-    PlanRequest,
-    SanitizedPayload,
-    InteractiveElement,
-    ARIAElement,
-    AgentAction,
-    ActionValidationError,
-    LLMParseError,
-)
+import pytest
+from fastapi.testclient import TestClient
+
+# Import the FastAPI app from the server module (repo-root layout).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from server.main import app
+from server.planner import ActionPlanner, ActionSchema, MockLLMClient
 
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
 
-def make_element(id: int, role: str = "button", label: str = "Click me",
-                 name: str = "btn", is_password: bool = False) -> dict:
+def make_element(id, role="button", label="Click me", name="btn",
+                 is_password=False, tag=None):
+    """Plain dict element in the shape planner.parse_llm_output consumes
+    (the raw_elements produced by InteractiveElement.model_dump())."""
     return {
         "id": id,
-        "tag": "button" if role == "button" else "input",
+        "tag": tag or ("button" if role in ("button", "submit") else "input"),
         "role": role,
         "label": label,
         "name": name,
         "rect": {"x": 0, "y": 0, "width": 100, "height": 40},
         "isPassword": is_password,
-    }
-
-
-def make_payload(elements: list | None = None, pii: list | None = None,
-                 url: str = "https://example.com") -> dict:
-    return {
-        "url": url,
-        "title": "Test Page",
-        "timestamp": 1700000000,
-        "interactiveElements": [make_element(1)] if elements is None else elements,
-        "accessibilityTree": [],
-        "detectedPII": pii or [],
-        "hasScreenshots": False,
-    }
-
-
-def make_request(elements: list | None = None, task: str = "Test task",
-                 url: str = "https://example.com") -> dict:
-    return {
-        "payload": make_payload(elements, url=url),
-        "task_description": task,
+        "interactive": True,
     }
 
 
 @pytest.fixture
+def planner():
+    return ActionPlanner(llm_client=MockLLMClient())
+
+
+@pytest.fixture
 def client():
-    """Synchronous client for non-async tests."""
-    from fastapi.testclient import TestClient
+    """Synchronous client for endpoint tests."""
     return TestClient(app)
 
 
@@ -103,368 +85,264 @@ class TestHealthCheck:
     def test_health_contains_status(self, client):
         data = client.get("/health").json()
         assert data["status"] == "healthy"
-        assert "ollama_available" in data
         assert "uptime_seconds" in data
+        assert "version" in data
 
 
-# ─── JSON Extraction ───────────────────────────────────────────────────────────
+# ─── _extract_json_substring (was _extract_json) ──────────────────────────────
 
-class TestExtractJSON:
-    def test_parses_plain_json(self):
-        result = _extract_json('{"type": "CLICK", "targetId": 1}')
-        assert result is not None
-        assert result["type"] == "CLICK"
-        assert result["targetId"] == 1
+class TestExtractJsonSubstring:
+    """ActionPlanner._extract_json_substring returns the raw JSON *string*
+    (parse_llm_output json.loads it) - not a parsed dict like the old
+    _extract_json did."""
 
-    def test_parses_json_in_markdown_code_block(self):
+    def test_parses_plain_json(self, planner):
+        raw = planner._extract_json_substring('{"type": "CLICK", "targetId": 1}')
+        assert raw is not None
+        assert json.loads(raw) == {"type": "CLICK", "targetId": 1}
+
+    def test_parses_json_in_markdown_code_block(self, planner):
         text = '```json\n{"type": "SCROLL", "direction": "down"}\n```'
-        result = _extract_json(text)
-        assert result is not None
-        assert result["type"] == "SCROLL"
+        raw = planner._extract_json_substring(text)
+        assert raw is not None
+        assert json.loads(raw)["type"] == "SCROLL"
 
-    def test_parses_json_embedded_in_prose(self):
+    def test_parses_json_embedded_in_prose(self, planner):
         text = 'I will click the button. {"type": "CLICK", "targetId": 2} That is the action.'
-        result = _extract_json(text)
-        assert result is not None
-        assert result["type"] == "CLICK"
+        raw = planner._extract_json_substring(text)
+        assert raw is not None
+        assert json.loads(raw)["type"] == "CLICK"
 
-    def test_parses_nested_json(self):
+    def test_parses_nested_json(self, planner):
         text = '{"type": "NAVIGATE", "url": "https://example.com/path"}'
-        result = _extract_json(text)
-        assert result is not None
-        assert result["url"] == "https://example.com/path"
+        raw = planner._extract_json_substring(text)
+        assert raw is not None
+        assert json.loads(raw)["url"] == "https://example.com/path"
 
-    def test_returns_none_for_empty_string(self):
-        assert _extract_json("") is None
+    def test_returns_none_for_empty_string(self, planner):
+        assert planner._extract_json_substring("") is None
 
-    def test_returns_none_for_non_json(self):
-        assert _extract_json("This is just text, no JSON here.") is None
+    def test_returns_none_for_non_json(self, planner):
+        assert planner._extract_json_substring("This is just text, no JSON here.") is None
 
-    def test_returns_none_for_truncated_json(self):
-        assert _extract_json('{"type": "CLICK"') is None
-
-
-# ─── _contains_raw_pii ────────────────────────────────────────────────────────
-
-class TestContainsRawPII:
-    def test_detects_email(self):
-        assert _contains_raw_pii("user@example.com") is True
-
-    def test_detects_indian_phone(self):
-        assert _contains_raw_pii("9876543210") is True
-
-    def test_does_not_flag_redacted_placeholder(self):
-        assert _contains_raw_pii("[REDACTED]") is False
-
-    def test_clean_text_passes(self):
-        assert _contains_raw_pii("Click the Submit button") is False
-
-    def test_detects_pan_format(self):
-        assert _contains_raw_pii("PAN ABCPE1234F is invalid") is True
+    def test_returns_none_for_truncated_json(self, planner):
+        # Unbalanced brace -> no \{.*\} match -> None.
+        assert planner._extract_json_substring('{"type": "CLICK"') is None
 
 
-# ─── _check_payload_pii ───────────────────────────────────────────────────────
+# ─── parse_llm_output (was parse_and_validate_action) ────────────────────────
 
-class TestCheckPayloadPII:
-    def _make_pydantic_payload(self, elements: list, title: str = "Safe Title"):
-        return SanitizedPayload(
-            url="https://example.com",
-            title=title,
-            timestamp=1700000000,
-            interactiveElements=[InteractiveElement(**e) for e in elements],
-            accessibilityTree=[],
-            detectedPII=[],
-            hasScreenshots=False,
+class TestParseLLMOutput:
+    """The current planner never RAISES on bad LLM output - it degrades to a
+    conservative fallback (issues #85/#68: success=True, degraded=True)."""
+
+    def test_parses_valid_click_action(self, planner):
+        res = planner.parse_llm_output(
+            '{"type": "CLICK", "targetId": 1}',
+            [make_element(1), make_element(2)],
         )
+        assert res.success
+        assert res.degraded is False
+        assert res.action.type == "CLICK"
+        assert res.action.targetId == 1
 
-    def test_clean_payload_passes(self):
-        payload = self._make_pydantic_payload([make_element(1)])
-        assert _check_payload_pii(payload) is None
+    def test_parses_valid_scroll_action(self, planner):
+        res = planner.parse_llm_output(
+            '{"type": "SCROLL", "scrollDirection": "down", "scrollAmount": 400}', [])
+        assert res.success
+        assert res.action.type == "SCROLL"
+        assert res.action.scrollDirection == "down"
 
-    def test_email_in_label_triggers_block(self):
-        el = make_element(1, label="user@example.com", role="textbox")
-        payload = self._make_pydantic_payload([el])
-        result = _check_payload_pii(payload)
-        assert result is not None
-        assert "element#1" in result
+    def test_parses_done_action(self, planner):
+        # Ported from the old test_parses_complete_action: COMPLETE is now DONE.
+        res = planner.parse_llm_output('{"type": "DONE"}', [])
+        assert res.success
+        assert res.action.type == "DONE"
+        assert res.confidence == 1.0
 
-    def test_password_fields_skipped(self):
-        # Password fields are allowed to have a label (it's the field name)
-        el = make_element(1, label="Password", is_password=True)
-        payload = self._make_pydantic_payload([el])
-        # Should not be blocked because isPassword=True
-        result = _check_payload_pii(payload)
-        assert result is None
+    def test_degrades_on_empty_response(self, planner):
+        res = planner.parse_llm_output("", [make_element(1)])
+        # No JSON -> fallback. Nothing task-referenced (no task text) -> WAIT,
+        # and every fallback is flagged degraded.
+        assert res.success
+        assert res.degraded is True
+        assert res.action.type == "WAIT"
 
-    def test_pii_in_title_triggers_block(self):
-        payload = self._make_pydantic_payload(
-            [make_element(1)],
-            title="Page for user@example.com"
+    def test_degrades_on_non_json_response(self, planner):
+        res = planner.parse_llm_output("I cannot determine the action", [make_element(1)])
+        assert res.degraded is True
+        assert res.action.type == "WAIT"
+
+    def test_degrades_on_invalid_action_type(self, planner):
+        res = planner.parse_llm_output('{"type": "HACK", "targetId": 1}', [make_element(1)])
+        assert res.degraded is True
+
+    def test_degrades_when_targetid_not_in_elements(self, planner):
+        res = planner.parse_llm_output(
+            '{"type": "CLICK", "targetId": 99}',
+            [make_element(1), make_element(2)],
         )
-        result = _check_payload_pii(payload)
-        assert result is not None
-        assert "title" in result
+        assert res.degraded is True
+        assert "not found" in (res.error or res.reasoning)
 
-
-# ─── validate_action ─────────────────────────────────────────────────────────
-
-class TestValidateAction:
-    def _elements(self, ids):
-        return [InteractiveElement(**make_element(i)) for i in ids]
-
-    def test_click_with_valid_target_passes(self):
-        action = AgentAction(type="CLICK", targetId=1)
-        error = validate_action(action, self._elements([1, 2, 3]))
-        assert error is None
-
-    def test_click_with_missing_target_fails(self):
-        action = AgentAction(type="CLICK", targetId=99)
-        error = validate_action(action, self._elements([1, 2]))
-        assert error is not None
-        assert "not found" in error
-
-    def test_click_without_targetId_fails(self):
-        action = AgentAction(type="CLICK")
-        error = validate_action(action, self._elements([1]))
-        assert error is not None
-        assert "targetId" in error
-
-    def test_type_with_valid_target_passes(self):
-        action = AgentAction(type="TYPE", targetId=1, text="hello")
-        error = validate_action(action, self._elements([1]))
-        assert error is None
-
-    def test_type_with_pii_text_fails(self):
-        action = AgentAction(type="TYPE", targetId=1, text="user@example.com")
-        error = validate_action(action, self._elements([1]))
-        assert error is not None
-        assert "PII" in error
-
-    def test_scroll_with_valid_direction_passes(self):
-        action = AgentAction(type="SCROLL", direction="down", amount=300)
-        error = validate_action(action, [])
-        assert error is None
-
-    def test_scroll_with_invalid_direction_fails(self):
-        action = AgentAction(type="SCROLL", direction="sideways", amount=100)
-        error = validate_action(action, [])
-        assert error is not None
-
-    def test_scroll_with_huge_amount_fails(self):
-        action = AgentAction(type="SCROLL", direction="down", amount=99999)
-        error = validate_action(action, [])
-        assert error is not None
-        assert "range" in error
-
-    def test_navigate_with_http_url_passes(self):
-        action = AgentAction(type="NAVIGATE", url="https://example.com")
-        error = validate_action(action, [])
-        assert error is None
-
-    def test_navigate_without_url_fails(self):
-        action = AgentAction(type="NAVIGATE")
-        error = validate_action(action, [])
-        assert error is not None
-
-    def test_complete_always_passes(self):
-        action = AgentAction(type="COMPLETE")
-        error = validate_action(action, [])
-        assert error is None
-
-
-# ─── heuristic_action ─────────────────────────────────────────────────────────
-
-class TestHeuristicAction:
-    def _make_request(self, elements):
-        payload = SanitizedPayload(
-            url="https://example.com",
-            title="Page",
-            timestamp=1700000000,
-            interactiveElements=[InteractiveElement(**e) for e in elements],
-            accessibilityTree=[],
-            detectedPII=[],
+    def test_resolves_numeric_string_targetid(self, planner):
+        # The model sometimes emits targetId as a string - it must resolve.
+        res = planner.parse_llm_output(
+            '{"type": "CLICK", "targetId": "2"}',
+            [make_element(1), make_element(2)],
         )
-        return PlanRequest(payload=payload)
+        assert res.success and res.degraded is False
+        assert res.action.targetId == 2
 
-    def test_returns_complete_when_no_elements(self):
-        req = self._make_request([])
-        action = heuristic_action(req)
-        assert action.type == "COMPLETE"
+    def test_resolves_stableid_targetid(self, planner):
+        els = [
+            make_element(1),
+            {"id": 2, "tag": "input", "role": "textbox", "label": "Search",
+             "name": "", "isPassword": False, "stableId": "searchInput"},
+        ]
+        res = planner.parse_llm_output('{"type": "CLICK", "targetId": "searchInput"}', els)
+        assert res.success
+        assert res.action.targetId == 2
 
-    def test_clicks_first_button(self):
-        req = self._make_request([make_element(1, role="button")])
-        action = heuristic_action(req)
-        assert action.type == "CLICK"
-        assert action.targetId == 1
-
-    def test_types_into_textbox_when_no_button(self):
-        req = self._make_request([make_element(1, role="textbox")])
-        action = heuristic_action(req)
-        assert action.type == "TYPE"
-        assert action.targetId == 1
-
-    def test_scrolls_when_only_link_available(self):
-        # Links should result in a CLICK
-        req = self._make_request([make_element(1, role="link")])
-        action = heuristic_action(req)
-        assert action.type == "CLICK"
-
-    def test_skips_password_buttons(self):
-        # isPassword=True buttons should not be blindly clicked
-        # The heuristic should look for non-password buttons
-        req = self._make_request([
-            make_element(1, role="button", is_password=True),
-            make_element(2, role="button", is_password=False),
-        ])
-        action = heuristic_action(req)
-        assert action.type == "CLICK"
-        # Should prefer element 2 (non-password)
-        assert action.targetId == 2
+    def test_wait_defaults_waitms(self, planner):
+        res = planner.parse_llm_output('{"type": "WAIT"}', [])
+        assert res.success
+        assert res.action.waitMs == 1000
 
 
-# ─── parse_and_validate_action ───────────────────────────────────────────────
+# ─── Conservative fallback (was heuristic_action) ────────────────────────────
 
-class TestParseAndValidateAction:
-    def _make_request(self, element_ids=(1, 2)):
-        payload = SanitizedPayload(
-            url="https://example.com",
-            title="Page",
-            timestamp=1700000000,
-            interactiveElements=[InteractiveElement(**make_element(i)) for i in element_ids],
-            accessibilityTree=[],
-            detectedPII=[],
-        )
-        return PlanRequest(payload=payload)
+class TestConservativeFallback:
+    """Issue #85: the fallback only ever touches fields the TASK references.
+    The old blind "click first button / type into first textbox" behaviour is
+    gone - so several old assertions are ported to their new (safer) form."""
 
-    def test_parses_valid_click_action(self):
-        req = self._make_request([1, 2])
-        action = parse_and_validate_action('{"type": "CLICK", "targetId": 1}', req)
-        assert action.type == "CLICK"
-        assert action.targetId == 1
+    def test_no_elements_yields_wait(self, planner):
+        res = planner._fallback_action([], "parse failed", task_description="do a thing")
+        assert res.success
+        assert res.action.type == "WAIT"
+        assert res.degraded is True
 
-    def test_parses_valid_scroll_action(self):
-        req = self._make_request()
-        action = parse_and_validate_action(
-            '{"type": "SCROLL", "direction": "down", "amount": 400}', req
-        )
-        assert action.type == "SCROLL"
-        assert action.direction == "down"
+    def test_types_task_value_into_task_referenced_field(self, planner):
+        els = [make_element(1, role="textbox", label="First Name",
+                           name="firstName", tag="input")]
+        res = planner._fallback_action(els, "parse failed",
+                                       task_description="First Name: Alice, Last Name: Bob")
+        assert res.action.type == "TYPE"
+        assert res.action.targetId == 1
+        assert res.action.value == "Alice"  # value comes from the task, not invented
 
-    def test_raises_on_empty_response(self):
-        req = self._make_request()
-        with pytest.raises(LLMParseError):
-            parse_and_validate_action("", req)
+    def test_search_task_types_into_search_box(self, planner):
+        els = [make_element(1, role="textbox", label="Search Wikipedia",
+                           name="searchInput", tag="input")]
+        res = planner._fallback_action(els, "llm error", task_description="search Web browser")
+        assert res.action.type == "TYPE"
+        assert res.action.targetId == 1
+        assert res.action.value == "search"  # first word of the task
 
-    def test_raises_on_non_json_response(self):
-        req = self._make_request()
-        with pytest.raises(LLMParseError):
-            parse_and_validate_action("I cannot determine the action", req)
+    def test_prefers_non_password_button_on_task_keyword(self, planner):
+        # Ported from old test_skips_password_buttons: isPassword elements are
+        # skipped in every fallback pass; the non-password twin is clicked.
+        els = [
+            make_element(1, role="button", label="Submit", is_password=True),
+            make_element(2, role="button", label="Submit", is_password=False),
+        ]
+        res = planner._fallback_action(els, "llm error", task_description="submit the form")
+        assert res.action.type == "CLICK"
+        assert res.action.targetId == 2
 
-    def test_raises_on_invalid_action_type(self):
-        req = self._make_request()
-        with pytest.raises(ActionValidationError):
-            parse_and_validate_action('{"type": "HACK", "targetId": 1}', req)
+    def test_clicks_task_keyword_button(self, planner):
+        # Ported from old test_clicks_first_button: still CLICKs a button, but
+        # only because label/task match a keyword - never the blind first one.
+        els = [make_element(5, role="button", label="Search")]
+        res = planner._fallback_action(els, "llm error", task_description="search for Web browser")
+        assert res.action.type == "CLICK"
+        assert res.action.targetId == 5
 
-    def test_raises_when_targetid_not_in_elements(self):
-        req = self._make_request([1, 2])
-        with pytest.raises(ActionValidationError) as exc_info:
-            parse_and_validate_action('{"type": "CLICK", "targetId": 99}', req)
-        assert "not found" in str(exc_info.value)
+    def test_unreferenced_textbox_no_longer_blindly_typed(self, planner):
+        # Ported from old test_types_into_textbox_when_no_button: the #85 fix
+        # removed "type Test Data into the first live input". A textbox the
+        # task does NOT reference now degrades to WAIT.
+        els = [make_element(1, role="textbox", label="Comment", tag="input")]
+        res = planner._fallback_action(els, "llm error", task_description="some unrelated task")
+        assert res.action.type == "WAIT"
+        assert res.degraded is True
 
-    def test_parses_complete_action(self):
-        req = self._make_request()
-        action = parse_and_validate_action('{"type": "COMPLETE"}', req)
-        assert action.type == "COMPLETE"
+    def test_search_task_clicks_collapsed_search_toggle(self, planner):
+        # Ported from old test_scrolls_when_only_link_available: on a search
+        # task with no visible textbox, a visible "Search"-labelled link is
+        # clicked (pass 3b) instead of a blind scroll.
+        els = [make_element(1, role="link", label="Search", tag="a")]
+        els[0]["width"] = 44  # fallback gate checks top-level width >= 2
+        res = planner._fallback_action(els, "llm error", task_description="search Web browser")
+        assert res.action.type == "CLICK"
+        assert res.action.targetId == 1
 
 
-# ─── /plan endpoint ───────────────────────────────────────────────────────────
+# ─── Checklist normalization (parse_llm_output side-output) ───────────────────
+
+class TestChecklistNormalization:
+    def test_list_of_strings(self, planner):
+        res = planner.parse_llm_output(
+            '{"type": "DONE", "checklist": ["fill form", "submit form"]}', [])
+        assert [c.description for c in res.checklist] == ["fill form", "submit form"]
+        assert all(c.done is False for c in res.checklist)
+
+    def test_dict_variant_with_label_and_completed(self, planner):
+        res = planner.parse_llm_output(
+            '{"type": "DONE", "checklist": [{"label": "open page", "completed": true}]}', [])
+        assert res.checklist[0].description == "open page"
+        assert res.checklist[0].done is True
+
+    def test_non_list_degrades_to_empty(self, planner):
+        res = planner.parse_llm_output('{"type": "DONE", "checklist": "oops"}', [])
+        assert res.checklist == []
+
+
+# ─── /plan endpoint (current flat payload - no nested `payload` key) ──────────
+
+def make_request(elements: list | None = None, task: str = "Test task",
+                 url: str = "https://example.com") -> dict:
+    return {
+        "url": url,
+        "title": "Test Page",
+        "task": task,
+        "task_description": task,
+        "interactiveElements": elements if elements is not None else [make_element(1)],
+    }
+
 
 class TestPlanEndpoint:
     def test_returns_action_for_valid_request(self, client):
-        r = client.post("/plan", json=make_request([make_element(1)]))
+        r = client.post("/plan", json=make_request())
         assert r.status_code == 200
         data = r.json()
         assert "action" in data
         assert "session_id" in data
-
-    def test_blocked_when_payload_has_pii(self, client):
-        el = make_element(1, label="user@example.com", role="textbox")
-        req = make_request([el])
-        r = client.post("/plan", json=req)
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is False
-        assert "PII" in data.get("message", "") or "block" in data.get("message", "").lower()
+        assert data["success"] is True
 
     def test_returns_valid_action_structure(self, client):
-        r = client.post("/plan", json=make_request())
-        data = r.json()
+        data = client.post("/plan", json=make_request()).json()
         if data.get("action"):
-            action = data["action"]
-            assert "type" in action
-            assert action["type"] in [
-                "CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "COMPLETE"
+            assert "type" in data["action"]
+            assert data["action"]["type"] in [
+                "CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "KEY", "DONE"
             ]
 
-    def test_rejects_non_http_url(self, client):
-        req = make_request(url="javascript:alert(1)")
-        r = client.post("/plan", json=req)
-        # Should fail Pydantic validation → 422
-        assert r.status_code == 422
-
-    def test_empty_elements_returns_complete_or_scroll(self, client):
-        req = make_request(elements=[])
-        r = client.post("/plan", json=req)
+    def test_empty_elements_still_returns_action(self, client):
+        # The mock LLM answers DONE; the endpoint must not 500 on an empty page.
+        r = client.post("/plan", json=make_request(elements=[]))
         assert r.status_code == 200
-        data = r.json()
-        if data.get("action"):
-            assert data["action"]["type"] in ("COMPLETE", "SCROLL")
+        assert r.json()["success"] is True
 
-
-# ─── /audit endpoint ──────────────────────────────────────────────────────────
-
-class TestAuditEndpoint:
-    def test_audit_log_accessible(self, client):
-        r = client.get("/audit")
+    def test_javascript_url_not_rejected_server_side(self, client):
+        # Ported from old test_rejects_non_http_url (422): the server no longer
+        # validates URL schemes - scheme safety is enforced client-side
+        # (planner prompt + executor). The endpoint must still behave.
+        r = client.post("/plan", json=make_request(url="javascript:alert(1)"))
         assert r.status_code == 200
-        data = r.json()
-        assert "events" in data
-        assert "total" in data
-
-    def test_audit_log_populated_after_blocked_request(self, client):
-        el = make_element(1, label="user@example.com", role="textbox")
-        client.post("/plan", json=make_request([el]))
-        r = client.get("/audit")
-        data = r.json()
-        assert data["total"] > 0
-        # The audit event should be a BLOCKED type
-        events = data["events"]
-        assert any(e.get("event") == "BLOCKED" for e in events)
-
-    def test_audit_log_contains_no_raw_pii(self, client):
-        el = make_element(1, label="user@example.com", role="textbox")
-        client.post("/plan", json=make_request([el]))
-        r = client.get("/audit")
-        # The raw email must not appear in the audit log
-        assert "user@example.com" not in r.text
+        assert "action" in r.json()
 
 
-# ─── AgentAction validation ───────────────────────────────────────────────────
-
-class TestAgentActionSchema:
-    def test_valid_action_types_accepted(self):
-        for action_type in ["CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "COMPLETE"]:
-            a = AgentAction(type=action_type)
-            assert a.type == action_type
-
-    def test_invalid_action_type_raises(self):
-        with pytest.raises(Exception):
-            AgentAction(type="INVALID_TYPE")
-
-    def test_navigate_with_javascript_url_raises(self):
-        with pytest.raises(Exception):
-            AgentAction(type="NAVIGATE", url="javascript:void(0)")
-
-    def test_navigate_with_https_url_accepted(self):
-        a = AgentAction(type="NAVIGATE", url="https://example.com")
-        assert a.url == "https://example.com"
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-v"]))

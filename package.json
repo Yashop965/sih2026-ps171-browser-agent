@@ -16,6 +16,7 @@
     "test:e2e:headed": "playwright test --headed",
     "test:watch": "vitest",
     "server:install": "pip install -r server/requirements.txt",
+    "test:server": "python -m venv server/.venv && server/.venv/Scripts/python -m pip install -q -r server/requirements.txt && server/.venv/Scripts/python -m pytest tests/ -q",
     "ollama:pull": "ollama pull qwen2.5:1.5b && ollama pull Florence-2-base-ft"
   },
   "dependencies": {
