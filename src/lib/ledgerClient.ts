@@ -200,7 +200,7 @@ async function sha256Hex(input: string): Promise<string> {
  * the export itself must not carry any.
  */
 function scrub(entry: PrivacyLogEntry) {
-    let url: string | null = null;
+    let url: string | null;
     try {
         const u = new URL(entry.url);
         // Query strings routinely carry PII. Origin and path are enough to

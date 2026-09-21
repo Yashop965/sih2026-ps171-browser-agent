@@ -279,7 +279,7 @@ export default defineContentScript({
          * a page element. pointer-events: none keeps it from swallowing clicks.
          */
         function highlight(selector: string): { ok: boolean; error?: string } {
-            let el: Element | null = null;
+            let el: Element | null;
             try {
                 el = document.querySelector(selector);
             } catch {

@@ -16,6 +16,11 @@
     "test:e2e:headed": "playwright test --headed",
     "test:watch": "vitest",
     "server:install": "pip install -r server/requirements.txt",
+    "test:server": "python -m venv server/.venv && server/.venv/Scripts/python -m pip install -q -r server/requirements.txt && server/.venv/Scripts/python -m pytest tests/ -q",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
     "ollama:pull": "ollama pull qwen2.5:1.5b && ollama pull Florence-2-base-ft"
   },
   "dependencies": {
@@ -27,6 +32,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/chrome": "^0.0.287",
     "@types/node": "^22.0.0",
@@ -36,10 +42,16 @@
     "@wxt-dev/module-react": "^1.2.0",
     "autoprefixer": "^10.4.0",
     "concurrently": "^9.1.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "globals": "^17.12.0",
     "jsdom": "^25.0.1",
     "postcss": "^8.4.0",
+    "prettier": "^3.9.8",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.70.0",
     "vitest": "^4.1.11",
     "wxt": "^0.19.0"
   }
