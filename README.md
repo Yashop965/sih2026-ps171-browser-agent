@@ -5,15 +5,16 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-![vitest: 417/417](https://img.shields.io/badge/vitest-417%2F417%20passing-22c55e?style=for-the-badge)
+![vitest: 421/421](https://img.shields.io/badge/vitest-421%2F421%20passing-22c55e?style=for-the-badge)
 ![pytest: 74/74](https://img.shields.io/badge/pytest-74%2F74%20passing-22c55e?style=for-the-badge)
-![build: 1.31 MB](https://img.shields.io/badge/build-1.31%20MB%20chrome-mv3-6366f1?style=for-the-badge)
+![build: 1.33 MB](https://img.shields.io/badge/build-1.33%20MB%20chrome-mv3-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-22):** `main` clean · **417/417** vitest + **74/74**
-> pytest passing · Chrome MV3 build **1.31 MB** · 0 PII off-device · planner-authored task
-> checklist as cross-page memory · loop-guard planner signal · GSAP agent cursor · 3-hop
-> live E2E passing end-to-end. Repo:
+> **Current state (verified 2026-09-22):** `main` clean · **421/421** vitest + **74/74**
+> pytest passing · Chrome MV3 build **1.33 MB** · 0 PII off-device · Notion-style
+> agent cursor v3 (presence badge + sonar ping) · task-history cache · live VLM
+> indicator · planner on a zero-reasoning fast model · 3-hop live E2E passing
+> end-to-end. Repo:
 > [`github.com/Yashop965/sih2026-ps171-browser-agent`](https://github.com/Yashop965/sih2026-ps171-browser-agent).
 
 ---
@@ -68,7 +69,11 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 - **Autonomy (#84/#85/#86):** goal-driven multi-page execution — `NAVIGATE` via background `NAVIGATE_TAB`, `WAIT` primitive, `KEY` primitive (press Enter/Tab/arrows so a search actually submits), and robust web-tab resolution so the agent never targets its own extension page.
 - **Cross-page memory (#99):** the planner is stateless across pages, so after each navigation it used to re-reason from scratch and re-do completed steps. Fix: the planner authors a small ordered **task checklist** of sub-goals; the runner tracks it (`mergeChecklist`, sticky-`done`), feeds it back to `/plan` each step, and **gates DONE** on it (3-strike cap → best-effort degraded).
 - **Planner loop-guard (#130):** the runner detects repeated no-op actions and feeds a PII-safe `loopWarning` back into the planner prompt (with NPTEL-style Rule 20: a submit is proven by a *distinctive page change*). Kills the "re-typing the same value forever" loop seen in live runs.
-- **GSAP agent cursor (#130):** the visible agent cursor is now production-grade — distance-scaled transform-only travel, mid-glide retarget (`overwrite`), sequenced arrival pulse + click-ripple, **shadow-DOM isolation** so hostile page CSS can't hide it, reduced-motion fallback.
+- **Agent cursor v3 (#137):** the visible agent cursor is a Notion-style make-over — a clean rounded dark arrow with a concentric **presence badge** (ring + center dot) at the hotspot and a soft rounded **target halo**; while the planner thinks the badge dot heartbeats and a **sonar ring** pings out of the tip, so the agent reads as "alive". Transform-only glide (never teleports), shadow-DOM + `all:initial` isolation so hostile page CSS can't hide it.
+- **Task history (#134):** the popup caches recent prompts (`sih_recent_tasks`, cap 8, deduped) with one-click re-run and outcome-tinted status rails — the last task is persisted and reusable across popup opens.
+- **Live VLM indicator (#136):** a compact popup pill shows the on-device vision pipeline state (ready / loading / idle / unavailable) plus the last OCR outcome, polled from the active tab. Pure status — no pixels or PII leave the device.
+- **Fast planner model (#133):** the planner runs on a zero-reasoning model that answers in ~3 s instead of the CoT default's ~5 s per step (~4× faster live, no degraded calls). Both options are documented in `server/.env.example` with measured timings.
+- **Lower-section modernization (#135):** the PII heatmap tab renders the real card component (the dead inline dot-grid is gone), and a "quiet" toggle hides low-confidence unverified detections so the ledger reads "what matters."
 - **PII criticals closed (#130):** audit C1–C3 fixed — logs never record resolved profile values, 13–19-digit cards are blocked at the last-line firewall (was 16-digit-only), and non-card PII detections store a fully `[REDACTED]` sentinel instead of a 4-character prefix.
 - **Port retry (#105):** a navigating click drops the content port; the very next `EXTRACT` hit "Receiving end does not exist" and crashed the run. `src/lib/portRetry.ts` (`withPortRetry`) retries the transient case and fails fast on genuine errors.
 - **Live CDP/id discovery (#98):** `scripts/run_autonomy_live.mjs` discovers the live extension id from all `chrome-extension://` CDP targets (the old hardcoded id 404'd on a spun-down service worker). `scripts/run_autonomy_3hop.mjs` is the current live benchmark driver (3-hop Wikipedia task).
@@ -92,18 +97,19 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 | Metric | Value | Since |
 |---|---|---|
-| **Vitest unit tests** | **417 / 417 passing** · 34 files | PR #130 |
+| **Vitest unit tests** | **421 / 421 passing** · 34 files | PR #137 |
 | **Python server tests** | **74 / 74 passing** · 9 files | PR #127 |
-| **Chrome MV3 build** | **1.31 MB** (Firefox MV2 same tree) | PR #130 |
+| **Chrome MV3 build** | **1.33 MB** (Firefox MV2 same tree) | PR #137 |
 | **PII off-device leaks** | **0** (raw PII never leaves the machine; last-line firewall on egress) | audit C1–C3 |
-| **Live 3-hop E2E** | **Wikipedia ×3, 6/6 checklist, DONE** (run 2026-09-22, backstop-verified) | this session |
-| **Repo** | **233 commits · 60 PRs · 44 issues closed** | today |
-| **Codebase** | **~12 k LOC** client TS + **~2.3 k LOC** server Python | today |
+| **Live 3-hop E2E** | **Wikipedia ×3, 6/6 checklist, DONE** on the fast planner model (~7 s/step) | PR #133 |
+| **Planner model** | **zero-reasoning `agnes-3.0-flash`** — ~4× faster than the CoT default, no degraded calls | PR #133 |
+| **Repo** | **235 commits · 62 PRs · 66 issues closed** | today |
+| **Codebase** | **~12.4 k LOC** client TS + **~6.8 k LOC** server Python | today |
 
 <details>
-<summary>📈 Test coverage by module (417 tests, top 15 + rest) — click to expand</summary>
+<summary>📈 Test coverage by module (421 tests, top 15 + rest) — click to expand</summary>
 
-![Unit test coverage by module (417 passing, 34 files)](media/charts/tests-by-module.svg)
+![Unit test coverage by module (421 passing, 34 files)](media/charts/tests-by-module.svg)
 
 </details>
 
@@ -120,10 +126,15 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 | Change | Effect |
 |---|---|
+| **Cursor v3 make-over (#137)** | Notion-style agent cursor: clean rounded dark arrow + concentric presence badge (ring + center dot) at the hotspot + soft rounded target halo; heartbeat dot + expanding sonar ping while the planner thinks. Transform-only glide, shadow-DOM + `all:initial` isolation |
+| **Task history (#134)** | Popup persists a `sih_recent_tasks` list (cap 8, deduped, one-click re-run, status-tinted rails, relative timestamps, Clear) — the last prompt is cached and reused |
+| **Live VLM indicator (#136)** | `VlmIndicator` polls the active tab's on-device vision pipeline via a new `VISION_STATUS` message; compact status pill (ready / loading / idle / unavailable + last-OCR outcome). Pure state — no pixels, no PII leave the device |
+| **Lower-section modernization (#135)** | Heatmap tab renders the real card `Heatmap` component (removed the dead inline dot-grid); a "quiet" de-noise toggle hides unverified PII matches below 70% confidence |
+| **Fast planner model (#133)** | Planner switched to zero-reasoning `agnes-3.0-flash` (~2.9 s/step vs 5.3 s on the CoT default; ~4× faster live). Both options + timing evidence documented in `server/.env.example`; the live 3-hop E2E now runs at ~7 s/step |
 | **PII criticals C1–C3** fixed | Log no longer records resolved profile values · 13–19-digit cards firewall-blocked (was 16-only) · non-card PII detections now store `[REDACTED]`, not a 4-char prefix |
 | **Planner loop-guard** | Runner feeds a PII-safe `loopWarning` back to `/plan` when the same no-op action repeats; planner Rule 20: a submit is proven by a *distinctive page change*, not "I pressed Enter" (NPTEL report pattern) |
 | **LLM reasoning-model fixes** | `reasoning_content` fallback when `content` is empty + 30 s → 90 s per-request timeout — the "planner degraded" mid-run stalls are gone |
-| **GSAP agent cursor** | Distance-scaled transform-only travel, mid-glide retarget, arrival-pulse + click-ripple, shadow-DOM isolation so hostile page CSS can't hide it, reduced-motion fallback |
+| **GSAP agent cursor (v1–v2)** | Distance-scaled transform-only travel, mid-glide retarget, arrival-pulse + click-ripple, shadow-DOM isolation so hostile page CSS can't hide it, reduced-motion fallback (v3 above builds on this) |
 | **Tolerant `<select>` matching** | Normalized/unique-substring option matching (`matchSelectOption`) — stops the "no option matching" re-typing loop and closes audit M3 |
 | **`<all_urls>` host permission** | Unblocks `captureVisibleTab` for the on-device VLM path (#113 model load proven; live extension loop is the remaining piece) |
 | **Codebase audit + module reference** | `docs/audit/01-src-lib.md` (25 findings) · `docs/audit/02-server-and-entrypoints.md` (24 findings + API) · `docs/research/mouse-animation-libraries.md` (9-lib comparison) |
@@ -460,18 +471,26 @@ privacy-first extension. Post-deadline hardening shipped in two waves:
 - **Sep 10–17:** PII false-positive reduction (722 → ~15), heatmap redesign, live
   multi-page autonomy (#84/#85/#86), planner task-checklist cross-page memory
   (#99), port-retry (#105).
-- **Sep 19–22:** jev-ultrafast pattern port (PRs #124/#125 — occlusion check,
+- **Sep 19–22 (hardening wave 1):** jev-ultrafast pattern port (PRs #124/#125 — occlusion check,
   aria-hidden/inert filter, event-aware settle, freshness guard, extract cap,
   value gate), live-validation fixes (planner truncation, stableId resolution,
   form-submit, per-page memory, 0-element stall safety), on-device VLM
   verification (#113 model load proven), codebase audit, GSAP cursor, PII
   criticals C1–C3, and the planner loop-guard (PR #130) — verified by a clean
   3-hop live E2E.
+- **Sep 19–22 (UI/UX make-over wave, PR #137):** Notion-style **agent cursor v3**
+  (#137 — presence badge + sonar ping), **task history** (#134 — cached prompts,
+  one-click re-run), **live VLM indicator** (#136), **lower-section modernization**
+  (#135 — card heatmap + "quiet" PII de-noise), and the **fast planner model**
+  (#133 — zero-reasoning, ~4× faster live). Shipped as one squash-merged PR with
+  all suites green (421/421 vitest · 74/74 pytest · 1.33 MB build).
 
 Open feature issues **#100–#104 / #113 / #115** (local vision stop, agent-cursor
 overlay hardening, local user-profile, heatmap visual polish, on-device VLM live
 loop, VLM fallback extractor) are scoped; most cursor/VLM pieces now have a
-proven standalone path.
+proven standalone path. The on-device VLM *live end-to-end* loop (#113) is the
+one remaining open item — the model loads on-device and the new `VlmIndicator`
+(#136) surfaces its state, but the full OCR-confirmed run still needs a live pass.
 
 ---
 
