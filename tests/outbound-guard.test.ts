@@ -125,4 +125,62 @@ describe('guardOutboundPlan', () => {
     expect(label).toContain('[REDACTED]');
     expect(label).not.toContain('4111111111111111');
   });
+
+  // ── C2: non-16-digit cards must not pass the last line of defence ──────────
+  // The old redactor + firewall hard-coded the 4-4-4-4 16-digit form, so a
+  // Luhn-valid 15-digit Amex / 13-digit Visa card slipped through both layers
+  // and a raw one in payload.history was POSTed to /plan. The widened 13-19
+  // card regex (Luhn-gated) must redact it at the element layer AND block it
+  // when it reaches the body un-redacted (the history path).
+
+  it('C2: redacts a 15-digit Luhn-valid card in an element label (13-19 range)', () => {
+    const elements = [
+      { id: 1, tag: 'input', role: 'textbox', label: 'card 378282246310005', name: 'cc', isPassword: false },
+    ];
+    const result = guardOutboundPlan({ task: cleanTask, elements });
+    // Redacted in place at the element layer, so the body is clean and not
+    // blocked - but the raw 15-digit card must be gone from the label.
+    expect(result.blocked).toBe(false);
+    const label = (result.payload.elements as any[])[0].label;
+    expect(label).toContain('[REDACTED]');
+    expect(label).not.toContain('378282246310005');
+  });
+
+  it('C2: BLOCKS a 15-digit Luhn-valid card smuggled into payload.history', () => {
+    // history is not element-layer redacted (it carries ids + result strings),
+    // so the widened firewall regex is the last line of defence. A Luhn-valid
+    // 15-digit card in a history error string must be blocked, not POSTed.
+    const result = guardOutboundPlan({
+      task: cleanTask,
+      elements: cleanElements,
+      history: [{ targetId: 5, result: 'FAILED', error: 'no card match 378282246310005' }],
+    });
+    expect(result.blocked).toBe(true);
+    expect(result.category).toBe('CREDIT_CARD');
+  });
+
+  it('C2: also catches 13-digit and 19-digit Luhn-valid cards in history', () => {
+    const c13 = guardOutboundPlan({
+      task: cleanTask, elements: cleanElements,
+      history: [{ targetId: 1, result: 'FAILED', error: '4222222222222' }],
+    });
+    expect(c13.blocked).toBe(true);
+    expect(c13.category).toBe('CREDIT_CARD');
+    const c19 = guardOutboundPlan({
+      task: cleanTask, elements: cleanElements,
+      history: [{ targetId: 1, result: 'FAILED', error: '6200000000000000000' }],
+    });
+    expect(c19.blocked).toBe(true);
+    expect(c19.category).toBe('CREDIT_CARD');
+  });
+
+  it('C2: does NOT block a non-Luhn 13-digit run (no false block on wide regex)', () => {
+    // Widening to 13-19 digits must not create a new false positive: a 13-digit
+    // number that fails Luhn (4444333322221) is not a card and must pass.
+    const result = guardOutboundPlan({
+      task: cleanTask, elements: cleanElements,
+      history: [{ targetId: 1, result: 'FAILED', error: 'ref 4444333322221' }],
+    });
+    expect(result.blocked).toBe(false);
+  });
 });

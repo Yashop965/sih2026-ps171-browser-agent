@@ -83,17 +83,34 @@ class CustomEndpointClient(BaseLLMClient):
         
         def _post(client: httpx.AsyncClient) -> "httpx.Response":
             return client.post(url, headers=headers, json=payload)
-        
+
         # LLMRateLimitError (all retries exhausted on 429/5xx) propagates to
         # the planner, which degrades with a real reason instead of the
         # destructive "type Test Data into the first input" fallback.
+        #
+        # Reasoning models (agnes-2.5-flash and peers) can spend 60-90s on
+        # chain-of-thought for a big planner prompt; the old 30s per-request
+        # timeout tripped a ReadTimeout mid-CoT, all 4 retries aborted, and
+        # the planner degraded. 90s default, env-tunable.
+        timeout = float(os.getenv("SIH_LLM_REQUEST_TIMEOUT", "90.0"))
         response = await with_retry(
-            _post, attempts=4, name=f"custom_endpoint/{self.model}", timeout=30.0
+            _post, attempts=4, name=f"custom_endpoint/{self.model}", timeout=timeout
         )
         response.raise_for_status()
-        
+
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        msg = data["choices"][0]["message"]
+        # Reasoning-model contract: `content` is the final answer,
+        # `reasoning_content` is the chain-of-thought. When the CoT eats the
+        # whole token budget `content` can come back EMPTY (finish_reason
+        # "length", text_tokens=0). Fall back to the reasoning text: it
+        # usually contains the JSON the planner wants, and even when it
+        # doesn't, the extractor gets something real instead of "" (the
+        # "Failed to extract JSON from LLM output: " empty-string case).
+        content = (msg.get("content") or "").strip()
+        if not content:
+            content = (msg.get("reasoning_content") or "").strip()
+        return content
     
     async def health_check(self) -> Dict[str, Any]:
         """Check if custom endpoint is reachable."""

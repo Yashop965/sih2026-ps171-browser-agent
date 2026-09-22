@@ -132,6 +132,7 @@ class ActionPlanner:
         history: Optional[List[Dict[str, Any]]] = None,
         context: Optional[Dict[str, Any]] = None,
         checklist: Optional[List[Dict[str, Any]]] = None,
+        loop_warning: Optional[str] = None,
     ) -> str:
         """
         Builds a structured prompt for the LLM based on sanitized page metadata.
@@ -139,6 +140,11 @@ class ActionPlanner:
         ``checklist`` is the runner's cross-page task memory (an ordered list of
         sub-goals with a ``done`` flag). It is echoed into the prompt so the LLM
         remembers what it already finished and does not re-do completed steps.
+
+        ``loop_warning`` (NPTEL "post-verify" signal) is a PII-safe alert from
+        the runner that the model is re-issuing the same no-op action with no
+        page change. Rendered as a prominent block so the model breaks the loop
+        (e.g. submit a filled search box instead of re-typing it).
         """
         # Parse task description into key-value pairs (shared with the
         # conservative fallback in _fallback_action - issue #85).
@@ -249,6 +255,8 @@ RECENT ACTION HISTORY (results so far — OK = filled, FAILED = not yet done, re
 TASK CHECKLIST (your running "what's done / what's left" memory across pages — DO NOT re-do completed items):
 {checklist_str}
 
+{"LOOP WARNING: " + loop_warning if loop_warning else ""}
+
 AVAILABLE INTERACTIVE ELEMENTS (NOT yet filled):
 {json.dumps(available_elements, indent=2)}
 
@@ -278,6 +286,7 @@ Use your full action vocabulary to act on whatever page you land on:
 17. CAP TABLE AWARENESS: the element table above is capped for context size. PAGE GEOMETRY reports omittedElements = how many more interactive controls exist on this page but were NOT sent to you (0 = complete). If omittedElements > 0 and the field/control you need is not in the list, DO NOT guess an id and DO NOT signal DONE on a capped table: issue SCROLL down (or re-plan) so the next extraction reveals the remaining controls, and re-check. A "not found in the table" on a capped page is "not visible yet", not "does not exist".
 18. COLLAPSED SEARCH BOX: if the task needs a search box but there is NO visible text input (the extractor reports 0 inputs), the site likely keeps its search field collapsed behind a visible "Search" toggle/link/button. Do NOT WAIT or SCROLL looking for a box - instead CLICK the visible element whose label is "Search" (or contains "search") to expand it, then TYPE the query and press Enter. On Wikipedia specifically, article pages collapse the header search to a small "Search" link; clicking it reveals the input. A page title/URL already containing the target does NOT need a search - apply rule 15 instead.
 19. EMPTY-LOOKING PAGE AFTER NAVIGATION: if the element table has 0-2 elements and the previous step was a NAVIGATE or CLICK that changed the page, the page is likely still rendering. Issue WAIT (~1000ms) instead of DONE or re-typing the last query, then re-check. The runner re-extracts automatically - it will recover the elements on the next step.
+20. SUBMIT A FILLED SEARCH / FORM, THEN VERIFY THE PAGE CHANGED: if your last action was TYPE into a search box or form field and you have NOT yet submitted it, your NEXT action MUST be the submit - press KEY "Enter" (or CLICK the form's Search/Go button), do NOT re-type the same value. Typing fills the field but does NOT advance the task. A search/submit is proven COMPLETE only by a DISTINCTIVE page-state change - the URL/title moving to the target article or a results page (e.g. "…/wiki/World_Wide_Web"), not by "I pressed Enter." If the history shows the same target re-typed with the page still on the same URL, STOP re-typing and issue the submit control a different way (press Enter on the focused field, or click the visible submit button). Repeated no-op fills on one element mean the SUBMIT is what's missing, not the fill.
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -820,6 +829,7 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
         history: Optional[List[Dict[str, Any]]] = None,
         context: Optional[Dict[str, Any]] = None,
         checklist: Optional[List[Dict[str, Any]]] = None,
+        loop_warning: Optional[str] = None,
     ) -> PlannerResult:
         """
         Main entry point for generating an action plan.

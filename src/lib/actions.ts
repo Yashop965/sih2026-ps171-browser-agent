@@ -8,7 +8,7 @@ import {
     getGuardForStableId,
     verifyElementFreshness,
 } from './dom';
-import { showCursor, hideCursor, type CursorActionKind } from './agentCursor';
+import { showCursor, hideCursor, pulseCursor, type CursorActionKind } from './agentCursor';
 
 export interface Action {
     type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'KEY' | 'DONE';
@@ -258,19 +258,60 @@ function doSelect(action: Action) {
 
     scrollIntoView(el);
 
-    const wanted = (action.value ?? '').toLowerCase().trim();
-    const match = Array.from(el.options).find(
-        (o) =>
-            o.value.toLowerCase() === wanted ||
-            o.text.toLowerCase().trim() === wanted
-    );
-
+    const match = matchSelectOption(el, action.value ?? '');
     if (!match) {
-        throw new Error(`no option matching "${action.value}"`);
+        // PII-safe: this string flows into failedErrors -> plan history -> /plan,
+        // so it must NEVER echo the (possibly PII) requested value (audit M3).
+        throw new Error(`no option matching the requested value at element #${action.targetId}`);
     }
 
     el.value = match.value;
     el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// NPTEL-style tolerant option matching. The planner phrases a target loosely
+// (case drift, punctuation, a short unique fragment like "Place (Desha)"), so
+// exact-only matching threw and the agent re-typed the same value in a loop.
+// Normalise both sides (lowercase + collapse all punctuation/whitespace to a
+// single space, unicode-safe) and match exact -> unique-fragment, preferring
+// the most specific (shortest label) option when several contain the fragment.
+// Exported so it is jsdom-testable with no live element registry.
+export function matchSelectOption(
+    el: HTMLSelectElement,
+    value: string,
+): HTMLOptionElement | undefined {
+    // Punctuation + whitespace -> single space so "Time / Kala", "TIME/KALA"
+    // and "Time Kala" all compare equal; \p{L}/\p{N} keep unicode letters
+    // (e.g. "Vāṅmayī").
+    const norm = (s: string) =>
+        s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const wanted = norm(value);
+    if (wanted === '') return undefined;
+    const options = Array.from(el.options);
+
+    // 1) Exact normalized match (option value or label) - the strongest, most
+    //    specific signal. A lone "World" here never shadows "World Wide Web".
+    const exact = options.find((o) => norm(o.value) === wanted || norm(o.text) === wanted);
+    if (exact) return exact;
+
+    // 2) Fragment match: an option label/value contains the request, or a
+    //    short option label (>=3 chars, to skip trivial "in"/"a" labels) is a
+    //    substring of the request. Pick the shortest (most specific) so a
+    //    contained word wins over a longer one.
+    if (wanted.length >= 2) {
+        const cands = options
+            .filter((o) => {
+                const t = norm(o.text);
+                const v = norm(o.value);
+                const textHit =
+                    t !== '' && (t.includes(wanted) || (t.length >= 3 && wanted.includes(t)));
+                const valHit = v.length >= 2 && (v.includes(wanted) || wanted.includes(v));
+                return textHit || valHit;
+            })
+            .sort((a, b) => a.text.length - b.text.length);
+        if (cands.length) return cands[0];
+    }
+    return undefined;
 }
 
 function doScroll(action: Action) {
@@ -563,6 +604,18 @@ export async function execute(action: Action): Promise<ActionResult> {
 
     try {
         await Promise.race([run(), timeout]);
+        // #101 follow-up: the action LANDED - fire the click-ripple + settle
+        // pulse at the target (the overlay was presented up front). Only the
+        // target-bearing kinds get it; SCROLL/WAIT/DONE/NAVIGATE have no
+        // target (NAVIGATE already tore the cursor down).
+        if (
+            action.type === 'CLICK' ||
+            action.type === 'TYPE' ||
+            action.type === 'SELECT' ||
+            action.type === 'KEY'
+        ) {
+            pulseCursor();
+        }
         return { ok: true, action, durationMs: performance.now() - started };
     } catch (err) {
         const error = err instanceof Error ? err.message : String(err);

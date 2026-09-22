@@ -229,7 +229,7 @@ export class PIIManager {
         for (const match of matches) {
           const detection: PIIDetection = {
             type: piiType,
-            value: piiType === 'CREDIT_CARD' ? this.maskCard(match) : match.slice(0, 4) + '***',
+            value: this.redactValue(piiType, match),
             selector: this.getElementSelector(element),
             confidence: baseConfidence,
             isVerified: false,
@@ -272,7 +272,7 @@ export class PIIManager {
       if (match) {
         const detection: PIIDetection = {
           type: piiType,
-          value: piiType === 'CREDIT_CARD' ? this.maskCard(value) : value.slice(0, 4) + '***',
+          value: this.redactValue(piiType, value),
           selector: this.getElementSelector(element),
           confidence,
           isVerified: false,
@@ -376,6 +376,23 @@ export class PIIManager {
   private maskCard(card: string): string {
     const digits = card.replace(/[\s-]/g, '');
     return `${digits.slice(0, 4)} **** **** ${digits.slice(-4)}`;
+  }
+
+  /**
+   * C3: build the stored `value` for a detection. Card numbers keep the
+   * module's accepted first4/last4 display mask. Every OTHER PII type stores
+   * a fully redacted sentinel - the old `raw.slice(0, 4) + '***'` leaked the
+   * first four *real* characters of an Aadhaar/phone/PAN into any consumer
+   * of getDetections() / the capturePage detectedPII snapshot, defeating the
+   * "no raw PII in the audit trail" guarantee. Verification is unaffected:
+   * verifyPII() runs on the raw value captured at detection time, and the
+   * #104 dedupe keys on metadata.el, never on value.
+   */
+  private redactValue(piiType: PIIType, raw: string): string {
+    if (piiType === 'CREDIT_CARD' || piiType === 'DEBIT_CARD') {
+      return this.maskCard(raw);
+    }
+    return '[REDACTED]';
   }
 
   private isLikelyPassword(value: string): boolean {

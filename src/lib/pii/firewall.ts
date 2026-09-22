@@ -61,10 +61,15 @@ const FIREWALL_PATTERNS: FirewallPattern[] = [
     highPrecision: false,
     validator: validatePAN,
   },
-  // Credit/debit card: block when Luhn passes
+  // Credit/debit card: 13–19 digits (any grouping), Luhn-validated. C2: the
+  // old 4-4-4-4 regex let 13/14/15/18/19-digit cards through this last line
+  // of defence (a raw 15-digit card in payload.history was POSTed to /plan).
+  // validateCard already accepts 13–19 via Luhn, so this widens detection to
+  // the real card-length range without adding a false block on benign numbers
+  // (a non-card 13-19-digit run fails Luhn and passes).
   {
     type: 'CREDIT_CARD',
-    regex: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g,
+    regex: /\b\d(?:[\s-]?\d){12,18}\b/g,
     highPrecision: false,
     validator: validateCard,
   },

@@ -41,19 +41,21 @@ describe('PII precision regression on pii-test-page.html', () => {
   it('detects ALL planted true positives', () => {
     const dets = PIIManager.getInstance().scanDocument();
     const t = byType(dets);
-    // Detector masks values on egress by design (first 4 chars + ***),
-    // so assert on the masked forms - which still pin DOWN the source.
+    // C3: non-card PII values are stored FULLY redacted ('[REDACTED]') - the
+    // old first-4-chars prefix (`raje***`) was itself the C3 leak. We now pin
+    // the privacy contract: correct per-type COUNTS + a fully-redacted value,
+    // instead of a partial-raw prefix. Card types keep the first4/last4 mask.
     const emailVals = (t['EMAIL'] || []).map((d) => d.value).sort();
     // 2 real emails: the support contact + the profile email (deduped per leaf)
-    expect(emailVals).toEqual(['raje***', 'supp***']);
+    expect(emailVals).toEqual(['[REDACTED]', '[REDACTED]']);
 
     // 1 real phone in the profile section - NOT the planted Aadhaar
     const phoneVals = (t['PHONE'] || []).map((d) => d.value);
-    expect(phoneVals).toEqual(['9876***']);
+    expect(phoneVals).toEqual(['[REDACTED]']);
 
-    // The planted "1234 5678 9012" is detected as AADHAAR (not phone)
+    // The planted "1234 5678 9012" is detected as AADHAAR (not phone), redacted
     expect((t['AADHAAR'] || []).length).toBeGreaterThanOrEqual(1);
-    expect((t['AADHAAR'] || [])[0].value).toBe('1234***');
+    expect((t['AADHAAR'] || [])[0].value).toBe('[REDACTED]');
 
     // The password field is always detected (type=password)
     expect((t['PASSWORD_FIELD'] || []).length).toBe(1);
@@ -61,27 +63,21 @@ describe('PII precision regression on pii-test-page.html', () => {
 
   it('has ZERO false positives on the controlled page', () => {
     const dets = PIIManager.getInstance().scanDocument();
-    const values = (d: { value?: string }) => (d.value || '').toLowerCase();
+    const byT = byType(dets);
 
-    const fps: string[] = [];
-    for (const d of dets) {
-      // Price-table digits (45000/500/1500/12000) must never be PII.
-      // The detector masks, so a table FP would show as e.g. "500***".
-      if (/^[0-9]+\*+$/.test(values(d)) && /^(45000|500|1500|12000)\*+$/.test(values(d))) {
-        fps.push(`table-digit: ${d.type} ${d.value}`);
-      }
-      // The planted Aadhaar "1234 5678 9012" must NOT surface as a phone.
-      if (d.type === 'PHONE' && values(d).startsWith('1234***')) {
-        fps.push(`aadhaar-as-phone: ${d.value}`);
-      }
-    }
-    if (fps.length) console.log('FALSE POSITIVES:\n' + fps.join('\n'));
-    expect(fps).toEqual([]);
+    // (1) The planted Aadhaar "1234 5678 9012" must NOT also register as a
+    //     phone - exactly one PHONE (the real profile phone) is expected. A
+    //     mis-classified aadhaar would inflate this to 2.
+    expect((byT['PHONE'] || []).length).toBe(1);
 
-    // No duplicate value at multiple nested levels (ancestor-containment dedupe)
+    // (2) No double-report of the same element + type (ancestor-containment
+    //     dedupe, issue #104). Post-C3 the value is a shared '[REDACTED]'
+    //     sentinel, so it can no longer discriminate distinct PII - key on the
+    //     originating selector instead. A broken dedupe that re-reports the
+    //     same element shows up as a repeated selector.
     const seen = new Map<string, number>();
     for (const d of dets) {
-      const key = `${d.type}::${d.value}`;
+      const key = `${d.type}::${d.selector}`;
       seen.set(key, (seen.get(key) || 0) + 1);
     }
     for (const [key, n] of seen) {
@@ -92,8 +88,10 @@ describe('PII precision regression on pii-test-page.html', () => {
 
   it('reports no phone detection originating from the price table', () => {
     const dets = PIIManager.getInstance().scanDocument();
+    // A price-table phone FP would now surface via its element's selector, not
+    // a redacted value - key the check on the selector.
     const tablePhones = dets.filter(
-      (d) => d.type === 'PHONE' && /Laptop|Mouse|Keyboard|Monitor|45000|12000/i.test(d.value || ''),
+      (d) => d.type === 'PHONE' && /Laptop|Mouse|Keyboard|Monitor|45000|12000/i.test(d.selector || ''),
     );
     expect(tablePhones.length).toBe(0);
   });
