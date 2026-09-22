@@ -13,11 +13,12 @@
 //     outline (a blurred blue stroke of the same path, painted behind the
 //     arrow — not a separate circular blob) and breathes while the agent
 //     is working/thinking ("the agent is doing something right now").
-//   Loop travel: every hop completes a single ~300° circular loop around
-//     the start point, then exits straight to the destination — the
-//     cursor visibly "swings around" instead of snapping or riding a
-//     shallow S. Constant arc-length speed (slower on purpose, ~380px/s,
-//     floor 0.9s, cap 4s) so the movement is watchable and smooth.
+//   Loop travel: every hop glides from A toward B and then completes a
+//     SINGLE CLOSED 360° LOOP around the destination B before landing on it
+//     — the cursor visibly swings one full circle at the target instead of
+//     snapping. Constant arc-length speed (deliberately slow, ~320px/s,
+//     floor 0.9s, cap 4s, no easing) so the movement is smooth and
+//     watchable. The loop joins the approach tangent-continuously (G1).
 //   No indicators: the v3 presence badge / center dot / sonar ring are
 //     GONE — the pointer + border glow + halo + label are the only nodes.
 //
@@ -135,55 +136,70 @@ export function cursorStyles(
 
 /**
  * Travel duration for a hop whose PATH length is `dist` viewport px.
- * v5.1 pacing (user: "a lot more smooth movement but slow"): the cursor
- * travels at ~380px/s along the actual loop path (was 850px/s straight),
- * with a 0.9s FLOOR so even a tiny hop shows a visible loop, and a 4s cap
- * so cross-screen jumps stay deliberate, not sluggish. Pure
- * (testable): returns seconds. Hops of 2px or less still snap
- * instantly (no visible travel to speak of).
+ * v5.2 pacing (user: "a lot more smooth movement but slow"): the cursor
+ * travels at ~320px/s along the actual loop path, with a 0.9s FLOOR so
+ * even a tiny hop shows a full loop and a 4s cap so cross-screen jumps
+ * stay deliberate, not sluggish. Constant speed (no easing inside the
+ * travel) keeps the loop perfectly smooth. Pure (testable): returns
+ * seconds. Hops of 2px or less still snap instantly (no visible travel
+ * to speak of).
  */
 export function travelDuration(dist: number): number {
   if (!Number.isFinite(dist) || dist <= 2) return 0;
-  return Math.min(4, Math.max(0.9, dist / 380));
+  return Math.min(4, Math.max(0.9, dist / 320));
 }
 
 export interface LoopGeometry {
-  /** false when the hop is too short to loop (<= 8px) — snap instead. */
+  /** false when the hop is too short to loop (< 40px) — snap instead. */
   loop: boolean;
-  /** Loop circle center. */
+  /** Loop circle center (the mid-point of the hop, jitter-offset). */
   cx: number;
   cy: number;
   /** Loop radius (px). */
   r: number;
-  /** Entry angle on the circle (the start point), radians. */
-  alpha0: number;
-  /** Signed sweep angle (radians; ~±300°, sign = rotation direction). */
-  sweep: number;
-  /** Point where the loop exits (the start of the straight tail). */
+  /** Tangent entry point on the circle (the approach A->entry joins here, G1). */
+  entry: { x: number; y: number };
+  /** Tangent exit point on the circle (the exit->B straight leaves here, G1). */
   exit: { x: number; y: number };
-  /** Tail length from exit -> destination (px). */
-  tailLen: number;
-  /** Arc length of the loop portion (px). */
+  /** Entry angle on the circle (radians, circle-relative). */
+  alpha0: number;
+  /**
+   * Signed sweep angle (radians). Exactly ONE closed 360° loop plus the
+   * small connecting arc that carries the cursor from the loop to the
+   * destination's own tangent point — so entry AND exit are both
+   * tangent-continuous (the path never kinks) and the exit lands smoothly
+   * on B.
+   */
+  sweep: number;
+  /** Length of the straight approach A -> entry. */
+  approachLen: number;
+  /** Length of the straight exit -> B segment. */
+  finalLen: number;
+  /** Arc length of the whole circular portion (|sweep| * r). */
   arcLen: number;
-  /** Total path length the cursor rides (arcLen + tailLen). */
+  /** Total path length the cursor rides (approach + arc + final). */
   pathLen: number;
+  /** Path share [0..1] of the straight approach segment. */
+  approachShare: number;
+  /** Path share [0..1] of the circular segment. */
+  arcShare: number;
 }
 
 /**
- * v5.1: the loop-travel geometry. Given a start and end viewport
- * position, describe a path that (1) completes a single ~300° circular
- * loop based at the START point, then (2) exits in a straight tail to
- * the destination — "a single loop (circular movement) completed
- * between start and destination".
+ * v5.2: the single CLOSED loop travel. While traveling from A to B the
+ * cursor completes one full closed loop (a 360° circle centred between
+ * the two points), entering and exiting it tangent-continuously so the
+ * whole path is smooth: straight approach -> one closed 360° loop ->
+ * straight exit onto B.
  *
- * - The rotation direction is DETERMINISTIC (left/right of travel), so
- *   the same start/end pair always takes the same loop — reproducible.
- * - `jitter` (default 0, clamped to [-1,1]) randomly scales the radius
- *   and sweep a little, so consecutive hops vary organically. With
- *   jitter=0 the function is purely deterministic (testable).
- * - Hops of 8px or less cannot loop meaningfully: `loop=false` and the
- *   caller snaps.
- * - Non-finite inputs degrade to (0,0) -> (0,0) + loop=false, never NaN.
+ * - The rotation side is DETERMINISTIC (rightward travel loops on one
+ *   side, leftward on the other), so the same A/B pair always takes the
+ *   same loop — reproducible, and A->B vs B->A take opposite loops.
+ * - `jitter` (default 0, clamped to [-1,1]) offsets the loop center
+ *   perpendicularly and varies the radius a little, so consecutive hops
+ *   differ organically. jitter=0 is purely deterministic (testable).
+ * - Hops shorter than 40px snap instead (a loop needs room to read).
+ * - Non-finite inputs degrade to snap geometry, never NaN.
  */
 export function loopGeometry(
   from: { x: number; y: number },
@@ -199,36 +215,74 @@ export function loopGeometry(
   const len = Math.hypot(dx, dy);
   const jj = Number.isFinite(jitter) ? Math.max(-1, Math.min(1, jitter)) : 0;
 
-  const r = Math.max(48, Math.min(160, 0.3 * len)) * (1 + 0.1 * jj);
-  if (len < 8 || r <= 0) {
-    return {
-      loop: false,
-      cx: fx, cy: fy, r: 0, alpha0: 0, sweep: 0,
-      exit: { x: tx, y: ty },
-      tailLen: len, arcLen: 0, pathLen: len,
-    };
-  }
-  // Deterministic rotation direction: going right -> counter-clockwise
-  // (sweep negative in screen coords, y-down), going left -> clockwise.
-  // Back-and-forth hops therefore loop in opposite directions.
-  const side = dx >= 0 ? -1 : 1;
-  // Unit normal of the travel direction, chosen by `side`.
-  const nx = (-dy / len) * -side;
-  const ny = (dx / len) * -side;
-  // The loop circle is based AT the start: its center is one radius away
-  // along the normal, so the start point lies ON the circle.
-  const cx = fx + nx * r;
-  const cy = fy + ny * r;
-  const alpha0 = Math.atan2(fy - cy, fx - cx);
-  // ~300° (5/6 of a full circle), ±8% via jitter: "a single loop
-  // completed" without a perfect 360° (which would just return to the
-  // start and stall).
-  const sweep = side * Math.PI * 2 * (0.85 + 0.08 * jj);
-  const alphaE = alpha0 + sweep;
-  const exit = { x: cx + r * Math.cos(alphaE), y: cy + r * Math.sin(alphaE) };
-  const arcLen = r * Math.abs(sweep);
-  const tailLen = Math.hypot(tx - exit.x, ty - exit.y);
-  return { loop: true, cx, cy, r, alpha0, sweep, exit, arcLen, tailLen, pathLen: arcLen + tailLen };
+  const noLoop: LoopGeometry = {
+    loop: false, cx: tx, cy: ty, r: 0,
+    entry: { x: tx, y: ty }, exit: { x: tx, y: ty }, alpha0: 0, sweep: 0,
+    approachLen: 0, finalLen: 0, arcLen: 0, pathLen: len,
+    approachShare: 0, arcShare: 0,
+  };
+  // NaN guard: garbage A/B degrades to snap geometry, never NaN values.
+  if (!Number.isFinite(len) || len < 40) return noLoop;
+
+  // Loop center: mid-way along the hop, pushed sideways by the jitter so
+  // no two hops swing the loop in exactly the same place.
+  const ux = dx / len, uy = dy / len; // A -> B
+  const px = -uy, py = ux; // perpendicular (90° rotated, y-down screen)
+  const cxF = fx + ux * len / 2 + px * jj * 0.2 * len;
+  const cyF = fy + uy * len / 2 + py * jj * 0.2 * len;
+  const r = Math.max(40, Math.min(150, 0.35 * len)) * (1 + 0.1 * jj);
+
+  // Deterministic rotation: rightward travel sweeps CCW (in screen
+  // coords), leftward CW — back-and-forth hops loop in opposite ways.
+  const w = dx >= 0 ? 1 : -1;
+
+  // Tangent point FROM an external point P to the circle (C, r):
+  //   T = C + (r²/D²)·(P−C) ± (r·√(D²−r²)/D)·perp(P−C)/D·D ...
+  // implemented numerically below; `side` picks which of the two tangents.
+  const tangents = (Px: number, Py: number): Array<{ x: number; y: number }> => {
+    const ddx = Px - cxF;
+    const ddy = Py - cyF;
+    const D = Math.hypot(ddx, ddy);
+    if (D <= r) return []; // P inside/on the circle - no real tangents
+    const k = (r * r) / (D * D);
+    const s = (r * Math.sqrt(D * D - r * r)) / D;
+    const pnx = -ddy / D, pny = ddx / D; // unit perpendicular of (P-C)
+    return [
+      { x: cxF + k * ddx + s * pnx, y: cyF + k * ddy + s * pny },
+      { x: cxF + k * ddx - s * pnx, y: cyF + k * ddy - s * pny },
+    ];
+  };
+  const tAs = tangents(fx, fy);
+  const tBs = tangents(tx, ty);
+  if (tAs.length < 2 || tBs.length < 2) return noLoop;
+
+  // Pick the same SIDE for A and B (the loop sits on one side of the
+  // line): side s is chosen by the rotation direction so the entry is
+  // tangent-continuous (the approach arrives the way the loop departs).
+  const side = w === 1 ? 0 : 1;
+  const entry = tAs[side];
+  const exit = tBs[side === 0 ? 1 : 0]; // opposite side index on B (mirror)
+
+  const phiA = Math.atan2(entry.y - cyF, entry.x - cxF);
+  const phiB = Math.atan2(exit.y - cyF, exit.x - cxF);
+  // The signed angle from phiA to phiB in the sweep direction (0..2π),
+  // so the exit tangent continues the same rotation.
+  let delta = (phiB - phiA) * w;
+  delta = ((delta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  // ONE closed loop (2π) + the connecting arc to B's tangent point.
+  const sweep = w * (2 * Math.PI + delta);
+
+  const approachLen = Math.hypot(entry.x - fx, entry.y - fy);
+  const arcLen = Math.abs(sweep) * r;
+  const finalLen = Math.hypot(tx - exit.x, ty - exit.y);
+  const pathLen = approachLen + arcLen + finalLen;
+  return {
+    loop: true, cx: cxF, cy: cyF, r,
+    entry, exit, alpha0: phiA, sweep,
+    approachLen, finalLen, arcLen, pathLen,
+    approachShare: pathLen > 0 ? approachLen / pathLen : 0,
+    arcShare: pathLen > 0 ? arcLen / pathLen : 0,
+  };
 }
 
 /**
@@ -577,21 +631,32 @@ function travelCurve(
     return;
   }
 
-  // Arc + tail sampler, constant speed: u in [0, w] rides the loop
-  // circle (sweep proportional to u), u in (w, 1] rides the straight
-  // tail from the loop exit to the destination.
-  const w = geo.arcLen / Math.max(1, geo.pathLen); // arc share of the path
+  // Three-segment path, constant speed: straight approach A -> entry,
+  // then the closed-loop arc (alpha0 + sweep, exactly one 360° circle
+  // plus the connecting arc to B's tangent point), then the straight
+  // exit -> B. All joins are G1 (tangent-continuous), so at constant
+  // speed the motion reads as one smooth, unbroken swing.
+  const sA = geo.approachShare; // path share of the approach segment
+  const sF = sA + geo.arcShare; // approach + arc
   const pathPos = (u: number): { x: number; y: number } => {
     if (u <= 0) return { x: from.x, y: from.y };
     if (u >= 1) return { x: t.x, y: t.y };
-    if (u < w) {
-      const ang = geo.alpha0 + geo.sweep * (u / w);
+    if (u < sA) {
+      const v = sA > 0 ? u / sA : 1;
+      return {
+        x: from.x + (geo.entry.x - from.x) * v,
+        y: from.y + (geo.entry.y - from.y) * v,
+      };
+    }
+    if (u < sF) {
+      const au = sF - sA > 0 ? (u - sA) / (sF - sA) : 1;
+      const ang = geo.alpha0 + geo.sweep * au;
       return {
         x: geo.cx + geo.r * Math.cos(ang),
         y: geo.cy + geo.r * Math.sin(ang),
       };
     }
-    const v = (u - w) / (1 - w);
+    const v = 1 - sF > 0 ? (u - sF) / (1 - sF) : 1;
     return {
       x: geo.exit.x + (t.x - geo.exit.x) * v,
       y: geo.exit.y + (t.y - geo.exit.y) * v,

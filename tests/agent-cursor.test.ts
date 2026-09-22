@@ -60,45 +60,64 @@ describe('cursorStyles', () => {
   });
 });
 
-describe('travelDuration (v5.1: slow, watchable loop pacing)', () => {
+describe('travelDuration (v5.2: slow, watchable loop pacing)', () => {
   it('snaps tiny hops (<=2px) instantly', () => {
     expect(travelDuration(0)).toBe(0);
     expect(travelDuration(2)).toBe(0);
   });
-  it('scales with distance at ~380px/s (deliberately slow so the loop is watchable)', () => {
-    // 1520px / 380 = 4.0 -> capped; 760px / 380 = 2.0 exactly.
-    expect(travelDuration(760)).toBeCloseTo(2.0, 3);
-    expect(travelDuration(1520)).toBe(4); // capped at 4s
+  it('scales with distance at ~320px/s (deliberately slow so the loop is watchable)', () => {
+    // 1280px / 320 = 4.0 -> capped; 640px / 320 = 2.0 exactly.
+    expect(travelDuration(640)).toBeCloseTo(2.0, 3);
+    expect(travelDuration(1280)).toBe(4); // capped at 4s
   });
   it('has a 0.9s floor so short hops still show a full loop', () => {
     expect(travelDuration(30)).toBe(0.9);
-    expect(travelDuration(200)).toBe(0.9); // 200/380=0.53 -> floored to 0.9
+    expect(travelDuration(200)).toBe(0.9); // 200/320=0.625 -> floored to 0.9
   });
   it('never returns NaN', () => {
     expect(travelDuration(Number.NaN)).toBe(0);
   });
 });
 
-describe('loopGeometry (v5.1: single circular loop + straight exit tail)', () => {
-  it('loops for a real hop: a ~300° circle based at the start', () => {
+describe('loopGeometry (v5.2: one CLOSED 360° loop while traveling A -> B)', () => {
+  it('loops for a real hop: one full circle + connecting arc', () => {
     const g = loopGeometry({ x: 0, y: 0 }, { x: 400, y: 0 });
     expect(g.loop).toBe(true);
-    // The start point lies ON the loop circle (center is one radius away).
-    const startDist = Math.hypot(g.cx - 0, g.cy - 0);
-    expect(startDist).toBeCloseTo(g.r, 3);
-    // The sweep is a single big loop: 240° < |sweep| < 360°.
+    // The closed loop is exactly 360° plus the small connecting arc that
+    // carries the cursor to B's tangent point (G1 exit).
     const deg = Math.abs(g.sweep) * (180 / Math.PI);
-    expect(deg).toBeGreaterThan(240);
-    expect(deg).toBeLessThan(360);
+    expect(deg).toBeGreaterThanOrEqual(360);
+    expect(deg).toBeLessThan(360 + 180);
+    // pathLen = approach + arc + final.
+    expect(g.pathLen).toBeCloseTo(g.approachLen + g.arcLen + g.finalLen, 6);
   });
 
-  it('the exit point lies on the circle and the tail reaches the destination', () => {
+  it('entry + exit sit on the loop circle, and the joins are tangent-continuous (G1)', () => {
     const g = loopGeometry({ x: 0, y: 0 }, { x: 400, y: 300 });
-    const exitOnCircle = Math.hypot(g.exit.x - g.cx, g.exit.y - g.cy);
-    expect(exitOnCircle).toBeCloseTo(g.r, 1);
-    // pathLen = arc + tail, arc = |sweep| * r.
-    expect(g.pathLen).toBeCloseTo(g.arcLen + g.tailLen, 6);
-    expect(g.arcLen).toBeCloseTo(Math.abs(g.sweep) * g.r, 3);
+    // entry/exit are ON the circle.
+    expect(Math.hypot(g.entry.x - g.cx, g.entry.y - g.cy)).toBeCloseTo(g.r, 1);
+    expect(Math.hypot(g.exit.x - g.cx, g.exit.y - g.cy)).toBeCloseTo(g.r, 1);
+    // G1 at the entry: approach A->entry direction == loop departure
+    // direction (cosine of the angle between them ~ 1.0).
+    const w = Math.sign(g.sweep) || 1;
+    const a0 = g.alpha0;
+    const toEntry = {
+      x: g.entry.x - 0,
+      y: g.entry.y - 0,
+    };
+    const Le = Math.hypot(toEntry.x, toEntry.y);
+    const nE = { x: toEntry.x / Le, y: toEntry.y / Le };
+    const loopDir = { x: w * -Math.sin(a0), y: w * Math.cos(a0) };
+    const cosEntry = nE.x * loopDir.x + nE.y * loopDir.y;
+    expect(cosEntry).toBeGreaterThan(0.99);
+    // G1 at the exit: loop arrival direction == exit->B direction.
+    const aE = a0 + g.sweep;
+    const toB = { x: 400 - g.exit.x, y: 300 - g.exit.y };
+    const Lb = Math.hypot(toB.x, toB.y);
+    const nB = { x: toB.x / Lb, y: toB.y / Lb };
+    const loopDirE = { x: w * -Math.sin(aE), y: w * Math.cos(aE) };
+    const cosExit = nB.x * loopDirE.x + nB.y * loopDirE.y;
+    expect(cosExit).toBeGreaterThan(0.99);
   });
 
   it('is deterministic with jitter=0; jitter varies the loop organically', () => {
@@ -106,7 +125,8 @@ describe('loopGeometry (v5.1: single circular loop + straight exit tail)', () =>
     const b = loopGeometry({ x: 10, y: 20 }, { x: 300, y: 400 }, 0);
     expect(a).toEqual(b);
     const c = loopGeometry({ x: 10, y: 20 }, { x: 300, y: 400 }, 0.5);
-    expect(c.r).not.toBeCloseTo(a.r, 3); // organic variation
+    expect(c.r).not.toBeCloseTo(a.r, 3); // organic radius variation
+    expect(c.cx).not.toBeCloseTo(a.cx, 3); // organic center variation
   });
 
   it('never retraces: opposite travel directions loop opposite ways', () => {
@@ -115,17 +135,19 @@ describe('loopGeometry (v5.1: single circular loop + straight exit tail)', () =>
     expect(Math.sign(right.sweep)).not.toBe(Math.sign(back.sweep));
   });
 
-  it('degenerates to a snap for sub-8px hops (no visible loop)', () => {
-    const g = loopGeometry({ x: 0, y: 0 }, { x: 4, y: 0 });
+  it('snaps sub-40px hops (no room to read a loop)', () => {
+    const g = loopGeometry({ x: 0, y: 0 }, { x: 20, y: 0 });
     expect(g.loop).toBe(false);
-    expect(g.pathLen).toBeCloseTo(4, 6);
+    expect(g.pathLen).toBeCloseTo(20, 6);
   });
 
-  it('never returns NaN for garbage input', () => {
+  it('never returns NaN for garbage input (NaN coerces to a valid hop, all-finite out)', () => {
+    // NaN in the from/to coords coerces to 0 (finite), so the geometry is a
+    // valid (0,0) -> (500,500) hop. The contract: every OUTPUT field is
+    // finite — never NaN/Infinity.
     const g = loopGeometry({ x: NaN, y: NaN }, { x: 500, y: 500 });
-    expect(Number.isFinite(g.cx)).toBe(true);
-    expect(Number.isFinite(g.cy)).toBe(true);
-    expect(Number.isFinite(g.pathLen)).toBe(true);
+    const all = [g.cx, g.cy, g.r, g.alpha0, g.sweep, g.approachLen, g.finalLen, g.arcLen, g.pathLen, g.entry.x, g.entry.y, g.exit.x, g.exit.y];
+    expect(all.every(Number.isFinite)).toBe(true);
   });
 });
 
