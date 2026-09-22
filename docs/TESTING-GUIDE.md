@@ -16,23 +16,26 @@
 
 ### Unit Tests
 ```
-324/324 passing (23 test files)
+417/417 passing (34 test files)
 - PAN detection: ✓
 - Email detection: ✓
-- Credit card Luhn validation: ✓
+- Credit card Luhn validation (13–19 digits, widened in #130): ✓
 - Phone regex: ✓
 - Cross-page task checklist (mergeChecklist, sticky-done, DONE gate): ✓
 - Port retry (withPortRetry transient drop): ✓
-- Loop detection (real module): ✓
+- Loop detection (real module) + loopWarning planner signal (#130): ✓
 - WAIT primitive honors duration: ✓
 - Goal backstop (deterministic URL/title DONE-gate, #100): ✓
 - Vision confirm (on-device OCR gate, #107): ✓
+- Tolerant <select> option matching (matchSelectOption, #130): ✓
+- PII strict redaction contract (C3 [REDACTED] sentinel): ✓
+- 13/19-digit card egress firewall regression (C2): ✓
 ```
 
 ### Build Status
 ```
-Chrome MV3: 1.23 MB ✓
-Firefox MV2: 1.23 MB ✓ (rebuilt same session; re-verify after further vision work)
+Chrome MV3: 1.31 MB ✓
+Firefox MV2: 1.31 MB ✓ (rebuilt same session; re-verify after further vision work)
 No errors ✓
 ```
 
