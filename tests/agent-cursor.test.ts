@@ -11,6 +11,8 @@ import {
   startThinkingPulse,
   stopThinkingPulse,
   THINKING_PULSE,
+  curveControlPoint,
+  samplePageDark,
 } from '../src/lib/agentCursor';
 
 const CURSOR_ID = '__agent-cursor';
@@ -92,6 +94,59 @@ describe('thinking pulse (v3: badge-dot heartbeat + sonar ping while the planner
   });
 });
 
+describe('curveControlPoint (v5: S-curve travel, deterministic + testable)', () => {
+  it('bows the control point off the straight line for a real hop', () => {
+    const cp = curveControlPoint({ x: 0, y: 0 }, { x: 400, y: 0 });
+    expect(cp.curved).toBe(true);
+    // Midpoint is (200, 0); the bow pushes the control point off the line
+    // so the cursor glides in an arc, not a rigid straight shot.
+    expect(cp.x).toBeCloseTo(200, 0);
+    expect(cp.y).not.toBe(0); // a genuine arc
+  });
+  it('is deterministic (same inputs -> same curve)', () => {
+    const a = curveControlPoint({ x: 10, y: 20 }, { x: 300, y: 400 });
+    const b = curveControlPoint({ x: 10, y: 20 }, { x: 300, y: 400 });
+    expect(a).toEqual(b);
+  });
+  it('degenerates to a snap for sub-4px hops (no visible curve)', () => {
+    const cp = curveControlPoint({ x: 0, y: 0 }, { x: 2, y: 0 });
+    expect(cp.curved).toBe(false);
+    expect(cp).toEqual({ x: 2, y: 0, curved: false });
+  });
+  it('never returns NaN for garbage input', () => {
+    const cp = curveControlPoint({ x: NaN, y: NaN }, { x: 500, y: 500 });
+    expect(Number.isFinite(cp.x)).toBe(true);
+    expect(Number.isFinite(cp.y)).toBe(true);
+  });
+});
+
+describe('samplePageDark (v5: theme-aware colour inversion)', () => {
+  it('returns null (light fallback) when nothing is sampleable', () => {
+    // jsdom has no layout / elementFromPoint returns null -> light default.
+    expect(samplePageDark(10, 10)).toBeNull();
+  });
+  it('reads a dark page background under the point and reports dark=true', () => {
+    // Stub elementFromPoint + getComputedStyle on a fake doc to verify the
+    // luminance path end-to-end without a real browser.
+    const fakeDoc = {
+      elementFromPoint: () => ({ parentElement: null }),
+      defaultView: {
+        getComputedStyle: () => ({ backgroundColor: 'rgb(15, 23, 42)' }), // #0f172a -> dark
+      },
+    } as unknown as Document;
+    expect(samplePageDark(10, 10, fakeDoc)).toBe(true);
+  });
+  it('reads a light page background and reports dark=false', () => {
+    const fakeDoc = {
+      elementFromPoint: () => ({ parentElement: null }),
+      defaultView: {
+        getComputedStyle: () => ({ backgroundColor: 'rgb(255, 255, 255)' }),
+      },
+    } as unknown as Document;
+    expect(samplePageDark(10, 10, fakeDoc)).toBe(false);
+  });
+});
+
 describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
   beforeEach(() => {
     removeCursor();
@@ -116,21 +171,26 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     expect(shadowLabel(CURSOR_ID)?.textContent).toBe('CLICK · button');
   });
 
-  it('v3: mounts the presence badge (ring + dot), sonar, and halo nodes', () => {
+  it('v5: mounts the aura (working glow), presence badge, sonar, and halo', () => {
     const el = document.createElement('button');
     document.body.appendChild(el);
     showCursor(el, 'CLICK');
     const shadow = (document.getElementById(CURSOR_ID) as HTMLElement).shadowRoot!;
-    // The Notion-style presence badge = concentric ring with a center dot.
+    // v5: the blue "agent is working" aura sits behind the arrow.
+    expect(shadow.querySelector('.ac-aura')).toBeTruthy();
+    // The presence badge = concentric ring with a center dot (unchanged).
     const badge = shadow.querySelector('.ac-badge') as HTMLElement;
     expect(badge).toBeTruthy();
     expect(badge.querySelector('.ac-dot')).toBeTruthy();
     // Faint sonar ping + soft target halo.
     expect(shadow.querySelector('.ac-sonar')).toBeTruthy();
     expect(shadow.querySelector('.ac-halo')).toBeTruthy();
-    // v3: the arrow is now the constant clean dark shape (not kind-tinted).
+    // The pointer is the "select" cursor path, mirrored so the tip points
+    // top-left, defaulting to the light theme (dark shape on white outline).
+    const grp = shadow.querySelector('.ac-arrow svg g');
+    expect(grp?.getAttribute('transform')).toContain('scale(-1,1)');
     const path = shadow.querySelector('.ac-arrow svg path');
-    expect(path?.getAttribute('fill')).toBe('#111827');
+    expect(path?.getAttribute('fill')).toBe('#111827'); // light-theme default
   });
 
   it('is idempotent - one host, reused on repeat calls', () => {
