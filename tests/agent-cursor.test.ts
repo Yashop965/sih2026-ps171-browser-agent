@@ -11,7 +11,7 @@ import {
   startThinkingPulse,
   stopThinkingPulse,
   THINKING_PULSE,
-  curveControlPoint,
+  loopGeometry,
   samplePageDark,
 } from '../src/lib/agentCursor';
 
@@ -60,63 +60,83 @@ describe('cursorStyles', () => {
   });
 });
 
-describe('travelDuration (v2: slower, fluid, never teleports)', () => {
+describe('travelDuration (v5.1: slow, watchable loop pacing)', () => {
   it('snaps tiny hops (<=2px) instantly', () => {
     expect(travelDuration(0)).toBe(0);
     expect(travelDuration(2)).toBe(0);
   });
-  it('scales with distance (~850px/s, slower than v1 so it reads as a glide)', () => {
-    // 800px / 850 = 0.94s (was 0.5s at ~1600px/s in v1)
-    expect(travelDuration(800)).toBeCloseTo(800 / 850, 3);
+  it('scales with distance at ~380px/s (deliberately slow so the loop is watchable)', () => {
+    // 1520px / 380 = 4.0 -> capped; 760px / 380 = 2.0 exactly.
+    expect(travelDuration(760)).toBeCloseTo(2.0, 3);
+    expect(travelDuration(1520)).toBe(4); // capped at 4s
   });
-  it('has a 0.25s floor so short nudges glide instead of snapping', () => {
-    expect(travelDuration(30)).toBe(0.25);
-    expect(travelDuration(100)).toBe(0.25); // 100/850=0.118 -> floored to 0.25
-  });
-  it('caps long jumps at 1.2s (deliberate, not sluggish)', () => {
-    expect(travelDuration(4000)).toBe(1.2);
+  it('has a 0.9s floor so short hops still show a full loop', () => {
+    expect(travelDuration(30)).toBe(0.9);
+    expect(travelDuration(200)).toBe(0.9); // 200/380=0.53 -> floored to 0.9
   });
   it('never returns NaN', () => {
     expect(travelDuration(Number.NaN)).toBe(0);
   });
 });
 
-describe('thinking pulse (v3: badge-dot heartbeat + sonar ping while the planner waits)', () => {
-  it('exposes stable, sane timing constants', () => {
-    expect(THINKING_PULSE.period).toBeGreaterThan(1);
-    // v3: the badge's center dot breathes up to this scale (a heartbeat,
-    // not the whole ring scaling like v2).
-    expect(THINKING_PULSE.ringScalePeak).toBeGreaterThan(1);
-    expect(THINKING_PULSE.arrowDim).toBeGreaterThan(0);
-    expect(THINKING_PULSE.arrowDim).toBeLessThan(1);
-    // v3: the sonar ping expands out of the tip up to this scale.
-    expect(THINKING_PULSE.sonarScale).toBeGreaterThan(THINKING_PULSE.ringScalePeak);
+describe('loopGeometry (v5.1: single circular loop + straight exit tail)', () => {
+  it('loops for a real hop: a ~300° circle based at the start', () => {
+    const g = loopGeometry({ x: 0, y: 0 }, { x: 400, y: 0 });
+    expect(g.loop).toBe(true);
+    // The start point lies ON the loop circle (center is one radius away).
+    const startDist = Math.hypot(g.cx - 0, g.cy - 0);
+    expect(startDist).toBeCloseTo(g.r, 3);
+    // The sweep is a single big loop: 240° < |sweep| < 360°.
+    const deg = Math.abs(g.sweep) * (180 / Math.PI);
+    expect(deg).toBeGreaterThan(240);
+    expect(deg).toBeLessThan(360);
+  });
+
+  it('the exit point lies on the circle and the tail reaches the destination', () => {
+    const g = loopGeometry({ x: 0, y: 0 }, { x: 400, y: 300 });
+    const exitOnCircle = Math.hypot(g.exit.x - g.cx, g.exit.y - g.cy);
+    expect(exitOnCircle).toBeCloseTo(g.r, 1);
+    // pathLen = arc + tail, arc = |sweep| * r.
+    expect(g.pathLen).toBeCloseTo(g.arcLen + g.tailLen, 6);
+    expect(g.arcLen).toBeCloseTo(Math.abs(g.sweep) * g.r, 3);
+  });
+
+  it('is deterministic with jitter=0; jitter varies the loop organically', () => {
+    const a = loopGeometry({ x: 10, y: 20 }, { x: 300, y: 400 }, 0);
+    const b = loopGeometry({ x: 10, y: 20 }, { x: 300, y: 400 }, 0);
+    expect(a).toEqual(b);
+    const c = loopGeometry({ x: 10, y: 20 }, { x: 300, y: 400 }, 0.5);
+    expect(c.r).not.toBeCloseTo(a.r, 3); // organic variation
+  });
+
+  it('never retraces: opposite travel directions loop opposite ways', () => {
+    const right = loopGeometry({ x: 0, y: 0 }, { x: 400, y: 0 }, 0);
+    const back = loopGeometry({ x: 400, y: 0 }, { x: 0, y: 0 }, 0);
+    expect(Math.sign(right.sweep)).not.toBe(Math.sign(back.sweep));
+  });
+
+  it('degenerates to a snap for sub-8px hops (no visible loop)', () => {
+    const g = loopGeometry({ x: 0, y: 0 }, { x: 4, y: 0 });
+    expect(g.loop).toBe(false);
+    expect(g.pathLen).toBeCloseTo(4, 6);
+  });
+
+  it('never returns NaN for garbage input', () => {
+    const g = loopGeometry({ x: NaN, y: NaN }, { x: 500, y: 500 });
+    expect(Number.isFinite(g.cx)).toBe(true);
+    expect(Number.isFinite(g.cy)).toBe(true);
+    expect(Number.isFinite(g.pathLen)).toBe(true);
   });
 });
 
-describe('curveControlPoint (v5: S-curve travel, deterministic + testable)', () => {
-  it('bows the control point off the straight line for a real hop', () => {
-    const cp = curveControlPoint({ x: 0, y: 0 }, { x: 400, y: 0 });
-    expect(cp.curved).toBe(true);
-    // Midpoint is (200, 0); the bow pushes the control point off the line
-    // so the cursor glides in an arc, not a rigid straight shot.
-    expect(cp.x).toBeCloseTo(200, 0);
-    expect(cp.y).not.toBe(0); // a genuine arc
-  });
-  it('is deterministic (same inputs -> same curve)', () => {
-    const a = curveControlPoint({ x: 10, y: 20 }, { x: 300, y: 400 });
-    const b = curveControlPoint({ x: 10, y: 20 }, { x: 300, y: 400 });
-    expect(a).toEqual(b);
-  });
-  it('degenerates to a snap for sub-4px hops (no visible curve)', () => {
-    const cp = curveControlPoint({ x: 0, y: 0 }, { x: 2, y: 0 });
-    expect(cp.curved).toBe(false);
-    expect(cp).toEqual({ x: 2, y: 0, curved: false });
-  });
-  it('never returns NaN for garbage input', () => {
-    const cp = curveControlPoint({ x: NaN, y: NaN }, { x: 500, y: 500 });
-    expect(Number.isFinite(cp.x)).toBe(true);
-    expect(Number.isFinite(cp.y)).toBe(true);
+describe('thinking pulse (v5.1: border-glow breath while the planner waits)', () => {
+  it('exposes stable, sane timing constants', () => {
+    expect(THINKING_PULSE.period).toBeGreaterThan(1);
+    // v5.1: the working aura breathes up to this scale (heartbeat on the
+    // arrow's border, not a separate ring).
+    expect(THINKING_PULSE.scalePeak).toBeGreaterThan(1);
+    expect(THINKING_PULSE.arrowDim).toBeGreaterThan(0);
+    expect(THINKING_PULSE.arrowDim).toBeLessThan(1);
   });
 });
 
@@ -158,7 +178,7 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     const el = document.createElement('button');
     el.textContent = 'Go';
     document.body.appendChild(el);
-    // jsdom rects are all zero, so the ring collapses but the node still
+    // jsdom rects are all zero, so the halo collapses but the node still
     // lands.
     const ok = showCursor(el, 'CLICK');
     expect(ok).toBe(true);
@@ -171,26 +191,28 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     expect(shadowLabel(CURSOR_ID)?.textContent).toBe('CLICK · button');
   });
 
-  it('v5: mounts the aura (working glow), presence badge, sonar, and halo', () => {
+  it('v5.1: mounts the border-tracing aura + halo, and NO badge/dot/sonar', () => {
     const el = document.createElement('button');
     document.body.appendChild(el);
     showCursor(el, 'CLICK');
     const shadow = (document.getElementById(CURSOR_ID) as HTMLElement).shadowRoot!;
-    // v5: the blue "agent is working" aura sits behind the arrow.
+    // The border-tracing "working" glow: a blurred blue SVG stroke of the
+    // same cursor path, hugging the arrow's silhouette.
     expect(shadow.querySelector('.ac-aura')).toBeTruthy();
-    // The presence badge = concentric ring with a center dot (unchanged).
-    const badge = shadow.querySelector('.ac-badge') as HTMLElement;
-    expect(badge).toBeTruthy();
-    expect(badge.querySelector('.ac-dot')).toBeTruthy();
-    // Faint sonar ping + soft target halo.
-    expect(shadow.querySelector('.ac-sonar')).toBeTruthy();
+    expect(shadow.querySelector('.ac-aura svg path')).toBeTruthy();
+    // The user asked for the blue dot to be GONE — no badge, no center
+    // dot, no sonar ring anywhere in the overlay.
+    expect(shadow.querySelector('.ac-badge')).toBeNull();
+    expect(shadow.querySelector('.ac-dot')).toBeNull();
+    expect(shadow.querySelector('.ac-sonar')).toBeNull();
+    // Soft target halo remains (the element box, not a cursor indicator).
     expect(shadow.querySelector('.ac-halo')).toBeTruthy();
     // The pointer is the "select" cursor path, mirrored so the tip points
-    // top-left, defaulting to the light theme (dark shape on white outline).
+    // top-left, defaulting to the LIGHT theme (black shape on light sites).
     const grp = shadow.querySelector('.ac-arrow svg g');
     expect(grp?.getAttribute('transform')).toContain('scale(-1,1)');
     const path = shadow.querySelector('.ac-arrow svg path');
-    expect(path?.getAttribute('fill')).toBe('#111827'); // light-theme default
+    expect(path?.getAttribute('fill')).toBe('#111827'); // black on light
   });
 
   it('is idempotent - one host, reused on repeat calls', () => {

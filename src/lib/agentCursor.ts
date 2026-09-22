@@ -2,22 +2,24 @@
 //
 // Issue #101 / #132 / #137 / #139 — computer-use style "agent cursor" overlay.
 //
-// v5 (user reference 2026-09-23): the pointer is the svgrepo "select"
+// v5.1 (user iteration 2026-09-23): the pointer is the svgrepo "select"
 // cursor, MIRRORED so the tip points top-left (classic cursor direction).
-// Three v5 behaviors:
+// Behaviors:
 //
 //   Theme-aware colors: the shape inverts when the page under the tip is
-//     dark — dark shape + white outline on light sites, white shape +
-//     dark outline on dark sites (sampled live, per travel target).
-//   Working glow: a soft blue aura around the cursor boundary, steady at
-//     rest, pulsing while the agent is working/thinking (the "agent is
-//     doing something right now" cue).
-//   S-curve travel: every hop rides a randomized quadratic bézier
-//     (deterministic control point, so a given start/end pair always
-//     takes the same arc) instead of a straight line — fluid, engineered
-//     motion, still arc-length-timed at the v2 850px/s pacing with the
-//     0.25s floor / 1.2s cap. Never instant (except the <=2px snap and
-//     reduced-motion).
+//     dark — dark/black shape + white outline on light sites, white shape
+//     + dark outline on dark sites (sampled live, per travel target).
+//   Border-tracing working glow: a soft blue aura that HUGS the arrow's
+//     outline (a blurred blue stroke of the same path, painted behind the
+//     arrow — not a separate circular blob) and breathes while the agent
+//     is working/thinking ("the agent is doing something right now").
+//   Loop travel: every hop completes a single ~300° circular loop around
+//     the start point, then exits straight to the destination — the
+//     cursor visibly "swings around" instead of snapping or riding a
+//     shallow S. Constant arc-length speed (slower on purpose, ~380px/s,
+//     floor 0.9s, cap 4s) so the movement is watchable and smooth.
+//   No indicators: the v3 presence badge / center dot / sonar ring are
+//     GONE — the pointer + border glow + halo + label are the only nodes.
 //
 // The public API is UNCHANGED (showCursor / pulseCursor / hideCursor /
 // removeCursor / startThinkingPulse / stopThinkingPulse / cursorLabel /
@@ -27,8 +29,9 @@
 // PII contract (unchanged, critical): the overlay never carries values.
 // The label is `<KIND> · <TAG>` only — no typed text, no URLs, no PII.
 //
-// `cursorStyles` / `cursorLabel` / `travelDuration` stay pure +
-// jsdom-testable; the GSAP layer is only exercised in the live browser.
+// `cursorStyles` / `cursorLabel` / `travelDuration` / `loopGeometry` /
+// `samplePageDark` stay pure + jsdom-testable; the GSAP layer is only
+// exercised in the live browser.
 
 import { gsap } from 'gsap';
 
@@ -52,35 +55,37 @@ const KIND_COLORS: Record<CursorActionKind, string> = {
   KEY: '#d97706',
 };
 
-// v5: theme-aware pointer colors. On light sites: dark shape + white
-// outline. On dark sites (sampled): white shape + dark outline, so the
-// cursor never turns into a black blob on a dark page.
+// v5: theme-aware pointer colors. On LIGHT sites the shape is black
+// (#111827, reads as black) with a white outline. On DARK sites it
+// inverts to white with a near-black outline, so the cursor never turns
+// into an invisible blob on a dark page.
 const ACCENT = '#2563eb'; // brand blue — halo, working glow, label border
 const THEME_LIGHT = { fill: '#111827', stroke: '#ffffff' }; // light sites
 const THEME_DARK = { fill: '#ffffff', stroke: '#0f172a' }; // dark sites
 
-// v5: the "working" glow around the cursor boundary. A soft blue aura
-// (its own node, painted behind the arrow) that is steady at rest and
-// PULSES while the agent is working — the "agent is doing something
-// right now" cue.
+// v5.1: the border-tracing "working" glow. Rendered as a blurred blue
+// stroke of the SAME cursor path, painted behind the arrow, so the glow
+// hugs the arrow's silhouette exactly (its scale/opacity carry the
+// "working now" pulse).
 const GLOW = {
   /** Resting aura scale (steady "agent present" glow). */
   restScale: 1.0,
   /** Aura scale while a travel is in flight (working, pre-arrival). */
-  activeScale: 1.18,
+  activeScale: 1.15,
   /** Resting opacity of the aura (peaks at 1.0 when active/pulsing). */
   restOpacity: 0.55,
 };
 
-// v5: pointer geometry. The shape is the "select" cursor from the user's
+// v5.1: pointer geometry. The shape is the "select" cursor from the user's
 // reference (svgrepo select-cursor, 2026-09-23), MIRRORED via a group
-// transform so its tip points top-left like a classic cursor. TIP_OFFSET
-// is where the tip sits inside the ARROW_SIZE box (viewBox is 188.324
-// wide; the mirrored tip is at ~(32, 2) in viewBox units), so positioning
-// the div at (cx - TIP_OFFSET.x, cy - TIP_OFFSET.y) puts the tip exactly
-// on the target's centre.
-const ARROW_SIZE = 34;
-const TIP_OFFSET = { x: 6, y: 0 };
+// transform so its tip points top-left like a classic cursor. v5.1: the
+// box is 24px (34px read as "too big"). The viewBox is 188.324 wide and
+// the mirrored tip sits at ~(32, 2) in viewBox units, so at 24px the tip
+// is ~(4.1, 0.3) px inside the box — TIP_OFFSET below. Positioning the
+// div at (cx - TIP_OFFSET.x, cy - TIP_OFFSET.y) puts the tip exactly on
+// the target's centre.
+const ARROW_SIZE = 24;
+const TIP_OFFSET = { x: 4, y: 0 };
 // Two subpaths: the outer contour + the inset detail line (both wind the
 // same way -> a solid fill with the classic double-line cursor look).
 const CURSOR_PATH_D =
@@ -101,13 +106,13 @@ export function cursorLabel(kind: CursorActionKind, targetTag: string): string {
 
 /**
  * Compute the fixed-position CSS for the cursor from a target rect.
- * Pure so it is trivially unit-testable: given the element's on-screen rect,
- * where should the cursor land and how big is the ring?
+ * Pure so it is trivially unit-testable: given the element's on-screen
+ * rect, where should the cursor land and how big is the ring?
  *
- * - The dot sits at the element's center.
- * - The ring hugs the element's box (+8px padding).
+ * - The cursor tip sits at the element's center.
+ * - The target halo hugs the element's box (+8px padding).
  * - Zero/negative/NaN rects (detached or unrendered nodes) collapse to a
- *   ring-less dot at (0,0) rather than producing `NaNpx` CSS.
+ *   halo-less cursor at (0,0) rather than producing `NaNpx` CSS.
  */
 export function cursorStyles(
   rect: CursorPosition,
@@ -129,39 +134,62 @@ export function cursorStyles(
 }
 
 /**
- * Travel duration for a hop of `dist` viewport px. v2 pacing: the cursor
- * moves at roughly 850px/s (was 1600 — it read as "teleporting"), with a
- * 0.25s FLOOR so even a 30px nudge glides instead of snapping, and a 1.2s
- * cap so a corner-to-corner travel is deliberate, not sluggish. Pure
- * (testable): returns seconds. Hops of 2px or less still snap instantly
- * (no visible travel to speak of).
+ * Travel duration for a hop whose PATH length is `dist` viewport px.
+ * v5.1 pacing (user: "a lot more smooth movement but slow"): the cursor
+ * travels at ~380px/s along the actual loop path (was 850px/s straight),
+ * with a 0.9s FLOOR so even a tiny hop shows a visible loop, and a 4s cap
+ * so cross-screen jumps stay deliberate, not sluggish. Pure
+ * (testable): returns seconds. Hops of 2px or less still snap
+ * instantly (no visible travel to speak of).
  */
 export function travelDuration(dist: number): number {
   if (!Number.isFinite(dist) || dist <= 2) return 0;
-  return Math.min(1.2, Math.max(0.25, dist / 850));
+  return Math.min(4, Math.max(0.9, dist / 380));
+}
+
+export interface LoopGeometry {
+  /** false when the hop is too short to loop (<= 8px) — snap instead. */
+  loop: boolean;
+  /** Loop circle center. */
+  cx: number;
+  cy: number;
+  /** Loop radius (px). */
+  r: number;
+  /** Entry angle on the circle (the start point), radians. */
+  alpha0: number;
+  /** Signed sweep angle (radians; ~±300°, sign = rotation direction). */
+  sweep: number;
+  /** Point where the loop exits (the start of the straight tail). */
+  exit: { x: number; y: number };
+  /** Tail length from exit -> destination (px). */
+  tailLen: number;
+  /** Arc length of the loop portion (px). */
+  arcLen: number;
+  /** Total path length the cursor rides (arcLen + tailLen). */
+  pathLen: number;
 }
 
 /**
- * v5: the S-curve travel control point. Given a start and end viewport
- * position, return the control point of a quadratic bézier that bows the
- * path to one side of the straight line — so the cursor glides in a smooth
- * "S" rather than a rigid straight shot.
+ * v5.1: the loop-travel geometry. Given a start and end viewport
+ * position, describe a path that (1) completes a single ~300° circular
+ * loop based at the START point, then (2) exits in a straight tail to
+ * the destination — "a single loop (circular movement) completed
+ * between start and destination".
  *
- * - The bow side is DETERMINISTIC (chosen from the segment orientation),
- *   so the same start/end pair always takes the same arc — reproducible,
- *   and no two consecutive hops flip to the same side back-to-back.
- * - The bow depth is 18% of the segment length, so short hops stay
- *   almost straight and long hops show a clear curve.
- * - Segments of 0 length (or sub-4px, i.e. no visible travel) return the
- *   end point itself: the "curve" degenerates to a snap, and the caller
- *   skips the bézier tween.
- *
- * Pure + jsdom-testable (no DOM, no RNG).
+ * - The rotation direction is DETERMINISTIC (left/right of travel), so
+ *   the same start/end pair always takes the same loop — reproducible.
+ * - `jitter` (default 0, clamped to [-1,1]) randomly scales the radius
+ *   and sweep a little, so consecutive hops vary organically. With
+ *   jitter=0 the function is purely deterministic (testable).
+ * - Hops of 8px or less cannot loop meaningfully: `loop=false` and the
+ *   caller snaps.
+ * - Non-finite inputs degrade to (0,0) -> (0,0) + loop=false, never NaN.
  */
-export function curveControlPoint(
+export function loopGeometry(
   from: { x: number; y: number },
   to: { x: number; y: number },
-): { x: number; y: number; curved: boolean } {
+  jitter = 0,
+): LoopGeometry {
   const fx = Number.isFinite(from.x) ? from.x : 0;
   const fy = Number.isFinite(from.y) ? from.y : 0;
   const tx = Number.isFinite(to.x) ? to.x : 0;
@@ -169,18 +197,38 @@ export function curveControlPoint(
   const dx = tx - fx;
   const dy = ty - fy;
   const len = Math.hypot(dx, dy);
-  if (len < 4) return { x: tx, y: ty, curved: false };
-  // Deterministic side: bow to the left of the direction of travel when
-  // going right (dx >= 0), to the right when going left. This makes
-  // back-and-forth hops (A->B->A) take opposite arcs, so consecutive
-  // travels never retrace the same curve.
-  const left = dx >= 0 ? 1 : -1;
-  const nx = -dy / len; // unit normal of the segment (perpendicular)
-  const ny = dx / len;
-  const bow = 0.18 * len * left;
-  const cx = fx + dx / 2 + nx * bow;
-  const cy = fy + dy / 2 + ny * bow;
-  return { x: cx, y: cy, curved: true };
+  const jj = Number.isFinite(jitter) ? Math.max(-1, Math.min(1, jitter)) : 0;
+
+  const r = Math.max(48, Math.min(160, 0.3 * len)) * (1 + 0.1 * jj);
+  if (len < 8 || r <= 0) {
+    return {
+      loop: false,
+      cx: fx, cy: fy, r: 0, alpha0: 0, sweep: 0,
+      exit: { x: tx, y: ty },
+      tailLen: len, arcLen: 0, pathLen: len,
+    };
+  }
+  // Deterministic rotation direction: going right -> counter-clockwise
+  // (sweep negative in screen coords, y-down), going left -> clockwise.
+  // Back-and-forth hops therefore loop in opposite directions.
+  const side = dx >= 0 ? -1 : 1;
+  // Unit normal of the travel direction, chosen by `side`.
+  const nx = (-dy / len) * -side;
+  const ny = (dx / len) * -side;
+  // The loop circle is based AT the start: its center is one radius away
+  // along the normal, so the start point lies ON the circle.
+  const cx = fx + nx * r;
+  const cy = fy + ny * r;
+  const alpha0 = Math.atan2(fy - cy, fx - cx);
+  // ~300° (5/6 of a full circle), ±8% via jitter: "a single loop
+  // completed" without a perfect 360° (which would just return to the
+  // start and stall).
+  const sweep = side * Math.PI * 2 * (0.85 + 0.08 * jj);
+  const alphaE = alpha0 + sweep;
+  const exit = { x: cx + r * Math.cos(alphaE), y: cy + r * Math.sin(alphaE) };
+  const arcLen = r * Math.abs(sweep);
+  const tailLen = Math.hypot(tx - exit.x, ty - exit.y);
+  return { loop: true, cx, cy, r, alpha0, sweep, exit, arcLen, tailLen, pathLen: arcLen + tailLen };
 }
 
 /**
@@ -188,14 +236,13 @@ export function curveControlPoint(
  *
  * Walks up the element tree from the point (document.elementFromPoint)
  * and collects computed backgrounds; the first one with real coverage
- * (a non-transparent color) wins. A page background with multiple
- * layers collapses to the LAST declared layer that is opaque. Luminance
- * (0.2126 R + 0.7152 G + 0.0722 B, per WCAG relative-luminance weights on
- * 0-255 values) under 128 counts as "dark".
+ * (a non-transparent color) wins. Luminance (0.2126 R + 0.7152 G +
+ * 0.0722 B, WCAG relative-luminance weights on 0-255 values) under 128
+ * counts as "dark".
  *
  * Returns `null` when nothing sampleable is under the point (e.g. jsdom,
- * no layout) — callers fall back to the light theme, which is the safe
- * default. Never throws: theme detection is presentation-only.
+ * no layout) — callers fall back to the light theme (black arrow), which
+ * is the safe default. Never throws: theme detection is presentation-only.
  */
 export function samplePageDark(
   x: number,
@@ -239,60 +286,55 @@ function bgLuminance(color: string): number | null {
 }
 
 /**
- * v3: the idle "thinking" beat. While the agent is between actions (mostly
- * waiting on the planner LLM, which takes seconds) the cursor breathes:
- * the presence badge's center dot pulses and a faint sonar ring pings out
- * of the tip — so the agent reads as "alive", and the visible pacing
- * matches the LLM-bound step latency instead of fighting it. One
- * interruptible tween; `travel()` / `pulseCursor()` / `stopThinkingPulse()`
- * kill it. Pure timing constants so tests can pin the contract.
+ * v5.1: the idle "thinking" beat. While the agent waits on the planner,
+ * the border-tracing WORKING GLOW breathes (scale + opacity) — the
+ * "the agent is alive and working" cue. The v3 badge-dot heartbeat and
+ * sonar ring are gone (no indicators). One interruptible tween;
+ * `travelCurve` / `pulseCursor` / `stopThinkingPulse()` kill it. Pure
+ * timing constants so tests can pin the contract.
  */
 export const THINKING_PULSE = {
   /** Period of one breathing cycle (out+back), seconds. */
   period: 1.6,
-  /** Badge dot scale peak (1.0 resting -> 1.35 peak). */
-  ringScalePeak: 1.35,
+  /** Aura scale peak while thinking (1.0 resting -> 1.18 peak). */
+  scalePeak: 1.18,
   /** Arrow resting opacity while thinking (dips from 1.0). */
   arrowDim: 0.7,
-  /** Sonar ping travel (1.0 -> 2.6 scale) + one cycle seconds. */
-  sonarScale: 2.6,
 };
 
 interface OverlayNodes {
   host: HTMLElement;
   halo: HTMLElement;
-  aura: HTMLElement; // v5: the blue "working" glow behind the arrow
+  aura: HTMLElement; // v5.1: the border-tracing blue "working" glow (SVG)
   arrow: HTMLElement;
-  badge: HTMLElement;
-  badgeDot: HTMLElement;
-  sonar: HTMLElement;
   label: HTMLElement;
   ripple: HTMLElement;
 }
 
 /**
- * Build (once) or reuse the v5 cursor overlay. The host is a plain fixed
- * node in the light DOM — so `document.getElementById(CURSOR_ID)` keeps
- * working and the pointer-events:none / z-index contract holds for the
- * page. Its *inner* nodes live in an open shadow root with `all:initial`
- * so hostile host-page CSS cannot hide or restyle them.
+ * Build (once) or reuse the v5.1 cursor overlay. The host is a plain
+ * fixed node in the light DOM — so `document.getElementById(CURSOR_ID)`
+ * keeps working and the pointer-events:none / z-index contract holds for
+ * the page. Its *inner* nodes live in an open shadow root with
+ * `all:initial` so hostile host-page CSS cannot hide or restyle them.
  *
- * Node map (all absolutely-positioned, centred via xPercent/yPercent so
- * every motion is transform-only):
+ * Node map (all absolutely-positioned, motion is transform-only):
  *   .ac-halo   — the soft rounded target box (kind-tinted glow)
- *   .ac-aura   — v5: the blue "working" aura behind the arrow (pulses)
+ *   .ac-aura   — v5.1: blurred blue stroke of the cursor path, hugging
+ *                the arrow's silhouette; painted BEHIND the arrow,
+ *                breathes while the agent works
  *   .ac-arrow  — the select-cursor shape (mirrored, tip top-left)
- *   .ac-badge  — the presence badge ring at the tip
- *   .ac-dot    — the badge's center dot (breathes while thinking)
- *   .ac-sonar  — the faint pinging sonar ring (thinking only)
  *   .ac-label  — the dark `<KIND> · <TAG>` pill
  *   .ac-ripple — the click confirmation ripple
+ *
+ * There is deliberately NO badge, center dot, or sonar ring — the
+ * pointer itself + its border glow are the indicator.
  */
 function ensureCursorEl(): OverlayNodes | null {
   if (typeof document === 'undefined' || !document.body) return null;
   let host = document.getElementById(CURSOR_ID) as HTMLElement | null;
   if (!host || !host.dataset.agentCursor5) {
-    // A pre-v5 host (or a stale node without the aura) is replaced
+    // A pre-v5.1 host (or a stale node without the aura) is replaced
     // wholesale rather than migrated.
     host?.remove();
     host = document.createElement('div');
@@ -308,25 +350,20 @@ function ensureCursorEl(): OverlayNodes | null {
       'height:0',
     ].join(';');
     const shadow = host.attachShadow({ mode: 'open' });
-    // `all:initial` on :host so no inheritable host property (font, color,
-    // direction) leaks in; the overlay is fully self-styled below.
+    // `all:initial` on :host so no inheritable host property (font,
+    // color, direction) leaks in; the overlay is fully self-styled below.
     const style = document.createElement('style');
     style.textContent = `:host{all:initial;position:fixed;top:0;left:0;pointer-events:none;}
 .ac-halo{position:absolute;top:0;left:0;border-radius:14px;pointer-events:none;will-change:transform;
 box-shadow:0 0 0 0 transparent,0 0 18px 2px rgba(37,99,235,0);}
-.ac-aura{position:absolute;top:0;left:0;width:${ARROW_SIZE + 26}px;height:${ARROW_SIZE + 26}px;
-margin:${-TIP_OFFSET.x - 13}px 0 0 ${-TIP_OFFSET.y - 13}px;pointer-events:none;will-change:transform,opacity;
-background:radial-gradient(circle at 30% 12%, ${ACCENT}b3 0%, ${ACCENT}40 45%, rgba(37,99,235,0) 72%);
-border-radius:50%;opacity:${GLOW.restOpacity};transform:translate(0,0) scale(${GLOW.restScale});}
+.ac-aura{position:absolute;top:0;left:0;width:${ARROW_SIZE}px;height:${ARROW_SIZE}px;
+pointer-events:none;will-change:transform,opacity;opacity:${GLOW.restOpacity};
+transform:translate(0,0) scale(${GLOW.restScale});}
+.ac-aura svg{display:block;overflow:visible;filter:blur(5px);}
+.ac-aura path{fill:none;stroke:${ACCENT};stroke-width:34;stroke-linejoin:round;}
 .ac-arrow{position:absolute;top:0;left:0;width:${ARROW_SIZE}px;height:${ARROW_SIZE}px;pointer-events:none;
 will-change:transform,opacity;filter:drop-shadow(0 1.5px 2.5px rgba(0,0,0,.35));}
 .ac-arrow svg{display:block;overflow:visible;}
-.ac-badge{position:absolute;top:0;left:0;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;
-border:2px solid ${ACCENT};background:rgba(255,255,255,.85);pointer-events:none;will-change:transform;
-box-shadow:0 1px 3px rgba(0,0,0,.35),0 0 8px ${ACCENT}66;display:flex;align-items:center;justify-content:center;}
-.ac-dot{width:6px;height:6px;border-radius:50%;background:${ACCENT};will-change:transform;}
-.ac-sonar{position:absolute;top:0;left:0;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;
-border:1.5px solid ${ACCENT};opacity:0;pointer-events:none;will-change:transform,opacity;}
 .ac-label{position:absolute;top:0;left:0;pointer-events:none;font:600 11px/1 system-ui,sans-serif;
 color:#fff;background:#0f172aee;padding:4px 10px;border-radius:9999px;white-space:nowrap;
 box-shadow:0 2px 8px rgba(0,0,0,.28);will-change:transform;letter-spacing:.02em;opacity:0;}
@@ -336,17 +373,26 @@ border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change
 
     const halo = document.createElement('div');
     halo.className = 'ac-halo';
-    // The halo box (width/height/border/bg) is set instantly when the
-    // target changes — it is our own glow, not page content — and the
-    // GLIDE is a transform-only x/y tween, so no layout property animates.
     shadow.appendChild(halo);
 
-    // v5: the working aura — a soft blue radial glow painted BEHIND the
-    // arrow. Its scale/opacity are the "agent is working now" signal:
-    // steady at rest, brighter + pulsing while the agent thinks or a
-    // travel is in flight.
+    // v5.1: the working aura — a blurred blue stroke of the SAME cursor
+    // path, sized exactly like the arrow and painted just BEHIND it, so
+    // the glow traces the arrow's border instead of floating as a blob.
+    // Its scale/opacity carry the "agent is working now" breathing.
     const aura = document.createElement('div');
     aura.className = 'ac-aura';
+    const auraNS = 'http://www.w3.org/2000/svg';
+    const auraSvg = document.createElementNS(auraNS, 'svg');
+    auraSvg.setAttribute('viewBox', '0 0 188.324 188.324');
+    auraSvg.setAttribute('width', String(ARROW_SIZE));
+    auraSvg.setAttribute('height', String(ARROW_SIZE));
+    const auraGrp = document.createElementNS(auraNS, 'g');
+    auraGrp.setAttribute('transform', 'translate(188.324,0) scale(-1,1)');
+    const auraPath = document.createElementNS(auraNS, 'path');
+    auraPath.setAttribute('d', CURSOR_PATH_D);
+    auraGrp.appendChild(auraPath);
+    auraSvg.appendChild(auraGrp);
+    aura.appendChild(auraSvg);
     shadow.appendChild(aura);
 
     const arrow = document.createElement('div');
@@ -356,10 +402,10 @@ border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change
     svg.setAttribute('viewBox', '0 0 188.324 188.324');
     svg.setAttribute('width', String(ARROW_SIZE));
     svg.setAttribute('height', String(ARROW_SIZE));
-    // v5: the "select" cursor from the user's reference, MIRRORED so the
-    // tip points top-left (the original points top-right). The fill/stroke
-    // are theme-applied by applyTheme() — the attrs below are the light
-    // default so the first paint is already correct.
+    // v5.1: the "select" cursor, MIRRORED so the tip points top-left.
+    // Fill/stroke are theme-applied by applyTheme() — the attrs below
+    // are the LIGHT default (black arrow) so the first paint is already
+    // correct for light sites.
     const grp = document.createElementNS(svgNS, 'g');
     grp.setAttribute('transform', 'translate(188.324,0) scale(-1,1)');
     const path = document.createElementNS(svgNS, 'path');
@@ -372,17 +418,6 @@ border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change
     svg.appendChild(grp);
     arrow.appendChild(svg);
     shadow.appendChild(arrow);
-
-    const badge = document.createElement('div');
-    badge.className = 'ac-badge';
-    const dot = document.createElement('div');
-    dot.className = 'ac-dot';
-    badge.appendChild(dot);
-    shadow.appendChild(badge);
-
-    const sonar = document.createElement('div');
-    sonar.className = 'ac-sonar';
-    shadow.appendChild(sonar);
 
     const label = document.createElement('div');
     label.className = 'ac-label';
@@ -399,21 +434,18 @@ border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change
   const halo = shadow.querySelector('.ac-halo') as HTMLElement | null;
   const aura = shadow.querySelector('.ac-aura') as HTMLElement | null;
   const arrow = shadow.querySelector('.ac-arrow') as HTMLElement | null;
-  const badge = shadow.querySelector('.ac-badge') as HTMLElement | null;
-  const badgeDot = shadow.querySelector('.ac-dot') as HTMLElement | null;
-  const sonar = shadow.querySelector('.ac-sonar') as HTMLElement | null;
   const label = shadow.querySelector('.ac-label') as HTMLElement | null;
   const ripple = shadow.querySelector('.ac-ripple') as HTMLElement | null;
-  if (!halo || !aura || !arrow || !badge || !badgeDot || !sonar || !label || !ripple) return null;
-  return { host: host as HTMLElement, halo, aura, arrow, badge, badgeDot, sonar, label, ripple };
+  if (!halo || !aura || !arrow || !label || !ripple) return null;
+  return { host: host as HTMLElement, halo, aura, arrow, label, ripple };
 }
 
 /**
- * v5: flip the pointer between the light/dark themes. Called on every
+ * v5.1: flip the pointer between the light/dark themes. Called on every
  * travel against the TARGET point — so the cursor inverts exactly when
  * it lands on (or glides into) a dark area. jsdom / no-layout / unknown
- * sample falls back to the light theme (dark shape on white outline),
- * which is the safe default.
+ * sample falls back to the LIGHT theme (black arrow), which is the safe
+ * default. Never throws.
  */
 function applyTheme(nodes: OverlayNodes, cx: number, cy: number): void {
   try {
@@ -428,16 +460,13 @@ function applyTheme(nodes: OverlayNodes, cx: number, cy: number): void {
   }
 }
 
-/** Last known cursor position (the arrow tip) — origin of every travel. */
+/** Last known cursor position (the arrow TIP at the target centre). */
 let lastPos = { x: 0, y: 0 };
 /** Active travel timeline; killed on every retarget (overwrite semantics). */
 let travel: gsap.core.Timeline | null = null;
-/** The idle thinking-pulse tweens (single, interruptible): dot heartbeat. */
-let thinkingPulse: gsap.core.Tween | null = null;
-/** v3: the idle sonar ping (expands + fades, loops) - killed with the pulse. */
-let sonarPing: gsap.core.Tween | null = null;
-/** v5: the working aura's looped scale-pulse (killed with the travel). */
+/** v5.1: the working aura's looped breath (killed with the travel). */
 let auraPulse: gsap.core.Tween | null = null;
+const GLOW_PERIOD_HALF = 0.55; // half-cycle of the working-aura breath
 
 /** Host-page reduced-motion preference, checked per call. */
 function prefersReducedMotion(): boolean {
@@ -449,15 +478,13 @@ function prefersReducedMotion(): boolean {
   }
 }
 
-/** v5: point the aura at the tip and give it a steady "working now" pulse. */
+/** v5.1: point the aura at the arrow and give it a steady "working now" breath. */
 function startAuraPulse(nodes: OverlayNodes): void {
   try {
     auraPulse?.kill();
-    const tip = { x: lastPos.x - TIP_OFFSET.x, y: lastPos.y - TIP_OFFSET.y };
-    gsap.set(nodes.aura, {
-      x: tip.x, y: tip.y, xPercent: -50, yPercent: -50,
-      scale: GLOW.restScale, opacity: GLOW.restOpacity,
-    });
+    const ax = lastPos.x - TIP_OFFSET.x;
+    const ay = lastPos.y - TIP_OFFSET.y;
+    gsap.set(nodes.aura, { x: ax, y: ay, scale: GLOW.restScale, opacity: GLOW.restOpacity });
     auraPulse = gsap.to(nodes.aura, {
       scale: GLOW.activeScale,
       opacity: 1,
@@ -472,7 +499,7 @@ function startAuraPulse(nodes: OverlayNodes): void {
   }
 }
 
-/** v5: settle the aura (an HTMLElement) back to its steady resting glow. */
+/** v5.1: settle the aura (an HTMLElement) back to its steady resting glow. */
 function restAura(aura: HTMLElement | null): void {
   try {
     auraPulse?.kill();
@@ -483,24 +510,23 @@ function restAura(aura: HTMLElement | null): void {
   }
 }
 
-const GLOW_PERIOD_HALF = 0.55; // half-cycle of the working-aura pulse
-
 /**
- * v5: the S-curve travel engine. Every hop rides a quadratic bézier that
- * bows to one side of the straight line (deterministic side from
- * `curveControlPoint`), so the agent's cursor glides in smooth arcs
- * instead of rigid straight shots — and consecutive back-and-forth hops
- * take opposite arcs, never retracing.
+ * v5.1: the loop-travel engine. Every hop completes a single ~300°
+ * circular loop based at the start point, then exits in a straight tail
+ * to the destination — "a single loop (circular movement) completed
+ * between start and destination".
  *
- * - The arrow + badge + sonar + aura follow the CURVE (transform-only
- *   x/y via a sampled path, no layout properties animate).
- * - The HALO follows the straight line: it is the target indicator, and
- *   it should sit on the element while the cursor approaches it.
+ * - The arrow + border aura ride the LOOP PATH (transform-only x/y via a
+ *   progress sampler: GSAP tweens 0->1 and each frame we evaluate the
+ *   arc + tail position and set transforms — no layout animates).
+ * - The HALO (the target indicator) glides STRAIGHT to the element — it
+ *   marks "where the action lands", not the pointer's scenic route.
  * - The LABEL fades in near arrival.
- * - Duration = travelDuration of the STRAIGHT distance, so pacing keeps
- *   the v2 850px/s feel (floor 0.25s, cap 1.2s) even though the path is
- *   slightly longer.
- * - Theme: the pointer is re-sampled at start / mid / end of the travel
+ * - Constant arc-length speed: the whole path is timed by its true
+ *   length at ~380px/s (floor 0.9s / cap 4s) — deliberately slow and
+ *   smooth, so the working is watchable. `ease:'none'` keeps velocity
+ *   constant along the loop (the smoothest circular motion).
+ * - Theme: the pointer is re-sampled at the loop's apex + on arrival
  *   (applyTheme), so it inverts as it crosses a light->dark boundary.
  */
 function travelCurve(
@@ -509,149 +535,111 @@ function travelCurve(
   cx: number,
   cy: number,
 ): void {
-  // Re-steer from the arrow's CURRENT on-screen position (transform state),
-  // so a mid-glide retarget glides from where the cursor actually is, not
-  // from the last committed target. `gsap.getProperty` returns the live
-  // transform; the tip sits TIP_OFFSET inside the ARROW box.
+  // Re-steer from the arrow's CURRENT on-screen position (transform
+  // state), so a mid-glide retarget loops from where the cursor
+  // actually is, not from the last committed target. The arrow div sits
+  // at tip - TIP_OFFSET; add the offset back to get the live tip.
   const onScreenX = typeof gsap.getProperty === 'function' ? gsap.getProperty(nodes.arrow, 'x') : 0;
   const onScreenY = typeof gsap.getProperty === 'function' ? gsap.getProperty(nodes.arrow, 'y') : 0;
   const from = {
     x: (Number(onScreenX) || 0) + TIP_OFFSET.x,
     y: (Number(onScreenY) || 0) + TIP_OFFSET.y,
   };
-  let cp = curveControlPoint(from, target);
+  // Presentation-only organic variation: each hop's loop varies slightly
+  // in radius + sweep (never the endpoints or timing contract). Skipped
+  // under reduced motion (then jitter=0 keeps the path deterministic).
+  const jitter = prefersReducedMotion() ? 0 : Math.random() * 2 - 1;
+  const geo = loopGeometry(from, target, jitter);
   const t = { x: target.x, y: target.y };
   const lx = cx + 14, ly = cy + 14; // label target
 
-  // v5: "random curves" — the base S-arc from `curveControlPoint` is
-  // deterministic (reproducible), but each hop adds a random perpendicular
-  // jitter to the control point so no two travels trace the same curve.
-  // Presentation-only: it varies the SHAPE of the glide, never the
-  // endpoints or timing, and is skipped for reduced motion / short hops.
-  if (cp.curved && !prefersReducedMotion()) {
-    const segLen = Math.hypot(target.x - from.x, target.y - from.y);
-    if (segLen > 4) {
-      const jitter = (Math.random() * 2 - 1) * 0.12 * segLen; // ±12% of the hop
-      const nx = -(target.y - from.y) / segLen;
-      const ny = (target.x - from.x) / segLen;
-      cp = { ...cp, x: cp.x + nx * jitter, y: cp.y + ny * jitter };
-    }
-  }
-
-  // Quadratic bézier sampler: B(u) = (1-u)^2 P0 + 2(1-u)u C + u^2 P1,
-  // evaluated at the CURVE's control point so the cursor rides the arc.
-  const curve = (u: number): { x: number; y: number } => {
-    const a = (1 - u) * (1 - u);
-    const b = 2 * (1 - u) * u;
-    const c = u * u;
-    return { x: a * from.x + b * cp.x + c * t.x, y: a * from.y + b * cp.y + c * t.y };
-  };
-
-  const badgeTo = { x: t.x - TIP_OFFSET.x + 4, y: t.y - TIP_OFFSET.y + 4 };
-  const dist = Math.hypot(t.x - from.x, t.y - from.y);
+  const dist = geo.pathLen;
   const dur = travelDuration(dist);
-  const straightOnly = !cp.curved || dur <= 0;
+  const loopless = !geo.loop || dur <= 0;
 
-  // Theme: sample at the target before travel so the pointer is already the
-  // right colour when it lands; re-sampled mid-flight + on arrival below.
+  // Theme: sample at the target before travel so the pointer is already
+  // the right colour when it lands; re-sampled at the loop apex below.
   applyTheme(nodes, cx, cy);
 
   travel?.kill();
   travel = null;
 
-  if (prefersReducedMotion() || straightOnly) {
-    // No curve / no animation: instant placement (still themed + aured).
-    gsap.set(nodes.arrow, { x: t.x - TIP_OFFSET.x, y: t.y - TIP_OFFSET.y, scale: 1, opacity: 1 });
-    gsap.set(nodes.aura, { x: t.x - TIP_OFFSET.x, y: t.y - TIP_OFFSET.y, xPercent: -50, yPercent: -50, scale: GLOW.restScale, opacity: GLOW.restOpacity });
+  const arrowTo = { x: t.x - TIP_OFFSET.x, y: t.y - TIP_OFFSET.y };
+
+  if (prefersReducedMotion() || loopless) {
+    // No loop / no animation: instant placement (still themed + glowed).
+    gsap.set(nodes.arrow, { x: arrowTo.x, y: arrowTo.y, scale: 1, opacity: 1 });
+    gsap.set(nodes.aura, { x: arrowTo.x, y: arrowTo.y, scale: GLOW.restScale, opacity: GLOW.restOpacity });
     gsap.set(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
-    gsap.set(nodes.badge, { x: badgeTo.x, y: badgeTo.y, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
-    gsap.set(nodes.sonar, { x: badgeTo.x, y: badgeTo.y, xPercent: -50, yPercent: -50, opacity: 0 });
     gsap.set(nodes.label, { x: lx, y: ly, opacity: 1 });
     restAura(nodes.aura);
     lastPos = t;
     return;
   }
 
-  // The cursor + badge + aura + sonar ride the S-curve via a progress
-  // sampler: GSAP tweens a 0->1 progress and each frame we evaluate the
-  // quadratic bézier and set transforms. The HALO (the target indicator)
-  // glides STRAIGHT — it marks "where the action lands", not the pointer.
+  // Arc + tail sampler, constant speed: u in [0, w] rides the loop
+  // circle (sweep proportional to u), u in (w, 1] rides the straight
+  // tail from the loop exit to the destination.
+  const w = geo.arcLen / Math.max(1, geo.pathLen); // arc share of the path
+  const pathPos = (u: number): { x: number; y: number } => {
+    if (u <= 0) return { x: from.x, y: from.y };
+    if (u >= 1) return { x: t.x, y: t.y };
+    if (u < w) {
+      const ang = geo.alpha0 + geo.sweep * (u / w);
+      return {
+        x: geo.cx + geo.r * Math.cos(ang),
+        y: geo.cy + geo.r * Math.sin(ang),
+      };
+    }
+    const v = (u - w) / (1 - w);
+    return {
+      x: geo.exit.x + (t.x - geo.exit.x) * v,
+      y: geo.exit.y + (t.y - geo.exit.y) * v,
+    };
+  };
+
+  // The cursor + border aura ride the loop; the HALO (the target
+  // indicator) glides straight — it marks "where the action lands".
   const prog = { t: 0 };
   const frame = (): void => {
-    const p = curve(prog.t);
+    const p = pathPos(prog.t);
     const ax = p.x - TIP_OFFSET.x;
     const ay = p.y - TIP_OFFSET.y;
     gsap.set(nodes.arrow, { x: ax, y: ay, scale: 1, opacity: 1 });
-    gsap.set(nodes.aura, { x: ax, y: ay, xPercent: -50, yPercent: -50, scale: GLOW.activeScale, opacity: 1 });
-    gsap.set(nodes.badge, { x: ax + 4, y: ay + 4, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
-    gsap.set(nodes.sonar, { x: ax + 4, y: ay + 4, xPercent: -50, yPercent: -50, opacity: 0 });
+    gsap.set(nodes.aura, { x: ax, y: ay, scale: GLOW.activeScale, opacity: 1 });
   };
 
   const tl = gsap.timeline({ defaults: { overwrite: 'auto' } });
-  tl.to(prog, { t: 1, duration: dur, ease: 'sine.inOut', immediateRender: true, onUpdate: frame }, 0);
+  // Constant speed along the loop path (`none`): the smoothest circular
+  // motion — no easing lumps inside the loop itself.
+  tl.to(prog, { t: 1, duration: dur, ease: 'none', immediateRender: true, onUpdate: frame }, 0);
   tl.to(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, duration: dur, ease: 'sine.inOut', immediateRender: true }, 0);
   tl.to(nodes.label, { x: lx, y: ly, duration: dur * 0.9, ease: 'power1.inOut', opacity: 1 }, dur * 0.1);
-  // Mid-travel theme re-sample: if the path crosses into a dark area,
-  // invert the pointer halfway through so it never sits the wrong colour.
+  // At the loop's apex (~half the travel), re-sample the theme so the
+  // pointer inverts if it swung over a dark area.
   tl.call(() => applyTheme(nodes, cx, cy), undefined, dur * 0.5);
-  // Arrival beat: halo settle-pulse + label fade-in, sequenced after the
-  // travel in ONE interruptible timeline.
+  // Arrival beat: halo settle-pulse + label brighten, after the travel.
   tl.fromTo(nodes.halo, { scale: 0.96 }, { scale: 1, duration: 0.26, ease: 'power2.out' }, dur);
   tl.fromTo(nodes.label, { opacity: 0.4 }, { opacity: 1, duration: 0.22, ease: 'power1.out' }, dur);
-  // The aura keeps pulsing while the agent is "working on" this target.
+  // The border aura keeps breathing while the agent works on the target.
   tl.call(() => startAuraPulse(nodes), undefined, dur + 0.1);
 
   travel = tl;
   lastPos = t;
 }
 
-/** v5: the agent is now WAITING (planner round-trip) — breathe + glow. */
+/** v5.1: the agent is now WAITING (planner round-trip) — breathe the border glow. */
 export function startThinkingPulse(): void {
   try {
     if (prefersReducedMotion()) return;
     const nodes = ensureCursorEl();
     if (!nodes) return;
     stopThinkingPulse();
-    // Place the badge + sonar at the current tip before breathing (they
-    // may have never had a travel run, e.g. overlay just built).
-    const tip = { x: lastPos.x - TIP_OFFSET.x, y: lastPos.y - TIP_OFFSET.y };
-    const bx = tip.x + 4;
-    const by = tip.y + 4;
-    gsap.set(nodes.badge, { x: bx, y: by, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
-    gsap.set(nodes.sonar, { x: bx, y: by, xPercent: -50, yPercent: -50, scale: 1, opacity: 0.5 });
-    gsap.set(nodes.badgeDot, { scale: 1, opacity: 1 });
-
-    // v5: while the agent thinks, the WORKING AURA pulses (the "the agent
-    // is alive and doing something" cue) instead of the v3 dot heartbeat.
+    // The working cue is the border-tracing aura breathing (v5.1) — the
+    // v3 badge-dot heartbeat + sonar ping are gone. Place the aura at
+    // the current arrow position first (it may never have had a
+    // travel, e.g. the overlay was just built).
     startAuraPulse(nodes);
-
-    // Sonar ping: a separate loop that expands out of the tip and fades,
-    // then restarts - the "alive and listening" cue. From 1.0/0.5 to
-    // sonarScale/0 so each cycle is a visible expanding ring.
-    sonarPing = gsap.fromTo(
-      nodes.sonar,
-      { scale: 1, opacity: 0.5 },
-      {
-        scale: THINKING_PULSE.sonarScale,
-        opacity: 0,
-        duration: THINKING_PULSE.period,
-        repeat: -1,
-        ease: 'sine.out',
-        transformOrigin: 'center',
-        overwrite: 'auto',
-      },
-    );
-    // Keep the exported THINKING_PULSE contract exercised (the badge dot
-    // still breathes, just less prominently than in v3).
-    thinkingPulse = gsap.to(nodes.badgeDot, {
-      scale: THINKING_PULSE.ringScalePeak,
-      opacity: THINKING_PULSE.arrowDim,
-      duration: THINKING_PULSE.period / 2,
-      yoyo: true,
-      repeat: -1,
-      ease: 'sine.inOut',
-      transformOrigin: 'center',
-    });
   } catch {
     /* presentation layer - never fatal */
   }
@@ -660,19 +648,14 @@ export function startThinkingPulse(): void {
 /** The agent is acting again — stop thinking, let the aura settle. */
 export function stopThinkingPulse(): void {
   try {
-    thinkingPulse?.kill();
-    thinkingPulse = null;
-    sonarPing?.kill();
-    sonarPing = null;
+    restAura(
+      (typeof document === 'undefined'
+        ? null
+        : document.getElementById(CURSOR_ID)?.shadowRoot?.querySelector('.ac-aura')) as HTMLElement | null,
+    );
     const host = typeof document === 'undefined' ? null : document.getElementById(CURSOR_ID);
     const shadow = host?.shadowRoot;
-    if (shadow) {
-      gsap.set(shadow.querySelector('.ac-dot'), { scale: 1, opacity: 1 });
-      gsap.set(shadow.querySelector('.ac-sonar'), { scale: 1, opacity: 0 });
-      gsap.set(shadow.querySelector('.ac-arrow'), { opacity: 1, scale: 1 });
-      gsap.set(shadow.querySelector('.ac-badge'), { scale: 1, opacity: 1 });
-      restAura(shadow.querySelector('.ac-aura') as HTMLElement | null);
-    }
+    if (shadow) gsap.set(shadow.querySelector('.ac-arrow'), { opacity: 1, scale: 1 });
   } catch {
     /* presentation layer - never fatal */
   }
@@ -681,10 +664,10 @@ export function stopThinkingPulse(): void {
 /**
  * Position + colour the overlay for a centre/box/kind. Never throws.
  *
- * v5: this now only (a) tints the target HALO by action kind and
- * (b) hands the travel to `travelCurve` — the S-curve bézier engine that
+ * v5.1: this now only (a) tints the target HALO by action kind and
+ * (b) hands the travel to `travelCurve` — the circular-loop engine that
  * also re-samples the page theme under the target (applyTheme) so the
- * pointer inverts on dark sites. `kind` still drives the halo tint.
+ * pointer inverts on dark sites (black arrow on light sites).
  */
 function moveOverlay(
   nodes: OverlayNodes,
@@ -695,7 +678,7 @@ function moveOverlay(
 ): void {
   const color = KIND_COLORS[kind];
 
-  // v3: the target box is a soft rounded HALO (radius + soft glow), not a
+  // The target box is a soft rounded HALO (radius + soft glow), not a
   // hard 2px border. cursorStyles still returns border/background for
   // test-compat; we apply them as halo tint + box-shadow instead.
   const ringed = s.width !== '0px' && s.height !== '0px';
@@ -710,16 +693,17 @@ function moveOverlay(
   // Moving = acting: stop the idle breathing first.
   stopThinkingPulse();
 
-  // The arrow tip is the hotspot; travel the S-curve to it (themed +
-  // aured) — the engine owns the halo glide, label, and arrival beat.
+  // The arrow tip is the hotspot; loop-travel to it (themed + glowed) —
+  // the engine owns the halo glide, label, and arrival beat.
   const target = { x: cx, y: cy };
   travelCurve(nodes, target, cx, cy);
 }
 
 /**
  * Position the agent cursor over a target element for a kind of action.
- * Reads the element's *current* rect (the executor has already scrolled it
- * into view), colours it by action kind, and labels it `<KIND> · <TAG>`.
+ * Reads the element's *current* rect (the executor has already scrolled
+ * it into view), colours it by action kind, and labels it
+ * `<KIND> · <TAG>`.
  *
  * Never throws: this is a presentation overlay, and a failure here must
  * not take the action down with it. Returns whether it actually moved.
@@ -748,9 +732,9 @@ export function showCursor(el: Element, kind: CursorActionKind): boolean {
 
 /**
  * Fire the click-ripple + settle pulse at the current cursor position.
- * Call this the moment an action *lands* (from the executor), not when the
- * cursor is presented. Pure presentation; never throws; no-op under
- * reduced motion (a ripple is a visual effect, not information).
+ * Call this the moment an action *lands* (from the executor), not when
+ * the cursor is presented. Pure presentation; never throws; no-op
+ * under reduced motion (a ripple is a visual effect, not information).
  */
 export function pulseCursor(): void {
   try {
@@ -758,18 +742,15 @@ export function pulseCursor(): void {
     if (!nodes) return;
     if (prefersReducedMotion()) return;
     stopThinkingPulse();
-    // v5: the tip sits TIP_OFFSET inside the ARROW box, which is pinned at
-    // lastPos (the element centre) — so the ripple fires at the tip, not
-    // the centre, matching where the user's eye is watching.
-    const tipX = lastPos.x - TIP_OFFSET.x;
-    const tipY = lastPos.y - TIP_OFFSET.y;
+    // The arrow tip sits exactly on lastPos (the element centre) — the
+    // tip is the hotspot the user watches, so the ripple fires there.
     gsap.fromTo(
       nodes.ripple,
-      { scale: 0.25, opacity: 0.5, x: tipX, y: tipY, backgroundColor: KIND_COLORS.CLICK },
+      { scale: 0.25, opacity: 0.5, x: lastPos.x, y: lastPos.y, backgroundColor: KIND_COLORS.CLICK },
       { scale: 2.6, opacity: 0, duration: 0.6, ease: 'power2.out', overwrite: 'auto' },
     );
     // The landing beat is a quick scale-pop on the target halo (the
-    // "action landed" feedback), plus a brightening working-aura blip.
+    // "action landed" feedback), plus a brightening border-glow blip.
     gsap.fromTo(
       nodes.halo,
       { scale: 1 },
