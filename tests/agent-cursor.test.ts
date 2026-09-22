@@ -8,6 +8,9 @@ import {
   pulseCursor,
   hideCursor,
   removeCursor,
+  startThinkingPulse,
+  stopThinkingPulse,
+  THINKING_PULSE,
 } from '../src/lib/agentCursor';
 
 const CURSOR_ID = '__agent-cursor';
@@ -55,20 +58,37 @@ describe('cursorStyles', () => {
   });
 });
 
-describe('travelDuration (distance-scaled, clamped)', () => {
+describe('travelDuration (v2: slower, fluid, never teleports)', () => {
   it('snaps tiny hops (<=2px) instantly', () => {
     expect(travelDuration(0)).toBe(0);
     expect(travelDuration(2)).toBe(0);
   });
-  it('scales with distance (~1600px/s)', () => {
-    expect(travelDuration(800)).toBeCloseTo(0.5, 5);
+  it('scales with distance (~850px/s, slower than v1 so it reads as a glide)', () => {
+    // 800px / 850 = 0.94s (was 0.5s at ~1600px/s in v1)
+    expect(travelDuration(800)).toBeCloseTo(800 / 850, 3);
   });
-  it('clamps long jumps to the 0.15-0.6s band', () => {
-    expect(travelDuration(10)).toBe(0.15);
-    expect(travelDuration(4000)).toBe(0.6);
+  it('has a 0.25s floor so short nudges glide instead of snapping', () => {
+    expect(travelDuration(30)).toBe(0.25);
+    expect(travelDuration(100)).toBe(0.25); // 100/850=0.118 -> floored to 0.25
+  });
+  it('caps long jumps at 1.2s (deliberate, not sluggish)', () => {
+    expect(travelDuration(4000)).toBe(1.2);
   });
   it('never returns NaN', () => {
     expect(travelDuration(Number.NaN)).toBe(0);
+  });
+});
+
+describe('thinking pulse (v3: badge-dot heartbeat + sonar ping while the planner waits)', () => {
+  it('exposes stable, sane timing constants', () => {
+    expect(THINKING_PULSE.period).toBeGreaterThan(1);
+    // v3: the badge's center dot breathes up to this scale (a heartbeat,
+    // not the whole ring scaling like v2).
+    expect(THINKING_PULSE.ringScalePeak).toBeGreaterThan(1);
+    expect(THINKING_PULSE.arrowDim).toBeGreaterThan(0);
+    expect(THINKING_PULSE.arrowDim).toBeLessThan(1);
+    // v3: the sonar ping expands out of the tip up to this scale.
+    expect(THINKING_PULSE.sonarScale).toBeGreaterThan(THINKING_PULSE.ringScalePeak);
   });
 });
 
@@ -96,6 +116,23 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     expect(shadowLabel(CURSOR_ID)?.textContent).toBe('CLICK · button');
   });
 
+  it('v3: mounts the presence badge (ring + dot), sonar, and halo nodes', () => {
+    const el = document.createElement('button');
+    document.body.appendChild(el);
+    showCursor(el, 'CLICK');
+    const shadow = (document.getElementById(CURSOR_ID) as HTMLElement).shadowRoot!;
+    // The Notion-style presence badge = concentric ring with a center dot.
+    const badge = shadow.querySelector('.ac-badge') as HTMLElement;
+    expect(badge).toBeTruthy();
+    expect(badge.querySelector('.ac-dot')).toBeTruthy();
+    // Faint sonar ping + soft target halo.
+    expect(shadow.querySelector('.ac-sonar')).toBeTruthy();
+    expect(shadow.querySelector('.ac-halo')).toBeTruthy();
+    // v3: the arrow is now the constant clean dark shape (not kind-tinted).
+    const path = shadow.querySelector('.ac-arrow svg path');
+    expect(path?.getAttribute('fill')).toBe('#111827');
+  });
+
   it('is idempotent - one host, reused on repeat calls', () => {
     const el = document.createElement('input');
     document.body.appendChild(el);
@@ -116,6 +153,19 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     document.body.appendChild(el);
     showCursor(el, 'CLICK');
     expect(() => pulseCursor()).not.toThrow();
+  });
+
+  it('startThinkingPulse / stopThinkingPulse are idempotent and never throw', () => {
+    const el = document.createElement('button');
+    document.body.appendChild(el);
+    showCursor(el, 'CLICK');
+    expect(() => startThinkingPulse()).not.toThrow();
+    expect(() => startThinkingPulse()).not.toThrow(); // second call restarts, no dup tween
+    expect(() => stopThinkingPulse()).not.toThrow();
+    // A new travel stops the pulse automatically.
+    startThinkingPulse();
+    expect(() => showCursor(el, 'TYPE')).not.toThrow();
+    expect(() => stopThinkingPulse()).not.toThrow();
   });
 
   it('hideCursor hides but keeps the node; removeCursor removes it', () => {

@@ -3,13 +3,14 @@ import { browser } from 'wxt/browser';
 import { extract, getPageContext, maskLabel } from '../lib/dom';
 import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/actions';
 import { visionPipeline } from '../lib/vision/florence2';
+import { startThinkingPulse, stopThinkingPulse } from '../lib/agentCursor';
 
 /**
  * Content Script - DOM Capture + PII Redaction + Action Execution
  *
  * This script runs in the page context and:
  * 1. Captures DOM structure and accessibility tree
- * 2. Detects and redacts PII before sending to server
+ * 2. Detects and redacts PII before sending to the server
  * 3. Executes actions (click, type, scroll) on elements
  * 4. Posts sanitized data to the background script
  */
@@ -22,14 +23,16 @@ type AgentRequest =
     | { type: 'capturePage' }
     | { type: 'HIGHLIGHT'; selector: string }
     | { type: 'VISION_EXTRACT' } // New: DOM + Vision extraction
-    | { type: 'VISION_OCR' }; // #100: on-device OCR confirm
+    | { type: 'VISION_OCR' } // #100: on-device OCR confirm
+    | { type: 'CURSOR_THINKING'; on: boolean } // #132: agent-cursor breathing while the planner LLM is thinking
+    | { type: 'VISION_STATUS' }; // #136: on-device VLM live-indicator status
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
     if (typeof msg !== 'object' || msg === null || !('type' in msg)) return false;
     const t = (msg as { type: unknown }).type;
     return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING'
         || t === 'capturePage' || t === 'HIGHLIGHT' || t === 'VISION_EXTRACT'
-        || t === 'VISION_OCR';
+        || t === 'VISION_OCR' || t === 'CURSOR_THINKING' || t === 'VISION_STATUS';
 }
 
 const HIGHLIGHT_ID = '__agent-highlight';
@@ -154,12 +157,14 @@ export default defineContentScript({
             try {
                 const screenshotResult: any = await browser.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
                 if (!screenshotResult?.dataUrl) {
+                    visionPipeline.recordOcr(false, 'no screenshot');
                     return { ok: false, error: 'no screenshot' };
                 }
                 if (!visionPipeline.isInitialized()) {
                     try {
                         await visionPipeline.initialize();
                     } catch (initErr) {
+                        visionPipeline.recordOcr(false, 'init failed');
                         return { ok: false, error: 'vision init failed: ' + String(initErr) };
                     }
                 }
@@ -167,11 +172,23 @@ export default defineContentScript({
                     task: 'ocr',
                 });
                 const text = result?.text ?? (result?.data as any)?.text ?? '';
-                if (!text) return { ok: false, error: 'empty ocr' };
+                if (!text) {
+                    visionPipeline.recordOcr(false, 'empty ocr');
+                    return { ok: false, error: 'empty ocr' };
+                }
+                visionPipeline.recordOcr(true, 'ok');
                 return { ok: true, text };
             } catch (e) {
+                visionPipeline.recordOcr(false, String(e));
                 return { ok: false, error: String(e) };
             }
+        }
+
+        // #136: the popup's VLM live indicator polls this. Pure status (no PII,
+        // no pixels): is the on-device model ready / loading / unavailable,
+        // and what did the last OCR check conclude?
+        function getVisionStatus() {
+            return visionPipeline.status();
         }
 
         /**
@@ -364,6 +381,27 @@ export default defineContentScript({
 
             if (message.type === 'HIGHLIGHT') {
                 return Promise.resolve(highlight(message.selector));
+            }
+
+            if (message.type === 'CURSOR_THINKING') {
+                // #132: the planner LLM round-trip takes seconds (reasoning
+                // model). While it runs, the agent cursor breathes instead of
+                // sitting frozen, so the wait reads as "thinking", not "dead".
+                // Best-effort: if the overlay isn't on this page the call is
+                // a no-op. Fire-and-forget - never block the message path.
+                try {
+                    if (message.on) startThinkingPulse();
+                    else stopThinkingPulse();
+                } catch {
+                    /* presentation layer - never fatal */
+                }
+                return Promise.resolve({ ok: true });
+            }
+
+            if (message.type === 'VISION_STATUS') {
+                // #136: return the on-device VLM pipeline status for the popup
+                // live indicator. Pure status - no pixels, no PII.
+                return Promise.resolve({ ok: true, status: getVisionStatus() });
             }
 
             return;

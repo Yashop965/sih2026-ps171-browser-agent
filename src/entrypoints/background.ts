@@ -212,8 +212,19 @@ export default defineBackground({
       }
     };
 
+    // #132: nudge the agent-cursor into "breathing" mode around the LLM wait,
+    // so the multi-second planner round-trip reads as the agent *thinking*
+    // rather than the cursor sitting frozen. Best-effort fire-and-forget: it
+    // targets the active web tab's content script and never blocks the plan.
+    const setCursorThinking = (on: boolean) => {
+      void browser.tabs.query({ active: true, currentWindow: true })
+        .then(([t]) => (t?.id === undefined ? null : browser.tabs.sendMessage(t.id, { type: 'CURSOR_THINKING', on })))
+        .catch(() => {});
+    };
+
     const fetchPlan = async (payload: unknown, signal?: AbortSignal): Promise<any> => {
       const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
+      setCursorThinking(true);
       try {
         const response = await fetch(`${serverUrl}/plan`, {
           method: 'POST',
@@ -227,6 +238,8 @@ export default defineBackground({
         // AbortError (Stop pressed mid-request) or a network failure. Either
         // way there is no plan to act on this step; the loop stops/re-checks.
         return null;
+      } finally {
+        setCursorThinking(false);
       }
     };
 
