@@ -525,10 +525,12 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
 
 ### 5.1 Build Status
 
-> **Note (2026-09-22):** current `dist/chrome-mv3` build is **1.33 MB** after the
-> PII criticals (#130 C1–C3), the agent-cursor v3 make-over (#137), task history
-> (#134), live VLM indicator (#136), lower-section modernization (#135), and the
-> fast zero-reasoning planner model (#133). The breakdown below is the Sep-2 snapshot.
+> **Note (2026-09-23):** current `dist/chrome-mv3` build is **1.33 MB** after the
+> PII criticals (#130 C1–C3), the agent-cursor v5 rebuild (#137→v5.2: theme-aware
+> "select" pointer + border-tracing working glow + single closed 360° loop
+> travel, movement-engine rework open in #139), task history (#134), live VLM
+> indicator (#136), lower-section modernization (#135), and the fast
+> zero-reasoning planner model (#133). The breakdown below is the Sep-2 snapshot.
 
 ```
 Total build size: 1.21 MB (Sep-2 snapshot)
@@ -540,11 +542,12 @@ Total build size: 1.21 MB (Sep-2 snapshot)
 
 ### 5.2 Test Coverage Summary
 
-> **Note (2026-09-22):** the test suite has since grown to **421 tests across 34
+> **Note (2026-09-23):** the test suite has since grown to **429 tests across 34
 > files** (Chrome MV3 build **1.33 MB**), plus a 74-test Python server suite. The
 > table below is the Sep-2 snapshot list; the current full set adds the checklist,
 > port-retry, loop-detection, loopWarning-signal, WAIT-duration, autonomy,
-> goal-backstop, vision-confirm, agent-cursor v3 (presence badge + sonar ping),
+> goal-backstop, vision-confirm, agent-cursor v5.2 (theme-aware pointer,
+> border-tracing glow, closed 360° loop travel — `loopGeometry`/`travelDuration`),
 > task-history, tolerant select-matching, and PII redaction/egress regression
 > suites.
 
@@ -934,7 +937,7 @@ interface PlanResponse {
 | Issue | Feature | Status | Notes |
 |-------|---------|--------|-------|
 | #100 | Local Florence-2 / deterministic goal backstop to stop when the goal is on-screen | **In progress** (another agent) | Fast path = URL/title matching vs checklist (`src/lib/goalBackstop.ts`); optional Florence-2 OCR/VQA confirm; screenshot never leaves device |
-| #101 | Visual agent-cursor overlay (computer-use style) | Filed | Content-script overlay, `pointer-events:none`, no PII to logs |
+| #101 | Visual agent-cursor overlay (computer-use style) | **Done (v5.2)** · rework → #139 | Select pointer (mirrored, tip top-left), theme-aware colors, border-tracing working glow, single closed 360° loop travel; open #139 tracks the movement-engine rework + the light-mode color bug |
 | #102 | Local user-profile of fixed personal constants on-device | Filed | Raw values masked to tokens before `/plan` egress |
 | #103 | Heatmap visual redesign (modern, non-expert readable) | Filed | Presentation-only, no detection change |
 | #104 | PII false-positive regression test on `pii-test-page.html` | Filed | Context-aware detection + precision benchmark |

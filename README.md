@@ -5,16 +5,17 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-![vitest: 421/421](https://img.shields.io/badge/vitest-421%2F421%20passing-22c55e?style=for-the-badge)
+![vitest: 429/429](https://img.shields.io/badge/vitest-429%2F429%20passing-22c55e?style=for-the-badge)
 ![pytest: 74/74](https://img.shields.io/badge/pytest-74%2F74%20passing-22c55e?style=for-the-badge)
 ![build: 1.33 MB](https://img.shields.io/badge/build-1.33%20MB%20chrome-mv3-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-22):** `main` clean · **421/421** vitest + **74/74**
-> pytest passing · Chrome MV3 build **1.33 MB** · 0 PII off-device · Notion-style
-> agent cursor v3 (presence badge + sonar ping) · task-history cache · live VLM
-> indicator · planner on a zero-reasoning fast model · 3-hop live E2E passing
-> end-to-end. Repo:
+> **Current state (verified 2026-09-23):** `main` clean · **429/429** vitest + **74/74**
+> pytest passing · Chrome MV3 build **1.33 MB** · 0 PII off-device · agent cursor
+> v5.2 (theme-aware select pointer + border-tracing working glow + single closed
+> 360° loop travel, open in #139) · task-history cache · live VLM indicator ·
+> planner on a zero-reasoning fast model · 3-hop live E2E passing end-to-end.
+> Repo:
 > [`github.com/Yashop965/sih2026-ps171-browser-agent`](https://github.com/Yashop965/sih2026-ps171-browser-agent).
 
 ---
@@ -69,7 +70,7 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 - **Autonomy (#84/#85/#86):** goal-driven multi-page execution — `NAVIGATE` via background `NAVIGATE_TAB`, `WAIT` primitive, `KEY` primitive (press Enter/Tab/arrows so a search actually submits), and robust web-tab resolution so the agent never targets its own extension page.
 - **Cross-page memory (#99):** the planner is stateless across pages, so after each navigation it used to re-reason from scratch and re-do completed steps. Fix: the planner authors a small ordered **task checklist** of sub-goals; the runner tracks it (`mergeChecklist`, sticky-`done`), feeds it back to `/plan` each step, and **gates DONE** on it (3-strike cap → best-effort degraded).
 - **Planner loop-guard (#130):** the runner detects repeated no-op actions and feeds a PII-safe `loopWarning` back into the planner prompt (with NPTEL-style Rule 20: a submit is proven by a *distinctive page change*). Kills the "re-typing the same value forever" loop seen in live runs.
-- **Agent cursor v3 (#137):** the visible agent cursor is a Notion-style make-over — a clean rounded dark arrow with a concentric **presence badge** (ring + center dot) at the hotspot and a soft rounded **target halo**; while the planner thinks the badge dot heartbeats and a **sonar ring** pings out of the tip, so the agent reads as "alive". Transform-only glide (never teleports), shadow-DOM + `all:initial` isolation so hostile page CSS can't hide it.
+- **Agent cursor v5 (#137 → v5.2, movement engine open in #139):** the visible agent cursor is the user-referenced "select" pointer (mirrored, tip top-left), **theme-aware** — a black shape + white outline on light sites, inverting to white + dark outline on dark sites (sampled live per target) — with a **border-tracing blue working glow** that hugs the pointer's silhouette and breathes while the agent works/thinks. Every hop now rides a **single closed 360° loop** (straight approach → one full circle, G1-continuous in and out → straight tail onto the target) at a deliberately slow, constant ~320px/s so the motion is smooth and watchable. Transform-only, shadow-DOM + `all:initial` isolation so hostile page CSS can't hide it. The loop **placement/shape** is flagged for a rework pass in #139 (and a known open: the arrow did not switch to black on light mode yet — tracked in #139).
 - **Task history (#134):** the popup caches recent prompts (`sih_recent_tasks`, cap 8, deduped) with one-click re-run and outcome-tinted status rails — the last task is persisted and reusable across popup opens.
 - **Live VLM indicator (#136):** a compact popup pill shows the on-device vision pipeline state (ready / loading / idle / unavailable) plus the last OCR outcome, polled from the active tab. Pure status — no pixels or PII leave the device.
 - **Fast planner model (#133):** the planner runs on a zero-reasoning model that answers in ~3 s instead of the CoT default's ~5 s per step (~4× faster live, no degraded calls). Both options are documented in `server/.env.example` with measured timings.
@@ -97,7 +98,7 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 | Metric | Value | Since |
 |---|---|---|
-| **Vitest unit tests** | **421 / 421 passing** · 34 files | PR #137 |
+| **Vitest unit tests** | **429 / 429 passing** · 34 files | cursor v5 work |
 | **Python server tests** | **74 / 74 passing** · 9 files | PR #127 |
 | **Chrome MV3 build** | **1.33 MB** (Firefox MV2 same tree) | PR #137 |
 | **PII off-device leaks** | **0** (raw PII never leaves the machine; last-line firewall on egress) | audit C1–C3 |
@@ -107,9 +108,9 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 | **Codebase** | **~12.4 k LOC** client TS + **~6.8 k LOC** server Python | today |
 
 <details>
-<summary>📈 Test coverage by module (421 tests, top 15 + rest) — click to expand</summary>
+<summary>📈 Test coverage by module (429 tests, top 15 + rest) — click to expand</summary>
 
-![Unit test coverage by module (421 passing, 34 files)](media/charts/tests-by-module.svg)
+![Unit test coverage by module (429 passing, 34 files)](media/charts/tests-by-module.svg)
 
 </details>
 
@@ -126,7 +127,7 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 | Change | Effect |
 |---|---|
-| **Cursor v3 make-over (#137)** | Notion-style agent cursor: clean rounded dark arrow + concentric presence badge (ring + center dot) at the hotspot + soft rounded target halo; heartbeat dot + expanding sonar ping while the planner thinks. Transform-only glide, shadow-DOM + `all:initial` isolation |
+| **Agent cursor v5.2 (movement engine → #139)** | The user-referenced "select" pointer (mirrored, tip top-left, 24px), theme-aware colors (black on light / white on dark sites) + a **border-tracing blue working glow** that hugs the pointer silhouette and breathes while the agent works. Travel = a **single closed 360° loop** (straight approach → one full G1-continuous circle → straight tail onto target) at a slow constant ~320px/s. Transform-only, shadow-DOM + `all:initial` isolation. Open in #139: loop placement/shape rework + the light-mode color still inverts to white on some light pages |
 | **Task history (#134)** | Popup persists a `sih_recent_tasks` list (cap 8, deduped, one-click re-run, status-tinted rails, relative timestamps, Clear) — the last prompt is cached and reused |
 | **Live VLM indicator (#136)** | `VlmIndicator` polls the active tab's on-device vision pipeline via a new `VISION_STATUS` message; compact status pill (ready / loading / idle / unavailable + last-OCR outcome). Pure state — no pixels, no PII leave the device |
 | **Lower-section modernization (#135)** | Heatmap tab renders the real card `Heatmap` component (removed the dead inline dot-grid); a "quiet" de-noise toggle hides unverified PII matches below 70% confidence |
@@ -484,10 +485,19 @@ privacy-first extension. Post-deadline hardening shipped in two waves:
   (#135 — card heatmap + "quiet" PII de-noise), and the **fast planner model**
   (#133 — zero-reasoning, ~4× faster live). Shipped as one squash-merged PR with
   all suites green (421/421 vitest · 74/74 pytest · 1.33 MB build).
+- **Sep 23 (cursor v5 wave, this PR):** agent cursor rebuilt to the user's
+  reference — the "select" pointer (mirrored, tip top-left), **theme-aware
+  colors** (black on light / white on dark sites), a **border-tracing blue
+  working glow** (blurred stroke of the same path — no badge/dot/sonar), and
+  **closed-loop travel** (v5.2: one full 360° circle between A and B, G1
+  tangent-continuous, constant ~320px/s, slow + watchable). 429/429 vitest ·
+  74/74 pytest · 1.33 MB. The movement-pattern engine is being reworked next
+  (issue #139), which also tracks the open light-mode color bug.
 
-Open feature issues **#100–#104 / #113 / #115** (local vision stop, agent-cursor
-overlay hardening, local user-profile, heatmap visual polish, on-device VLM live
-loop, VLM fallback extractor) are scoped; most cursor/VLM pieces now have a
+Open feature issues **#100–#104 / #113 / #115 / #139** (local vision stop,
+agent-cursor overlay hardening, local user-profile, heatmap visual polish,
+on-device VLM live loop, VLM fallback extractor, **cursor movement-pattern
+engine rework**) are scoped; most cursor/VLM pieces now have a
 proven standalone path. The on-device VLM *live end-to-end* loop (#113) is the
 one remaining open item — the model loads on-device and the new `VlmIndicator`
 (#136) surfaces its state, but the full OCR-confirmed run still needs a live pass.
