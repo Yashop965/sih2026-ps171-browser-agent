@@ -58,12 +58,60 @@ export interface VisionModelConfig {
   dtype: 'fp32' | 'fp16' | 'q4';
 }
 
+// #136: the VLM live-indicator's view of the on-device vision pipeline.
+// Pure status (state + backend + last OCR outcome), no PII.
+export interface VisionStatus {
+  state: 'idle' | 'loading' | 'ready' | 'unsupported';
+  backend?: 'webgpu' | 'wasm';
+  model?: string;
+  lastOcrAt?: number;
+  lastOcrOk?: boolean;
+  lastOcrDetail?: string;
+}
+
 class Florence2Pipeline {
   private model: any = null;
   private processor: any = null;
   private initialized = false;
   private usingWebGPU = false;
   private loadPromise: Promise<void> | null = null;
+  // #136: live status for the popup VLM indicator. Records the last OCR
+  // verdict so the UI can show "ready", "not-yet-loaded", "last check
+  // failed", etc. Pure state, no PII.
+  private lastOcrAt = 0;
+  private lastOcrOk = false;
+  private lastOcrDetail = '';
+
+  /** #136: poll this (or the VISION_STATUS message) to render the indicator. */
+  status(): VisionStatus {
+    const webgpu = Florence2Pipeline.isWebGPUSupported();
+    if (this.initialized) {
+      return {
+        state: 'ready',
+        backend: this.usingWebGPU ? 'webgpu' : 'wasm',
+        model: this.getModelId(),
+        lastOcrAt: this.lastOcrAt,
+        lastOcrOk: this.lastOcrOk,
+        lastOcrDetail: this.lastOcrDetail,
+      };
+    }
+    if (this.loadPromise) {
+      return { state: 'loading', backend: webgpu ? 'webgpu' : 'wasm', model: this.getModelId() };
+    }
+    // Not started. If WebGPU is absent the model may still load via WASM,
+    // so "unsupported" only when neither path is available on this browser.
+    if (!webgpu && typeof window === 'undefined') {
+      return { state: 'unsupported' };
+    }
+    return { state: 'idle', backend: webgpu ? 'webgpu' : 'wasm' };
+  }
+
+  /** #136: record an OCR attempt's outcome (called by ocrVisibleScreen). */
+  recordOcr(ok: boolean, detail: string): void {
+    this.lastOcrAt = Date.now();
+    this.lastOcrOk = ok;
+    this.lastOcrDetail = detail;
+  }
 
   /** Check WebGPU availability */
   static isWebGPUSupported(): boolean {

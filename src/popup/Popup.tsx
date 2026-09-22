@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
 import ResourceMonitor from '../components/ResourceMonitor';
+import VlmIndicator from '../components/VlmIndicator';
 import { PROVIDERS, ProviderKey } from '../lib/providerConfig';
 
 // #134: task-history shape (persisted under this key in browser.storage.local).
@@ -43,16 +44,17 @@ function Popup() {
 
   // Load saved state from browser.storage
   useEffect(() => {
-    browser.storage.local.get(['task', 'startUrl', 'providerKey', 'apiKey', RECENT_TASKS_KEY]).then((result) => {
-      if (result.task) setTask(result.task);
-      if (result.startUrl) setStartUrl(result.startUrl);
-      if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
-      if (result.apiKey) setProviderKey(result.apiKey);
-      if (Array.isArray(result[RECENT_TASKS_KEY])) {
-        setRecentTasks(result[RECENT_TASKS_KEY] as RecentTask[]);
-      }
-      setHydrated(true);
-    });
+    browser.storage.local.get(['task', 'startUrl', 'providerKey', 'apiKey', RECENT_TASKS_KEY])
+      .then((result: Record<string, any>) => {
+        if (result.task) setTask(result.task);
+        if (result.startUrl) setStartUrl(result.startUrl);
+        if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
+        if (result.apiKey) setProviderKey(result.apiKey);
+        if (Array.isArray(result[RECENT_TASKS_KEY])) {
+          setRecentTasks(result[RECENT_TASKS_KEY] as RecentTask[]);
+        }
+        setHydrated(true);
+      });
   }, []);
 
   // Save task to browser.storage whenever it changes
@@ -272,7 +274,10 @@ function Popup() {
       <div className="popup-body">
         {/* Resource Monitor - at top for visibility */}
         <ResourceMonitor />
-        
+
+        {/* #136: on-device VLM live indicator */}
+        <VlmIndicator />
+
         {/* Provider Selection */}
         <div className="provider-section">
           <label className="input-label">LLM Provider</label>
