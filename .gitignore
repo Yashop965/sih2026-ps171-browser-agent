@@ -81,3 +81,4 @@ scripts/.scratch/
 scripts/verify/vlm-drive-result.txt
 scripts/verify/local-model-request.log
 .vitest-results.json
+server/.env*
