@@ -1,9 +1,20 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { browser } from 'wxt/browser';
 import './Popup.css';
 import PrivacyLedger from '../components/PrivacyLedger';
 import ResourceMonitor from '../components/ResourceMonitor';
 import { PROVIDERS, ProviderKey } from '../lib/providerConfig';
+
+// #134: task-history shape (persisted under this key in browser.storage.local).
+const RECENT_TASKS_KEY = 'sih_recent_tasks';
+const RECENT_TASKS_CAP = 8;
+
+interface RecentTask {
+  task: string;
+  startUrl: string;
+  startedAt: number;
+  status: 'complete' | 'stalled' | 'failed' | 'stopped' | 'running' | 'unknown';
+}
 
 function Popup() {
   const [isRunning, setIsRunning] = useState(false);
@@ -20,13 +31,27 @@ function Popup() {
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [copyFlash, setCopyFlash] = useState(false);
 
+  // #134 task history: recent prompts cached in storage, reusable with one
+  // click. Newest first; each entry remembers its start URL + the final
+  // status of its last run.
+  const [recentTasks, setRecentTasks] = useState<RecentTask[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const activeTaskRef = useRef<string | null>(null);
+  // #134: the most recently mirrored runner state (used by the status-sync
+  // effect to stamp a terminal status onto the active recent-task entry).
+  const mirrorRef = useRef<any>(null);
+
   // Load saved state from browser.storage
   useEffect(() => {
-    browser.storage.local.get(['task', 'startUrl', 'providerKey', 'apiKey']).then((result) => {
+    browser.storage.local.get(['task', 'startUrl', 'providerKey', 'apiKey', RECENT_TASKS_KEY]).then((result) => {
       if (result.task) setTask(result.task);
       if (result.startUrl) setStartUrl(result.startUrl);
       if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
       if (result.apiKey) setProviderKey(result.apiKey);
+      if (Array.isArray(result[RECENT_TASKS_KEY])) {
+        setRecentTasks(result[RECENT_TASKS_KEY] as RecentTask[]);
+      }
+      setHydrated(true);
     });
   }, []);
 
@@ -76,6 +101,7 @@ function Popup() {
   // broadcasts into local UI state. Closing the popup no longer aborts a run.
   const mirrorTaskState = useCallback((state: any) => {
     if (!state) return;
+    mirrorRef.current = state; // #134: keep the latest runner state for the history status-sync
     setStep(state.step ?? 0);
     setIsRunning(state.running === true);
     const raw = Array.isArray(state.logs) ? state.logs : [];
@@ -119,6 +145,19 @@ function Popup() {
     setIsRunning(true);
     setLatency(null);
     const started = performance.now();
+    const taskId = task.trim();
+    activeTaskRef.current = taskId;
+
+    // #134: record this prompt into the recent-tasks cache (deduped, newest
+    // first, capped). Runs persist even if the popup closes.
+    setRecentTasks((prev) => {
+      const rest = prev.filter((t) => t.task !== taskId);
+      return [
+        { task: taskId, startUrl: startUrl.trim(), startedAt: Date.now(), status: 'running' as const },
+        ...rest,
+      ].slice(0, RECENT_TASKS_CAP);
+    });
+
     const res: any = await browser.runtime.sendMessage({
       type: 'START_TASK',
       task: task.trim(),
@@ -127,16 +166,94 @@ function Popup() {
     if (!res?.ok) {
       setLogs([`⚠️ Could not start task (${res?.error ?? 'unknown'})`]);
       setIsRunning(false);
+      activeTaskRef.current = null;
       return;
     }
     setLatency(Math.round(performance.now() - started));
   }, [task, startUrl]);
+
+  // #134: when the active run reaches a terminal status, stamp it onto the
+  // matching recent-task entry so the history shows the outcome, not just
+  // "was started". Persists the updated list to storage too.
+  useEffect(() => {
+    const active = activeTaskRef.current;
+    if (!active) return;
+    const terminal: Record<string, RecentTask['status']> = {
+      complete: 'complete',
+      stalled: 'stalled',
+      failed: 'failed',
+      stopped: 'stopped',
+    };
+    const mirror = mirrorRef.current;
+    if (mirror && terminal[mirror.status] && !mirror.running) {
+      setRecentTasks((prev) => {
+        const next = prev.map((t) =>
+          t.task === active ? { ...t, status: terminal[mirror.status] } : t,
+        );
+        browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
+        return next;
+      });
+      activeTaskRef.current = null;
+    }
+  }, [isRunning, step, logs]);
 
   // Issue #70: stop the SW-owned runner. The runner notices it at the top of
   // the next step and aborts any in-flight /plan request.
   const handleStop = useCallback(async () => {
     await browser.runtime.sendMessage({ type: 'STOP_TASK' });
   }, []);
+
+  // #134: one-click reuse of a cached prompt - fill the input + start-URL and
+  // kick off the run. Reuses handleStart's logic so the new entry is recorded
+  // into the history consistently.
+  const runRecentTask = useCallback(
+    async (entry: RecentTask) => {
+      setTask(entry.task);
+      setStartUrl(entry.startUrl || '');
+      // The state is set before this tick; start explicitly with the
+      // entry's values so we don't race on the re-render.
+      setLogs([]);
+      setStep(0);
+      setIsRunning(true);
+      setLatency(null);
+      activeTaskRef.current = entry.task;
+      setRecentTasks((prev) => {
+        const rest = prev.filter((t) => t.task !== entry.task);
+        const next = [
+          { ...entry, startedAt: Date.now(), status: 'running' as const },
+          ...rest,
+        ].slice(0, RECENT_TASKS_CAP);
+        browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
+        return next;
+      });
+      const res: any = await browser.runtime.sendMessage({
+        type: 'START_TASK',
+        task: entry.task,
+        startUrl: entry.startUrl || '',
+      });
+      if (!res?.ok) {
+        setLogs([`⚠️ Could not start task (${res?.error ?? 'unknown'})`]);
+        setIsRunning(false);
+        activeTaskRef.current = null;
+      }
+    },
+    []
+  );
+
+  const clearTaskHistory = useCallback(() => {
+    setRecentTasks([]);
+    browser.storage.local.set({ [RECENT_TASKS_KEY]: [] });
+  }, []);
+
+  const timeAgo = (ts: number) => {
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  };
 
 
   return (
@@ -216,6 +333,41 @@ function Popup() {
             onChange={(e) => setStartUrl(e.target.value)}
           />
         </div>
+
+        {/* Recent tasks - #134: cached prompts, one-click re-run */}
+        {hydrated && recentTasks.length > 0 && (
+          <div className="recent-tasks-section">
+            <div className="recent-tasks-header">
+              <span className="input-label recent-tasks-label">Recent</span>
+              <button
+                type="button"
+                className="recent-tasks-clear"
+                onClick={clearTaskHistory}
+                title="Clear task history"
+              >
+                Clear
+              </button>
+            </div>
+            <ul className="recent-tasks-list">
+              {recentTasks.slice(0, 5).map((t) => (
+                <li key={t.startedAt + t.task} className={`recent-task recent-task-${t.status}`}>
+                  <button
+                    type="button"
+                    className="recent-task-body"
+                    onClick={() => runRecentTask(t)}
+                    title="Re-run this task"
+                  >
+                    <span className="recent-task-text">{t.task}</span>
+                    <span className="recent-task-meta">
+                      {t.status === 'complete' ? '✓' : t.status === 'stalled' ? '⏸' : t.status === 'failed' ? '✕' : t.status === 'stopped' ? '⏹' : '…'}{' '}
+                      {timeAgo(t.startedAt)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Controls */}
         <div className="controls">
