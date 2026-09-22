@@ -5,10 +5,37 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-> **Current state (verified 2026-09-17):** `main` clean · **324/324** vitest tests passing ·
-> Chrome MV3 build **1.23 MB** · 0 PII off-device · planner-authored task checklist as
-> cross-page memory · port-retry on navigating clicks. Repo:
+![vitest: 417/417](https://img.shields.io/badge/vitest-417%2F417%20passing-22c55e?style=for-the-badge)
+![pytest: 74/74](https://img.shields.io/badge/pytest-74%2F74%20passing-22c55e?style=for-the-badge)
+![build: 1.31 MB](https://img.shields.io/badge/build-1.31%20MB%20chrome-mv3-6366f1?style=for-the-badge)
+![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
+
+> **Current state (verified 2026-09-22):** `main` clean · **417/417** vitest + **74/74**
+> pytest passing · Chrome MV3 build **1.31 MB** · 0 PII off-device · planner-authored task
+> checklist as cross-page memory · loop-guard planner signal · GSAP agent cursor · 3-hop
+> live E2E passing end-to-end. Repo:
 > [`github.com/Yashop965/sih2026-ps171-browser-agent`](https://github.com/Yashop965/sih2026-ps171-browser-agent).
+
+---
+
+## 🎬 See It Work
+
+<video
+  src="SIH2026_PS171_YC_Ad_project_FINAL.mp4"
+  poster="media/poster-project.jpg"
+  controls muted autoplay loop playsinline
+  preload="metadata"
+  style="max-width: 720px; width: 100%; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); background:#0b0d17;"
+></video>
+
+<p align="center">
+  <sub>90-second programmatic launch-ad — real extension footage, no stock assets.
+  Switch theme: <a href="SIH2026_PS171_YC_Ad_black_FINAL.mp4"><b>black</b></a> ·
+  <a href="SIH2026_PS171_YC_Ad_light_FINAL.mp4"><b>light</b></a> ·
+  <a href="SIH2026_PS171_YC_Ad_project_FINAL.mp4"><b>project (above)</b></a>
+  — pipeline: <a href="./ad_pipeline/README.md"><code>ad_pipeline/</code></a>
+</sub>
+</p>
 
 ---
 
@@ -40,14 +67,66 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 - **Autonomy (#84/#85/#86):** goal-driven multi-page execution — `NAVIGATE` via background `NAVIGATE_TAB`, `WAIT` primitive, `KEY` primitive (press Enter/Tab/arrows so a search actually submits), and robust web-tab resolution so the agent never targets its own extension page.
 - **Cross-page memory (#99):** the planner is stateless across pages, so after each navigation it used to re-reason from scratch and re-do completed steps. Fix: the planner authors a small ordered **task checklist** of sub-goals; the runner tracks it (`mergeChecklist`, sticky-`done`), feeds it back to `/plan` each step, and **gates DONE** on it (3-strike cap → best-effort degraded).
+- **Planner loop-guard (#130):** the runner detects repeated no-op actions and feeds a PII-safe `loopWarning` back into the planner prompt (with NPTEL-style Rule 20: a submit is proven by a *distinctive page change*). Kills the "re-typing the same value forever" loop seen in live runs.
+- **GSAP agent cursor (#130):** the visible agent cursor is now production-grade — distance-scaled transform-only travel, mid-glide retarget (`overwrite`), sequenced arrival pulse + click-ripple, **shadow-DOM isolation** so hostile page CSS can't hide it, reduced-motion fallback.
+- **PII criticals closed (#130):** audit C1–C3 fixed — logs never record resolved profile values, 13–19-digit cards are blocked at the last-line firewall (was 16-digit-only), and non-card PII detections store a fully `[REDACTED]` sentinel instead of a 4-character prefix.
 - **Port retry (#105):** a navigating click drops the content port; the very next `EXTRACT` hit "Receiving end does not exist" and crashed the run. `src/lib/portRetry.ts` (`withPortRetry`) retries the transient case and fails fast on genuine errors.
-- **Live CDP/id discovery (#98):** `scripts/run_autonomy_live.mjs` discovers the live extension id from all `chrome-extension://` CDP targets (the old hardcoded id 404'd on a spun-down service worker).
+- **Live CDP/id discovery (#98):** `scripts/run_autonomy_live.mjs` discovers the live extension id from all `chrome-extension://` CDP targets (the old hardcoded id 404'd on a spun-down service worker). `scripts/run_autonomy_3hop.mjs` is the current live benchmark driver (3-hop Wikipedia task).
 
 ### Related Documents
 - [Product Requirements Document (PRD)](./docs/PRD.md) — Detailed feature specifications, acceptance criteria, and technical constraints
 - [Session logs](./docs/SESSION-2026-09-16.md) · [SESSION-2026-09-17](./docs/SESSION-2026-09-17.md) — autonomy + live re-run + checklist
 - [Testing guide](./docs/TESTING-GUIDE.md) · [API](./docs/API.md)
 - [Audit findings](./docs/AUDIT-FINDINGS.md) — issues #59–#77
+- [Codebase audit — `src/lib`](./docs/audit/01-src-lib.md) · [server + entrypoints](./docs/audit/02-server-and-entrypoints.md) — 2026-09-22 deep audit (critical/major/minor findings; C1–C3 closed in #130)
+- [Mouse animation library research](./docs/research/mouse-animation-libraries.md) — 9-lib comparison, GSAP chosen for the agent cursor
+- [PII benchmark report](./docs/PII_BENCHMARK_REPORT.md) — recall/precision by PII type + adversarial resistance
+
+---
+
+## 📊 Live Dashboard
+
+*Every number below was re-verified on 2026-09-22 by running the suites — not copy-pasted from a stale report. Charts are inline SVG (`media/charts/`), regenerated any time via `python scripts/generate_readme_charts.py`.*
+
+### Health
+
+| Metric | Value | Since |
+|---|---|---|
+| **Vitest unit tests** | **417 / 417 passing** · 34 files | PR #130 |
+| **Python server tests** | **74 / 74 passing** · 9 files | PR #127 |
+| **Chrome MV3 build** | **1.31 MB** (Firefox MV2 same tree) | PR #130 |
+| **PII off-device leaks** | **0** (raw PII never leaves the machine; last-line firewall on egress) | audit C1–C3 |
+| **Live 3-hop E2E** | **Wikipedia ×3, 6/6 checklist, DONE** (run 2026-09-22, backstop-verified) | this session |
+| **Repo** | **233 commits · 60 PRs · 44 issues closed** | today |
+| **Codebase** | **~12 k LOC** client TS + **~2.3 k LOC** server Python | today |
+
+<details>
+<summary>📈 Test coverage by module (417 tests, top 15 + rest) — click to expand</summary>
+
+![Unit test coverage by module (417 passing, 34 files)](media/charts/tests-by-module.svg)
+
+</details>
+
+<details open>
+<summary>🛡️ PII detection performance (click to collapse)</summary>
+
+![PII detection performance by type](media/charts/pii-recall.svg)
+
+![PII false-positive reduction: 722 → 15 (98%)](media/charts/pii-false-positive-reduction.svg)
+
+</details>
+
+### What shipped since the last dashboard (2026-09-17 → 09-22)
+
+| Change | Effect |
+|---|---|
+| **PII criticals C1–C3** fixed | Log no longer records resolved profile values · 13–19-digit cards firewall-blocked (was 16-only) · non-card PII detections now store `[REDACTED]`, not a 4-char prefix |
+| **Planner loop-guard** | Runner feeds a PII-safe `loopWarning` back to `/plan` when the same no-op action repeats; planner Rule 20: a submit is proven by a *distinctive page change*, not "I pressed Enter" (NPTEL report pattern) |
+| **LLM reasoning-model fixes** | `reasoning_content` fallback when `content` is empty + 30 s → 90 s per-request timeout — the "planner degraded" mid-run stalls are gone |
+| **GSAP agent cursor** | Distance-scaled transform-only travel, mid-glide retarget, arrival-pulse + click-ripple, shadow-DOM isolation so hostile page CSS can't hide it, reduced-motion fallback |
+| **Tolerant `<select>` matching** | Normalized/unique-substring option matching (`matchSelectOption`) — stops the "no option matching" re-typing loop and closes audit M3 |
+| **`<all_urls>` host permission** | Unblocks `captureVisibleTab` for the on-device VLM path (#113 model load proven; live extension loop is the remaining piece) |
+| **Codebase audit + module reference** | `docs/audit/01-src-lib.md` (25 findings) · `docs/audit/02-server-and-entrypoints.md` (24 findings + API) · `docs/research/mouse-animation-libraries.md` (9-lib comparison) |
 
 ---
 
@@ -376,12 +455,23 @@ ps171-browser-agent/
 
 The college internal round deadline was **September 2, 2026**. The core 4-day build
 (foundation → core features → integration → polish) shipped the autonomous,
-privacy-first extension. Post-deadline hardening (Sep 10–17) added the PII
-false-positive reduction, heatmap redesign, live multi-page autonomy
-(#84/#85/#86), planner task-checklist cross-page memory (#99), and port-retry
-(#105). Open feature issues **#100–#104** (local vision stop, agent-cursor
-overlay, local user-profile, heatmap visual polish, PII false-positive
-regression test) are scoped, not yet built.
+privacy-first extension. Post-deadline hardening shipped in two waves:
+
+- **Sep 10–17:** PII false-positive reduction (722 → ~15), heatmap redesign, live
+  multi-page autonomy (#84/#85/#86), planner task-checklist cross-page memory
+  (#99), port-retry (#105).
+- **Sep 19–22:** jev-ultrafast pattern port (PRs #124/#125 — occlusion check,
+  aria-hidden/inert filter, event-aware settle, freshness guard, extract cap,
+  value gate), live-validation fixes (planner truncation, stableId resolution,
+  form-submit, per-page memory, 0-element stall safety), on-device VLM
+  verification (#113 model load proven), codebase audit, GSAP cursor, PII
+  criticals C1–C3, and the planner loop-guard (PR #130) — verified by a clean
+  3-hop live E2E.
+
+Open feature issues **#100–#104 / #113 / #115** (local vision stop, agent-cursor
+overlay hardening, local user-profile, heatmap visual polish, on-device VLM live
+loop, VLM fallback extractor) are scoped; most cursor/VLM pieces now have a
+proven standalone path.
 
 ---
 

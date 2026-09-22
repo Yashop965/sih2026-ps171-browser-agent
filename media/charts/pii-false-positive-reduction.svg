@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="224" viewBox="0 0 760 224" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="760" height="224" fill="#ffffff"/>
+<text x="20" y="30" font-size="18" font-weight="700" fill="#334155">PII false positives on benchmark corpus</text>
+<text x="20" y="50" font-size="12" fill="#64748b">context-aware filtering + checksum/Luhn validation · 98% reduction</text>
+<text x="210" y="86" font-size="13" fill="#334155" text-anchor="end">before (raw regex)</text>
+<rect x="222" y="77" width="460" height="17" rx="4" fill="#94a3b8"/>
+<text x="690" y="88" font-size="13" font-weight="600" fill="#64748b">722</text>
+<text x="210" y="130" font-size="13" fill="#334155" text-anchor="end">after (context-aware)</text>
+<rect x="222" y="121" width="9" height="17" rx="4" fill="#22c55e"/>
+<text x="239" y="132" font-size="13" font-weight="600" fill="#64748b">15</text>
+<text x="222" y="186" font-size="12" fill="#64748b">↓ 98% fewer false positives, zero verified FPs for Aadhaar &amp; card types</text>
+</svg>

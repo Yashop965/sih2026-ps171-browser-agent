@@ -525,9 +525,9 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
 
 ### 5.1 Build Status
 
-> **Note (2026-09-17):** current `dist/chrome-mv3` build is **1.23 MB** after the
-> post-deadline autonomy + checklist + port-retry + vision-stop (#107) work.
-> The breakdown below is the Sep-2 snapshot.
+> **Note (2026-09-22):** current `dist/chrome-mv3` build is **1.31 MB** after the
+> PII criticals (#130 C1–C3), GSAP cursor, loop-guard, and jev pattern-port
+> (#124/#125) work. The breakdown below is the Sep-2 snapshot.
 
 ```
 Total build size: 1.21 MB (Sep-2 snapshot)
@@ -539,10 +539,12 @@ Total build size: 1.21 MB (Sep-2 snapshot)
 
 ### 5.2 Test Coverage Summary
 
-> **Note (2026-09-17):** the test suite has since grown to **324 tests across 23
-> files** (Chrome MV3 build **1.23 MB**). The table below is the Sep-2 snapshot
-> list; the current full set adds the checklist, port-retry, loop-detection,
-> WAIT-duration, autonomy, goal-backstop, and vision-confirm suites.
+> **Note (2026-09-22):** the test suite has since grown to **417 tests across 34
+> files** (Chrome MV3 build **1.31 MB**), plus a 74-test Python server suite. The
+> table below is the Sep-2 snapshot list; the current full set adds the checklist,
+> port-retry, loop-detection, loopWarning-signal, WAIT-duration, autonomy,
+> goal-backstop, vision-confirm, GSAP cursor, tolerant select-matching, and PII
+> redaction/egress regression suites.
 
 | Test File | Tests | Status |
 |-----------|-------|--------|

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="330" viewBox="0 0 760 330" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="760" height="330" fill="#ffffff"/>
+<text x="20" y="30" font-size="18" font-weight="700" fill="#334155">PII detection performance</text>
+<text x="20" y="50" font-size="12" fill="#64748b">docs/PII_BENCHMARK_REPORT.md · verified 2026-09-22 · 0 verified false positives for Aadhaar &amp; cards</text>
+<text x="210" y="74" font-size="13" fill="#334155" text-anchor="end">PAN (checksum)</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#22c55e"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">100%</text>
+<text x="210" y="108" font-size="13" fill="#334155" text-anchor="end">Credit card (Luhn)</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#22c55e"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">100%</text>
+<text x="210" y="142" font-size="13" fill="#334155" text-anchor="end">Email</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#22c55e"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">100%</text>
+<text x="210" y="176" font-size="13" fill="#334155" text-anchor="end">Phone</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#22c55e"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">100%</text>
+<text x="210" y="210" font-size="13" fill="#334155" text-anchor="end">Password field</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#22c55e"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">100%</text>
+<text x="210" y="244" font-size="13" fill="#334155" text-anchor="end">Adversarial (13 cases)</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<rect x="222" y="-13" width="424" height="17" rx="4" fill="#f59e0b"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">92.3%</text>
+<text x="210" y="278" font-size="13" fill="#334155" text-anchor="end">IFSC input-field</text>
+<rect x="222" y="-13" width="460" height="17" rx="4" fill="#e2e8f0"/>
+<text x="690" y="-2" font-size="13" font-weight="600" fill="#64748b">0%</text>
+</svg>
