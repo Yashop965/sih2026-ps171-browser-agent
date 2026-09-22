@@ -254,8 +254,10 @@ border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change
 let lastPos = { x: 0, y: 0 };
 /** Active travel timeline; killed on every retarget (overwrite semantics). */
 let travel: gsap.core.Timeline | null = null;
-/** The idle thinking-pulse tween (single, interruptible). */
+/** The idle thinking-pulse tweens (single, interruptible): dot heartbeat. */
 let thinkingPulse: gsap.core.Tween | null = null;
+/** v3: the idle sonar ping (expands + fades, loops) - killed with the pulse. */
+let sonarPing: gsap.core.Tween | null = null;
 
 /** Host-page reduced-motion preference, checked per call. */
 function prefersReducedMotion(): boolean {
@@ -277,24 +279,39 @@ export function startThinkingPulse(): void {
     // Place the badge + sonar at the current tip before breathing (they
     // may have never had a travel run, e.g. overlay just built).
     const tip = { x: lastPos.x - 4, y: lastPos.y - 2 };
-    gsap.set(nodes.badge, { x: tip.x + 4, y: tip.y + 4, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
-    gsap.set(nodes.sonar, { x: tip.x + 4, y: tip.y + 4, xPercent: -50, yPercent: -50, opacity: 0 });
+    const bx = tip.x + 4;
+    const by = tip.y + 4;
+    gsap.set(nodes.badge, { x: bx, y: by, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
+    gsap.set(nodes.sonar, { x: bx, y: by, xPercent: -50, yPercent: -50, scale: 1, opacity: 0.5 });
+    gsap.set(nodes.badgeDot, { scale: 1, opacity: 1 });
 
-    // Breathing = the badge's center dot pulses (a heartbeat, not the whole
-    // ring scaling like v2) + a faint sonar ping cycling out of the tip.
-    // Both run as ONE interruptible multi-target tween until killed.
-    thinkingPulse = gsap.to([nodes.badgeDot, nodes.sonar], {
-      scale: [THINKING_PULSE.ringScalePeak, THINKING_PULSE.sonarScale],
-      opacity: [THINKING_PULSE.arrowDim, 0],
+    // Heartbeat: the badge's center dot pulses (scale + a soft opacity
+    // dip), one yoyo repeat = one breathing cycle, runs until killed.
+    thinkingPulse = gsap.to(nodes.badgeDot, {
+      scale: THINKING_PULSE.ringScalePeak,
+      opacity: THINKING_PULSE.arrowDim,
       duration: THINKING_PULSE.period / 2,
       yoyo: true,
       repeat: -1,
       ease: 'sine.inOut',
       transformOrigin: 'center',
-      immediateRender: false,
     });
-    // The sonar ping: start at full size 1.0 and expand + fade each cycle.
-    gsap.set(nodes.sonar, { scale: 1 });
+    // Sonar ping: a separate loop that expands out of the tip and fades,
+    // then restarts - the "alive and listening" cue. From 1.0/0.5 to
+    // sonarScale/0 so each cycle is a visible expanding ring.
+    sonarPing = gsap.fromTo(
+      nodes.sonar,
+      { scale: 1, opacity: 0.5 },
+      {
+        scale: THINKING_PULSE.sonarScale,
+        opacity: 0,
+        duration: THINKING_PULSE.period,
+        repeat: -1,
+        ease: 'sine.out',
+        transformOrigin: 'center',
+        overwrite: 'auto',
+      },
+    );
   } catch {
     /* presentation layer - never fatal */
   }
@@ -305,6 +322,8 @@ export function stopThinkingPulse(): void {
   try {
     thinkingPulse?.kill();
     thinkingPulse = null;
+    sonarPing?.kill();
+    sonarPing = null;
     const host = typeof document === 'undefined' ? null : document.getElementById(CURSOR_ID);
     const shadow = host?.shadowRoot;
     if (shadow) {
