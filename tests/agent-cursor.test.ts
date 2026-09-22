@@ -3,12 +3,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   cursorLabel,
   cursorStyles,
+  travelDuration,
   showCursor,
+  pulseCursor,
   hideCursor,
   removeCursor,
 } from '../src/lib/agentCursor';
 
 const CURSOR_ID = '__agent-cursor';
+
+// The overlay's inner nodes live in an OPEN shadow root on the host (so
+// hostile page CSS can't reach them); tests read through it.
+const shadowLabel = (hostId: string) =>
+  (document.getElementById(hostId) as HTMLElement)
+    ?.shadowRoot?.querySelector('.ac-label') as HTMLElement | null;
 
 describe('cursorLabel', () => {
   it('is kind + element tag, never a value', () => {
@@ -47,6 +55,23 @@ describe('cursorStyles', () => {
   });
 });
 
+describe('travelDuration (distance-scaled, clamped)', () => {
+  it('snaps tiny hops (<=2px) instantly', () => {
+    expect(travelDuration(0)).toBe(0);
+    expect(travelDuration(2)).toBe(0);
+  });
+  it('scales with distance (~1600px/s)', () => {
+    expect(travelDuration(800)).toBeCloseTo(0.5, 5);
+  });
+  it('clamps long jumps to the 0.15-0.6s band', () => {
+    expect(travelDuration(10)).toBe(0.15);
+    expect(travelDuration(4000)).toBe(0.6);
+  });
+  it('never returns NaN', () => {
+    expect(travelDuration(Number.NaN)).toBe(0);
+  });
+});
+
 describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
   beforeEach(() => {
     removeCursor();
@@ -58,14 +83,17 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     const el = document.createElement('button');
     el.textContent = 'Go';
     document.body.appendChild(el);
-    // jsdom rects are all zero, so the dot collapses but the node still lands.
+    // jsdom rects are all zero, so the ring collapses but the node still
+    // lands.
     const ok = showCursor(el, 'CLICK');
     expect(ok).toBe(true);
     const host = document.getElementById(CURSOR_ID) as HTMLElement;
     expect(host).toBeTruthy();
     expect(host.style.pointerEvents).toBe('none');
-    const label = host.children[2] as HTMLElement;
-    expect(label.textContent).toBe('CLICK · button');
+    // Inner nodes are shadow-isolated: the label is NOT a light-DOM child.
+    expect(host.children.length).toBe(0);
+    expect(host.shadowRoot?.querySelectorAll('*').length).toBeGreaterThan(0);
+    expect(shadowLabel(CURSOR_ID)?.textContent).toBe('CLICK · button');
   });
 
   it('is idempotent - one host, reused on repeat calls', () => {
@@ -75,13 +103,19 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     showCursor(el, 'CLICK');
     const hosts = document.querySelectorAll(`#${CURSOR_ID}`);
     expect(hosts.length).toBe(1);
-    const label = (hosts[0] as HTMLElement).children[2] as HTMLElement;
-    expect(label.textContent).toBe('CLICK · input');
+    expect(shadowLabel(CURSOR_ID)?.textContent).toBe('CLICK · input');
   });
 
   it('never throws for a detached element', () => {
     const el = document.createElement('span'); // not appended
     expect(() => showCursor(el, 'KEY')).not.toThrow();
+  });
+
+  it('pulseCursor never throws and no-ops gracefully', () => {
+    const el = document.createElement('button');
+    document.body.appendChild(el);
+    showCursor(el, 'CLICK');
+    expect(() => pulseCursor()).not.toThrow();
   });
 
   it('hideCursor hides but keeps the node; removeCursor removes it', () => {

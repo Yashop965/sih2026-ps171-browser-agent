@@ -52,10 +52,15 @@ const PATTERNS: PatternDef[] = [
     baseConfidence: 0.80,
     validator: validatePAN,
   },
-  // Credit/Debit card: 16 digits optionally separated
+  // Credit/Debit card: 13–19 digits, optionally grouped with spaces/dashes
+  // (4-4-4-4, 4-4-4-4-4, AmEx 4-6-5, etc.). C2: the old regex hard-coded the
+  // 16-digit form, so 13/14/15/18/19-digit cards were neither redacted here
+  // nor firewall-blocked downstream. \d + 12–18 more digits = 13–19 total;
+  // the Luhn validator (validateCard) confirms real cards; a run longer than
+  // 19 can't satisfy the trailing \b inside the longer run, so it's skipped.
   {
     type: 'CREDIT_CARD',
-    regex: /\b(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})\b/g,
+    regex: /\b(\d(?:[\s-]?\d){12,18})\b/g,
     baseConfidence: 0.70,
     validator: validateCard,
   },

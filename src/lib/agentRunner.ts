@@ -269,6 +269,12 @@ export class AgentRunner {
   private failedIds = new Set<string>();
   private failedErrors = new Map<string, string>();
   private recentActionHistory: Array<{ targetId: string; type: string; value?: string }> = [];
+  // Streak of consecutive "skipped repeated action" no-ops. Surfaces as a
+  // PII-safe loopWarning in the /plan payload so the planner SEES it is stuck
+  // re-issuing the same action and can switch tactics (e.g. submit the filled
+  // search box instead of re-typing it). Reset by any executed action and by
+  // the per-page memory clear.
+  private repeatedStreak = 0;
   // Cross-page task checklist (the "what's done / what's left" memory). Owned
   // by the runner; fed back to /plan each step and merged from the planner's
   // response. The task completes only when the whole list is satisfied (or it
@@ -527,6 +533,15 @@ export class AgentRunner {
           checklist: this.checklist.length
             ? this.checklist.map((c) => ({ id: c.id, description: c.description ?? '', done: c.done }))
             : undefined,
+          // NPTEL "post-verify" signal: the runner has detected the planner
+          // re-issuing the same no-op action with no page change. A PII-safe
+          // warning (streak count + the action shape only, never values) so
+          // the planner SEES the loop and switches tactics (e.g. submit the
+          // filled search box instead of re-typing it). Absent when not looping.
+          loopWarning:
+            this.repeatedStreak >= 2
+              ? `The same action has been skipped ${this.repeatedStreak} consecutive times with no page change. Repeating it will do nothing. Switch to a DIFFERENT action - e.g. submit a filled search box (KEY "Enter" or CLICK the submit button), or click a visible result link. Typing the same value again is not progress.`
+              : undefined,
         },
       });
       if (guard.blocked) {
@@ -644,7 +659,8 @@ export class AgentRunner {
       // Loop detection - a repeated action (same target+type, and same value
       // for value-bearing types) is skipped + marked done.
       if (isRepeatedAction(this.recentActionHistory, action)) {
-        this.log(`⚠️ Skipping repeated action on element #${action.targetId}`);
+        this.repeatedStreak += 1;
+        this.log(`⚠️ Skipping repeated action on element #${action.targetId} (${this.repeatedStreak} in a row)`);
         this.filledIds.add(String(action.targetId));
         this.recentActionHistory.push({ targetId: String(action.targetId), type: action.type, value: action.value });
         this.state.step = currentStep;
@@ -652,6 +668,8 @@ export class AgentRunner {
         continue;
       }
 
+      // A real executed action is progress - the loop is broken.
+      this.repeatedStreak = 0;
       await this.executeAction(action, d, sessionId);
       this.state.step = currentStep;
       this.notify();
@@ -764,10 +782,16 @@ export class AgentRunner {
     // executor types the user's actual value, not "Test Data". Log the
     // TOKEN, not the resolved value (the value is personal data - keep it
     // out of the activity log too).
+    // #102 C1 fix: remember what the planner emitted BEFORE on-device profile
+    // resolution. The activity log must show the TOKEN the planner saw, never
+    // the resolved personal value (email/phone/address). For non-profile tasks
+    // this is just the task-relevant value (already visible to the user in the
+    // plan), so the log stays useful without leaking a resolved PII value.
+    const emittedValue = action.value;
     if (d.profile && action.value !== undefined) {
       const resolved = resolveProfileValue(action.value, d.profile);
       if (resolved !== undefined && resolved !== '') {
-        this.log(`🔑 Resolving profile token ${action.value.trim()} on-device for element #${action.targetId ?? '?'}`);
+        this.log(`🔑 Resolving profile token ${emittedValue?.trim() ?? ''} on-device for element #${action.targetId ?? '?'}`);
         action.value = resolved;
       }
     }
@@ -798,7 +822,9 @@ export class AgentRunner {
 
     if (action.type === 'TYPE' && action.targetId !== undefined && action.value !== undefined) {
       this.scrollGuard.noteOtherAction();
-      this.log(`Typing: "${action.value}" into element #${action.targetId}`);
+      // C1: log the planner-emitted value (a token for profile tasks), never
+      // the on-device-resolved personal value.
+      this.log(`Typing: "${emittedValue}" into element #${action.targetId}`);
       const r = await d.execute(action);
       if (r?.ok) {
         this.log('✅ Typed successfully');
@@ -841,7 +867,8 @@ export class AgentRunner {
 
     if (action.type === 'SELECT' && action.targetId !== undefined && action.value !== undefined) {
       this.scrollGuard.noteOtherAction();
-      this.log(`Selecting "${action.value}" in element #${action.targetId}`);
+      // C1: log the planner-emitted value, never the resolved personal value.
+      this.log(`Selecting "${emittedValue}" in element #${action.targetId}`);
       const r = await d.execute(action);
       if (r?.ok) {
         this.log('✅ Selected successfully');
@@ -901,7 +928,10 @@ export class AgentRunner {
       return;
     }
 
-    this.log(`Unknown action: ${JSON.stringify(action)}`);
+    // M2 (C1-adjacent): never dump the whole action JSON - it can carry the
+    // (post-resolution) value and the target URL, both PII-bearing. Log only
+    // the safe structural fields the operator needs to debug an unknown type.
+    this.log(`Unknown action type "${String(action.type)}" (target #${action.targetId ?? '?'}) - ignoring`);
   }
 
   /**
@@ -919,6 +949,7 @@ export class AgentRunner {
     this.failedIds.clear();
     this.failedErrors.clear();
     this.recentActionHistory = [];
+    this.repeatedStreak = 0;
     this.scrollGuard.noteOtherAction();
   }
 

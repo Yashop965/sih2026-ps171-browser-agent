@@ -120,6 +120,9 @@ class SanitizedPayload(BaseModel):
     # Cross-page task checklist (runner's "what's done / what's left" memory).
     # Fed back to the planner so it can't re-do a completed sub-goal.
     checklist: Optional[List[Dict[str, Any]]] = None
+    # NPTEL "post-verify" loop signal: set by the runner when the planner keeps
+    # re-issuing the same no-op action with no page change. PII-safe (no values).
+    loopWarning: Optional[str] = None
 
 
 class PlanRequest(BaseModel):
@@ -141,6 +144,8 @@ class PlanRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
     # Cross-page task checklist (flat popup payload).
     checklist: Optional[List[Dict[str, Any]]] = None
+    # NPTEL "post-verify" loop signal (flat payload root; PII-safe string).
+    loopWarning: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 
@@ -178,6 +183,7 @@ class PlanRequest(BaseModel):
             history=self.history,
             context=self.context,
             checklist=self.checklist,
+            loopWarning=self.loopWarning,
         )
 
 
@@ -247,6 +253,8 @@ async def plan_action(request: PlanRequest):
         # Cross-page task checklist (the planner's running "what's done /
         # what's left" memory, fed back by the runner).
         checklist_list = payload.checklist or request.checklist
+        # NPTEL "post-verify" loop signal (root fallback; PII-safe string).
+        loop_warning = payload.loopWarning or request.loopWarning
         # Page geometry + scroll affordance (issue #59): lets the planner see
         # scrollY/scrollHeight/viewport and whether more content is below the
         # fold, so it can issue SCROLL to reveal the next fields.
@@ -262,6 +270,7 @@ async def plan_action(request: PlanRequest):
             history=history_list,
             context=page_context,
             checklist=checklist_list,
+            loop_warning=loop_warning,
         )
 
         return PlanResponse(
