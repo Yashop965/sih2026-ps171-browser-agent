@@ -18,15 +18,16 @@ TRACK = "#e2e8f0"
 # ---------------------------------------------------------------- chart 1
 ROW_H = 34
 LABEL_W = 210
-# vitest tests-per-module (top 15 + other). Verified against live 417/417 run.
+# vitest tests-per-module (top 15 + other). Verified against live 421/421 run
+# (2026-09-22, PR #137 merged) - counts pulled from the JSON reporter.
 top = [
     ("pii-sanitizer", 63), ("pii-recall-precision", 37), ("agent-runner", 30),
     ("pii-detector", 24), ("firefox-compatibility", 21), ("session-manager", 21),
-    ("loop-detection", 15), ("agent-cursor", 14), ("user-profile", 13),
+    ("agent-cursor", 18), ("loop-detection", 15), ("user-profile", 13),
     ("vision-utilities", 12), ("context", 11), ("dom-extraction", 11),
     ("vision-confirm", 11), ("actions-resilience", 10), ("goal-backstop", 10),
 ]
-other = 417 - sum(v for _, v in top)
+other = 421 - sum(v for _, v in top)
 rows = top + [("other (19 files)", other)]
 maxv = max(v for _, v in rows)
 
@@ -49,7 +50,7 @@ def bar_chart(title, subtitle, data, value_color, bar_w_scale=3.4, w=760, row_h=
 
 svg1 = bar_chart(
     "Unit test coverage by module (vitest)",
-    "417/417 passing · 34 test files · verified 2026-09-22 (PR #130)",
+    "421/421 passing · 34 test files · verified 2026-09-22 (PR #137)",
     [(n, v) for n, v in rows], GREEN,
 )
 open(os.path.join(OUT, "tests-by-module.svg"), "w").write(svg1)
