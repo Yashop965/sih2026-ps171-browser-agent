@@ -79,12 +79,16 @@ describe('travelDuration (v2: slower, fluid, never teleports)', () => {
   });
 });
 
-describe('thinking pulse (v2: alive while the planner waits)', () => {
+describe('thinking pulse (v3: badge-dot heartbeat + sonar ping while the planner waits)', () => {
   it('exposes stable, sane timing constants', () => {
     expect(THINKING_PULSE.period).toBeGreaterThan(1);
+    // v3: the badge's center dot breathes up to this scale (a heartbeat,
+    // not the whole ring scaling like v2).
     expect(THINKING_PULSE.ringScalePeak).toBeGreaterThan(1);
     expect(THINKING_PULSE.arrowDim).toBeGreaterThan(0);
     expect(THINKING_PULSE.arrowDim).toBeLessThan(1);
+    // v3: the sonar ping expands out of the tip up to this scale.
+    expect(THINKING_PULSE.sonarScale).toBeGreaterThan(THINKING_PULSE.ringScalePeak);
   });
 });
 
@@ -110,6 +114,23 @@ describe('showCursor / hideCursor / removeCursor (jsdom)', () => {
     expect(host.children.length).toBe(0);
     expect(host.shadowRoot?.querySelectorAll('*').length).toBeGreaterThan(0);
     expect(shadowLabel(CURSOR_ID)?.textContent).toBe('CLICK · button');
+  });
+
+  it('v3: mounts the presence badge (ring + dot), sonar, and halo nodes', () => {
+    const el = document.createElement('button');
+    document.body.appendChild(el);
+    showCursor(el, 'CLICK');
+    const shadow = (document.getElementById(CURSOR_ID) as HTMLElement).shadowRoot!;
+    // The Notion-style presence badge = concentric ring with a center dot.
+    const badge = shadow.querySelector('.ac-badge') as HTMLElement;
+    expect(badge).toBeTruthy();
+    expect(badge.querySelector('.ac-dot')).toBeTruthy();
+    // Faint sonar ping + soft target halo.
+    expect(shadow.querySelector('.ac-sonar')).toBeTruthy();
+    expect(shadow.querySelector('.ac-halo')).toBeTruthy();
+    // v3: the arrow is now the constant clean dark shape (not kind-tinted).
+    const path = shadow.querySelector('.ac-arrow svg path');
+    expect(path?.getAttribute('fill')).toBe('#111827');
   });
 
   it('is idempotent - one host, reused on repeat calls', () => {

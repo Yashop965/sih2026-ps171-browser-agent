@@ -1,16 +1,24 @@
 // src/lib/agentCursor.ts
 //
-// Issue #101 / #132 — computer-use style "agent cursor" overlay, v2.
+// Issue #101 / #132 / #137 — computer-use style "agent cursor" overlay, v3.
 //
-// v2 (make-over, user direction 2026-09-22): the motion should feel FLUID
-// and DELIBERATE, not teleporting. A 50px nudge still glides (it never
-// snaps), full-screen travels take longer, and while the planner is
-// THINKING the cursor breathes (subtle thinking-pulse) instead of sitting
-// frozen — so the agent reads as "alive", and the visible pacing matches
-// the LLM-bound step latency instead of fighting it. The visual language
-// is cleaner: soft rounded target ring, smaller white-on-blue arrow, dark
-// pill label. The inner nodes still live in an open shadow root with
-// `all:initial` so hostile host-page CSS cannot hide or restyle them.
+// v3 (Notion-agent make-over, user reference 2026-09-22): the visual
+// language is the Notion/Linear agent-cursor concept — a CLEAN, rounded
+// dark arrow (solid, high-contrast, reads on any page) with a "presence
+// badge" at the hotspot: a small concentric ring + center dot, like a
+// recording/sentinel indicator. The target box is a soft rounded halo
+// tinted by action kind (a gentle focus glow, not a hard box).
+//
+//   Idle / thinking : the badge's center dot breathes (slow yoyo scale)
+//                     and a faint sonar ring pings out from the tip.
+//   Gliding         : transform-only travel (v2 pacing: 850px/s, 0.25s
+//                     floor, 1.2s cap) — deliberate, never teleporting.
+//   Action lands    : the tip badge flashes the action color + a ripple.
+//
+// The public API is UNCHANGED (showCursor / pulseCursor / hideCursor /
+// removeCursor / startThinkingPulse / stopThinkingPulse / cursorLabel /
+// cursorStyles / travelDuration / THINKING_PULSE), so background.ts,
+// content.ts, the runner, and the existing tests keep working.
 //
 // PII contract (unchanged, critical): the overlay never carries values.
 // The label is `<KIND> · <TAG>` only — no typed text, no URLs, no PII.
@@ -32,12 +40,19 @@ export interface CursorPosition {
 
 const CURSOR_ID = '__agent-cursor';
 
+// v3: clean, saturated focus colors for the target halo (action kind).
 const KIND_COLORS: Record<CursorActionKind, string> = {
   CLICK: '#2563eb',
   TYPE: '#059669',
   SELECT: '#7c3aed',
   KEY: '#d97706',
 };
+
+// v3: the Notion-style presence badge at the hotspot — a constant agent
+// accent so the badge reads as "the agent", independent of the action.
+const ACCENT = '#2563eb';
+const ARROW_FILL = '#111827';
+const ARROW_STROKE = '#ffffff';
 
 export function cursorLabel(kind: CursorActionKind, targetTag: string): string {
   return `${kind} · ${targetTag}`;
@@ -86,47 +101,63 @@ export function travelDuration(dist: number): number {
 }
 
 /**
- * v2: the idle "thinking" beat. While the agent is between actions (mostly
- * waiting on the planner LLM, which takes seconds) the cursor breathes: a
- * gentle yoyo scale pulse on the ring + soft alpha pulse on the arrow.
- * Runs as ONE interruptible tween; `travel()` / `pulseCursor()` /
- * `stopThinkingPulse()` kill it. Pure timing constants so tests can pin
- * the "alive while waiting" contract.
+ * v3: the idle "thinking" beat. While the agent is between actions (mostly
+ * waiting on the planner LLM, which takes seconds) the cursor breathes:
+ * the presence badge's center dot pulses and a faint sonar ring pings out
+ * of the tip — so the agent reads as "alive", and the visible pacing
+ * matches the LLM-bound step latency instead of fighting it. One
+ * interruptible tween; `travel()` / `pulseCursor()` / `stopThinkingPulse()`
+ * kill it. Pure timing constants so tests can pin the contract.
  */
 export const THINKING_PULSE = {
   /** Period of one breathing cycle (out+back), seconds. */
   period: 1.6,
-  /** Ring scale peak (1.0 resting -> 1.07 peak). */
-  ringScalePeak: 1.07,
+  /** Badge dot scale peak (1.0 resting -> 1.35 peak). */
+  ringScalePeak: 1.35,
   /** Arrow resting opacity while thinking (dips from 1.0). */
   arrowDim: 0.7,
+  /** Sonar ping travel (1.0 -> 2.6 scale) + one cycle seconds. */
+  sonarScale: 2.6,
 };
 
 interface OverlayNodes {
   host: HTMLElement;
-  ring: HTMLElement;
+  halo: HTMLElement;
   arrow: HTMLElement;
+  badge: HTMLElement;
+  badgeDot: HTMLElement;
+  sonar: HTMLElement;
   label: HTMLElement;
   ripple: HTMLElement;
 }
 
 /**
- * Build (once) or reuse the cursor overlay. The host is a plain fixed node
- * in the light DOM — so `document.getElementById(CURSOR_ID)` keeps working
- * and the pointer-events:none / z-index contract holds for the page. Its
- * *inner* nodes live in an open shadow root so host-page CSS selectors
- * cannot reach them.
+ * Build (once) or reuse the v3 cursor overlay. The host is a plain fixed
+ * node in the light DOM — so `document.getElementById(CURSOR_ID)` keeps
+ * working and the pointer-events:none / z-index contract holds for the
+ * page. Its *inner* nodes live in an open shadow root with `all:initial`
+ * so hostile host-page CSS cannot hide or restyle them.
+ *
+ * Node map (all absolutely-positioned, centred via xPercent/yPercent so
+ * every motion is transform-only):
+ *   .ac-halo    — the soft rounded target box (kind-tinted glow)
+ *   .ac-arrow   — the clean rounded dark arrow, hotspot at top-left
+ *   .ac-badge   — the presence badge ring (concentric circle) at the tip
+ *   .ac-dot     — the badge's center dot (breathes while thinking)
+ *   .ac-sonar   — the faint pinging sonar ring (thinking only)
+ *   .ac-label   — the dark `<KIND> · <TAG>` pill
+ *   .ac-ripple  — the click confirmation ripple
  */
 function ensureCursorEl(): OverlayNodes | null {
   if (typeof document === 'undefined' || !document.body) return null;
   let host = document.getElementById(CURSOR_ID) as HTMLElement | null;
-  if (!host || !host.dataset.agentCursor2) {
-    // A pre-upgrade host (or a stale node without the shadow root) is
+  if (!host || !host.dataset.agentCursor3) {
+    // A pre-v3 host (or a stale node without the new badge/sonar) is
     // replaced wholesale rather than migrated.
     host?.remove();
     host = document.createElement('div');
     host.id = CURSOR_ID;
-    host.dataset.agentCursor2 = '1';
+    host.dataset.agentCursor3 = '1';
     host.style.cssText = [
       'position:fixed',
       'top:0',
@@ -141,41 +172,60 @@ function ensureCursorEl(): OverlayNodes | null {
     // direction) leaks in; the overlay is fully self-styled below.
     const style = document.createElement('style');
     style.textContent = `:host{all:initial;position:fixed;top:0;left:0;pointer-events:none;}
-.ac-ring{position:absolute;top:0;left:0;border-radius:12px;pointer-events:none;will-change:transform;}
-.ac-arrow{position:absolute;top:0;left:0;width:20px;height:20px;pointer-events:none;will-change:transform,opacity;
-filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));}
+.ac-halo{position:absolute;top:0;left:0;border-radius:14px;pointer-events:none;will-change:transform;
+box-shadow:0 0 0 0 transparent,0 0 18px 2px rgba(37,99,235,0);}
+.ac-arrow{position:absolute;top:0;left:0;width:22px;height:22px;pointer-events:none;will-change:transform,opacity;
+filter:drop-shadow(0 1.5px 2.5px rgba(0,0,0,.45));}
 .ac-arrow svg{display:block;overflow:visible;}
+.ac-badge{position:absolute;top:0;left:0;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;
+border:2px solid ${ACCENT};background:rgba(255,255,255,.85);pointer-events:none;will-change:transform;
+box-shadow:0 1px 3px rgba(0,0,0,.35),0 0 8px ${ACCENT}66;display:flex;align-items:center;justify-content:center;}
+.ac-dot{width:6px;height:6px;border-radius:50%;background:${ACCENT};will-change:transform;}
+.ac-sonar{position:absolute;top:0;left:0;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;
+border:1.5px solid ${ACCENT};opacity:0;pointer-events:none;will-change:transform,opacity;}
 .ac-label{position:absolute;top:0;left:0;pointer-events:none;font:600 11px/1 system-ui,sans-serif;
-color:#fff;background:#0f172aee;padding:4px 9px;border-radius:9999px;white-space:nowrap;
-box-shadow:0 2px 8px rgba(0,0,0,.25);will-change:transform;letter-spacing:.02em;}
+color:#fff;background:#0f172aee;padding:4px 10px;border-radius:9999px;white-space:nowrap;
+box-shadow:0 2px 8px rgba(0,0,0,.28);will-change:transform;letter-spacing:.02em;opacity:0;}
 .ac-ripple{position:absolute;top:0;left:0;width:56px;height:56px;margin:-28px 0 0 -28px;
 border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change:transform,opacity;}`;
     shadow.appendChild(style);
 
-    const ring = document.createElement('div');
-    ring.className = 'ac-ring';
-    // The ring box (width/height) is set instantly when the target changes
-    // — it is our own 2px border, not page content — and the GLIDE is a
+    const halo = document.createElement('div');
+    halo.className = 'ac-halo';
+    // The halo box (width/height/border/bg) is set instantly when the target
+    // changes — it is our own glow, not page content — and the GLIDE is a
     // transform-only x/y tween, so no layout property ever animates.
-    shadow.appendChild(ring);
+    shadow.appendChild(halo);
 
     const arrow = document.createElement('div');
     arrow.className = 'ac-arrow';
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('width', '20');
-    svg.setAttribute('height', '20');
+    svg.setAttribute('width', '22');
+    svg.setAttribute('height', '22');
+    // Clean, rounded mouse-pointer arrow (Notion-agent style): tip at the
+    // top-left of the box, soft stroke-linejoin so no sharp 90° corners.
     const path = document.createElementNS(svgNS, 'path');
-    // Classic mouse-pointer arrow, tip at the top-left of the box.
-    path.setAttribute('d', 'M4,2 L4,17 L7.6,13.6 L10.2,19.4 L12.6,18.4 L10,12.6 L15.2,12.6 Z');
-    path.setAttribute('fill', KIND_COLORS.CLICK);
-    path.setAttribute('stroke', '#ffffff');
-    path.setAttribute('stroke-width', '1.6');
+    path.setAttribute('d', 'M4.5,2.5 L4.5,17.5 L8.1,14.2 L10.4,19.6 L13,18.5 L10.7,13.1 L15.8,13.1 Z');
+    path.setAttribute('fill', ARROW_FILL);
+    path.setAttribute('stroke', ARROW_STROKE);
+    path.setAttribute('stroke-width', '1.4');
     path.setAttribute('stroke-linejoin', 'round');
     svg.appendChild(path);
     arrow.appendChild(svg);
     shadow.appendChild(arrow);
+
+    const badge = document.createElement('div');
+    badge.className = 'ac-badge';
+    const dot = document.createElement('div');
+    dot.className = 'ac-dot';
+    badge.appendChild(dot);
+    shadow.appendChild(badge);
+
+    const sonar = document.createElement('div');
+    sonar.className = 'ac-sonar';
+    shadow.appendChild(sonar);
 
     const label = document.createElement('div');
     label.className = 'ac-label';
@@ -189,12 +239,15 @@ border-radius:50%;pointer-events:none;opacity:0;transform:scale(.25);will-change
   }
   const shadow = (host as HTMLElement).shadowRoot;
   if (!shadow) return null;
-  const ring = shadow.querySelector('.ac-ring') as HTMLElement | null;
+  const halo = shadow.querySelector('.ac-halo') as HTMLElement | null;
   const arrow = shadow.querySelector('.ac-arrow') as HTMLElement | null;
+  const badge = shadow.querySelector('.ac-badge') as HTMLElement | null;
+  const badgeDot = shadow.querySelector('.ac-dot') as HTMLElement | null;
+  const sonar = shadow.querySelector('.ac-sonar') as HTMLElement | null;
   const label = shadow.querySelector('.ac-label') as HTMLElement | null;
   const ripple = shadow.querySelector('.ac-ripple') as HTMLElement | null;
-  if (!ring || !arrow || !label || !ripple) return null;
-  return { host: host as HTMLElement, ring, arrow, label, ripple };
+  if (!halo || !arrow || !badge || !badgeDot || !sonar || !label || !ripple) return null;
+  return { host: host as HTMLElement, halo, arrow, badge, badgeDot, sonar, label, ripple };
 }
 
 /** Last known cursor position (the arrow tip) — origin of every travel. */
@@ -214,25 +267,34 @@ function prefersReducedMotion(): boolean {
   }
 }
 
-/** v2: the agent is now WAITING (planner round-trip) — breathe. */
+/** v3: the agent is now WAITING (planner round-trip) — breathe. */
 export function startThinkingPulse(): void {
   try {
     if (prefersReducedMotion()) return;
     const nodes = ensureCursorEl();
     if (!nodes) return;
     stopThinkingPulse();
-    // One yoyo repeat = one breathing cycle; runs until killed. The ring
-    // is centred via xPercent/yPercent, so scaling around 50/50 keeps it
-    // on target.
-    thinkingPulse = gsap.to([nodes.ring, nodes.arrow], {
-      scale: THINKING_PULSE.ringScalePeak,
-      opacity: THINKING_PULSE.arrowDim,
+    // Place the badge + sonar at the current tip before breathing (they
+    // may have never had a travel run, e.g. overlay just built).
+    const tip = { x: lastPos.x - 4, y: lastPos.y - 2 };
+    gsap.set(nodes.badge, { x: tip.x + 4, y: tip.y + 4, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
+    gsap.set(nodes.sonar, { x: tip.x + 4, y: tip.y + 4, xPercent: -50, yPercent: -50, opacity: 0 });
+
+    // Breathing = the badge's center dot pulses (a heartbeat, not the whole
+    // ring scaling like v2) + a faint sonar ping cycling out of the tip.
+    // Both run as ONE interruptible multi-target tween until killed.
+    thinkingPulse = gsap.to([nodes.badgeDot, nodes.sonar], {
+      scale: [THINKING_PULSE.ringScalePeak, THINKING_PULSE.sonarScale],
+      opacity: [THINKING_PULSE.arrowDim, 0],
       duration: THINKING_PULSE.period / 2,
       yoyo: true,
       repeat: -1,
       ease: 'sine.inOut',
       transformOrigin: 'center',
+      immediateRender: false,
     });
+    // The sonar ping: start at full size 1.0 and expand + fade each cycle.
+    gsap.set(nodes.sonar, { scale: 1 });
   } catch {
     /* presentation layer - never fatal */
   }
@@ -246,8 +308,10 @@ export function stopThinkingPulse(): void {
     const host = typeof document === 'undefined' ? null : document.getElementById(CURSOR_ID);
     const shadow = host?.shadowRoot;
     if (shadow) {
-      gsap.set(shadow.querySelector('.ac-ring'), { scale: 1 });
+      gsap.set(shadow.querySelector('.ac-dot'), { scale: 1, opacity: 1 });
+      gsap.set(shadow.querySelector('.ac-sonar'), { scale: 1, opacity: 0 });
       gsap.set(shadow.querySelector('.ac-arrow'), { opacity: 1, scale: 1 });
+      gsap.set(shadow.querySelector('.ac-badge'), { scale: 1, opacity: 1 });
     }
   } catch {
     /* presentation layer - never fatal */
@@ -266,10 +330,22 @@ function moveOverlay(
   const target = { x: cx - 4, y: cy - 2 }; // arrow tip is the hotspot
   const from = { ...lastPos };
 
-  nodes.ring.style.width = s.width;
-  nodes.ring.style.height = s.height;
-  nodes.ring.style.border = s.border;
-  nodes.ring.style.background = s.background;
+  // v3: the target box is a soft rounded HALO (radius + soft glow), not a
+  // hard 2px border. cursorStyles still returns border/background for
+  // test-compat; we apply them as halo tint + box-shadow instead.
+  const ringed = s.width !== '0px' && s.height !== '0px';
+  nodes.halo.style.width = s.width;
+  nodes.halo.style.height = s.height;
+  nodes.halo.style.border = ringed ? `1.5px solid ${color}55` : 'none';
+  nodes.halo.style.background = s.background;
+  nodes.halo.style.boxShadow = ringed
+    ? `0 0 0 4px ${color}1a, 0 0 22px 4px ${color}40`
+    : 'none';
+
+  // The presence badge + sonar pin to the arrow tip, not the element
+  // centre — they travel with the arrow, like a sentinel on the pointer.
+  const badgeX = target.x + 4;
+  const badgeY = target.y + 4;
 
   // Moving = acting: stop the idle breathing first.
   stopThinkingPulse();
@@ -282,34 +358,40 @@ function moveOverlay(
   if (prefersReducedMotion()) {
     // No animation at all: instant placement, no ripple/pulse.
     gsap.set(nodes.arrow, { x: target.x, y: target.y, scale: 1, opacity: 1 });
-    gsap.set(nodes.ring, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
+    gsap.set(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
+    gsap.set(nodes.badge, { x: badgeX, y: badgeY, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
+    gsap.set(nodes.sonar, { x: badgeX, y: badgeY, xPercent: -50, yPercent: -50, opacity: 0 });
     gsap.set(nodes.label, { x: cx + 14, y: cy + 14, opacity: 1 });
     lastPos = target;
     return;
   }
 
-  // v2 motion: a slower, longer glide (0.25s floor) with a soft
+  // v3 motion: a slower, longer glide (0.25s floor) with a soft
   // slow-out/slow-in curve reads as a real cursor gliding, not a teleport.
   const dur = travelDuration(Math.hypot(target.x - from.x, target.y - from.y));
   const tl = gsap.timeline({ defaults: { overwrite: 'auto' } });
   if (dur > 0) {
     // Transform-only travel (x/y are transforms, never layout).
     tl.to(nodes.arrow, { x: target.x, y: target.y, duration: dur, ease: 'sine.inOut', immediateRender: true }, 0);
-    tl.to(nodes.ring, { x: cx, y: cy, xPercent: -50, yPercent: -50, duration: dur, ease: 'sine.inOut', immediateRender: true }, 0);
+    tl.to(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, duration: dur, ease: 'sine.inOut', immediateRender: true }, 0);
+    tl.to(nodes.badge, { x: badgeX, y: badgeY, xPercent: -50, yPercent: -50, duration: dur, ease: 'sine.inOut', immediateRender: true }, 0);
+    tl.to(nodes.sonar, { x: badgeX, y: badgeY, xPercent: -50, yPercent: -50, duration: dur, ease: 'sine.inOut', opacity: 0 }, 0);
     tl.to(nodes.label, { x: cx + 14, y: cy + 14, duration: dur * 0.9, ease: 'power1.inOut', opacity: 1 }, dur * 0.1);
-    // Arrival beats: ring settle-pulse + label fade-in, sequenced after the
+    // Arrival beat: halo settle-pulse + label fade-in, sequenced after the
     // travel in ONE interruptible timeline.
-    tl.fromTo(nodes.ring, { scale: 0.94 }, { scale: 1, duration: 0.26, ease: 'power2.out' }, dur);
+    tl.fromTo(nodes.halo, { scale: 0.96 }, { scale: 1, duration: 0.26, ease: 'power2.out' }, dur);
     tl.fromTo(nodes.label, { opacity: 0.4 }, { opacity: 1, duration: 0.22, ease: 'power1.out' }, dur);
   } else {
     // No travel distance: snap everything instantly.
     gsap.set(nodes.arrow, { x: target.x, y: target.y, scale: 1, opacity: 1 });
-    gsap.set(nodes.ring, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
+    gsap.set(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
+    gsap.set(nodes.badge, { x: badgeX, y: badgeY, xPercent: -50, yPercent: -50, scale: 1, opacity: 1 });
+    gsap.set(nodes.sonar, { x: badgeX, y: badgeY, xPercent: -50, yPercent: -50, opacity: 0 });
     gsap.set(nodes.label, { x: cx + 14, y: cy + 14, opacity: 1 });
   }
-  // Colour travel: arrow fill + label background (attr/bg are cheap,
-  // non-transform; the motion itself stays transform-only).
-  tl.to(nodes.arrow.querySelector('svg path') as SVGPathElement, { attr: { fill: color }, duration: 0.25, ease: 'power1.out' }, 0);
+  // v3: the arrow stays the constant clean dark shape (Notion reference);
+  // the ACTION KIND is carried by the halo tint + the badge border color.
+  tl.to(nodes.badge, { borderColor: color, duration: 0.25, ease: 'power1.out' }, 0);
   tl.set(nodes.label, { backgroundColor: 'transparent' }, 0);
 
   travel = tl;
@@ -363,10 +445,12 @@ export function pulseCursor(): void {
       { scale: 0.25, opacity: 0.5, x: lastPos.x - 4, y: lastPos.y - 2, backgroundColor: KIND_COLORS.CLICK },
       { scale: 2.6, opacity: 0, duration: 0.6, ease: 'power2.out', overwrite: 'auto' },
     );
+    // v3: the landing beat is a quick scale-pop on the target halo (the
+    // "action landed" feedback), not on a separate ring node anymore.
     gsap.fromTo(
-      nodes.ring,
+      nodes.halo,
       { scale: 1 },
-      { scale: 1.08, duration: 0.14, yoyo: true, repeat: 1, ease: 'power1.inOut', overwrite: 'auto' },
+      { scale: 1.06, duration: 0.14, yoyo: true, repeat: 1, ease: 'power1.inOut', overwrite: 'auto' },
     );
   } catch {
     /* presentation layer - never fatal */
