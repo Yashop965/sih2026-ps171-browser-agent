@@ -61,12 +61,15 @@ export interface VisionModelConfig {
 // #136: the VLM live-indicator's view of the on-device vision pipeline.
 // Pure status (state + backend + last OCR outcome), no PII.
 export interface VisionStatus {
-  state: 'idle' | 'loading' | 'ready' | 'unsupported';
+  state: 'idle' | 'loading' | 'ready' | 'unsupported' | 'failed';
   backend?: 'webgpu' | 'wasm';
   model?: string;
   lastOcrAt?: number;
   lastOcrOk?: boolean;
   lastOcrDetail?: string;
+  /** Set when state === 'failed': why the on-device model load failed. */
+  lastLoadError?: string;
+  loadFailedAt?: number;
 }
 
 class Florence2Pipeline {
@@ -81,6 +84,13 @@ class Florence2Pipeline {
   private lastOcrAt = 0;
   private lastOcrOk = false;
   private lastOcrDetail = '';
+  // Load-failure tracking: a failed model load is recorded (not silently
+  // reset to idle), and re-attempts within the cooldown are short-circuited
+  // so every VISION_OCR call does not re-trigger a 150MB download.
+  private loadFailedAt = 0;
+  private lastLoadError = '';
+  /** Between load attempts after a failure (ms). */
+  private static readonly LOAD_RETRY_COOLDOWN_MS = 60_000;
 
   /** #136: poll this (or the VISION_STATUS message) to render the indicator. */
   status(): VisionStatus {
@@ -102,6 +112,29 @@ class Florence2Pipeline {
     // so "unsupported" only when neither path is available on this browser.
     if (!webgpu && typeof window === 'undefined') {
       return { state: 'unsupported' };
+    }
+    // A previous load failed and the retry cooldown has not elapsed: report
+    // the failure honestly instead of resetting to idle (which made the
+    // popup claim "loads on first vision check" forever while every OCR
+    // attempt re-triggered the download).
+    if (
+      this.lastLoadError &&
+      Date.now() - this.loadFailedAt < Florence2Pipeline.LOAD_RETRY_COOLDOWN_MS
+    ) {
+      return {
+        state: 'failed',
+        backend: webgpu ? 'webgpu' : 'wasm',
+        model: this.getModelId(),
+        lastLoadError: this.lastLoadError,
+        loadFailedAt: this.loadFailedAt,
+      };
+    }
+    // Cooldown elapsed: start a re-attempt so the model can come back (e.g.
+    // network recovered). initialize() sets loadPromise synchronously, so
+    // this call is already tracked as a load in flight.
+    if (this.lastLoadError) {
+      this.initialize().catch(() => {});
+      return { state: 'loading', backend: webgpu ? 'webgpu' : 'wasm', model: this.getModelId() };
     }
     return { state: 'idle', backend: webgpu ? 'webgpu' : 'wasm' };
   }
@@ -126,6 +159,20 @@ class Florence2Pipeline {
   }): Promise<void> {
     if (this.initialized) return;
     if (this.loadPromise) return this.loadPromise;
+    // Fast-fail within the retry cooldown after a failed load: reject with
+    // the recorded reason instead of re-triggering a ~150MB model download
+    // on every VISION_OCR call.
+    if (
+      this.lastLoadError &&
+      Date.now() - this.loadFailedAt < Florence2Pipeline.LOAD_RETRY_COOLDOWN_MS
+    ) {
+      const waitS = Math.ceil(
+        (Florence2Pipeline.LOAD_RETRY_COOLDOWN_MS - (Date.now() - this.loadFailedAt)) / 1000,
+      );
+      return Promise.reject(
+        new Error(`on-device model load failed (${this.lastLoadError}); retrying in ~${waitS}s`),
+      );
+    }
 
     // Suppress ALL console output during initialization
     const silencedConsole = {
@@ -166,6 +213,10 @@ class Florence2Pipeline {
           this.processor = await AutoProcessor.from_pretrained(config.modelId);
 
           this.initialized = true;
+          // A successful (re-)load clears the recorded failure so status()
+          // reports ready/idle again instead of the stale error.
+          this.lastLoadError = '';
+          this.loadFailedAt = 0;
         } finally {
           // Restore console methods
           console.log = silencedConsole.log;
@@ -177,6 +228,13 @@ class Florence2Pipeline {
         }
       } catch (error) {
         console.error('[Vision] Failed to initialize:', error);
+        // Record the failure so status() reports 'failed' (with reason)
+        // instead of silently resetting to idle, and so the UI + runner can
+        // say WHY the model is unavailable. Narrow first: catch vars are
+        // `unknown` here, so `.message` needs an instanceof guard.
+        this.lastLoadError =
+          error instanceof Error ? error.message : String(error);
+        this.loadFailedAt = Date.now();
         throw error;
       } finally {
         this.loadPromise = null;

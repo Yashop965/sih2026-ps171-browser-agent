@@ -282,12 +282,15 @@ export interface AgentRunnerDeps {
    * visible on screen (OCR/grounding; screenshot never leaves the device).
    * Absent = not wired (fast path is the URL/title backstop only); a `null`
    * return means "model unavailable / inconclusive" - the loop just carries on.
+   * When unavailable, implementations SHOULD explain why via
+   * `unavailableReason` so the runner can say once why the VLM never ran
+   * (e.g. "model load failed: 401 …") instead of a generic line every step.
    */
   confirmGoal?: (input: {
     url: string;
     title: string;
     openItems: ChecklistItem[];
-  }) => Promise<{ confirmed: boolean; detail?: string } | null>;
+  }) => Promise<{ confirmed: boolean; detail?: string; unavailableReason?: string } | null>;
   /**
    * #102 local user profile (on-device). When the planner returns an action
    * whose value is a profile token (<EMAIL>, <ADDRESS> ...), the runner
@@ -352,6 +355,9 @@ export class AgentRunner {
   // A timely plan or an executed action resets it; 3 in a row stops the run
   // as stalled instead of spinning the step budget on hung events.
   private consecutiveEventTimeouts = 0;
+  // #136/D: the VLM-unavailable reason is said out loud ONCE per run so the
+  // per-step backstop log stays quiet (reasons rarely change mid-run).
+  private vlmUnavailableLogged = false;
 
   constructor(private readonly deps: AgentRunnerDeps) {
     this.state = emptyTaskState();
@@ -372,6 +378,18 @@ export class AgentRunner {
     // not just the last 200). 5000 short strings is still tiny.
     if (this.state.logs.length > 5000) this.state.logs = this.state.logs.slice(-5000);
     this.state.lastUpdate = Date.now();
+  }
+
+  /**
+   * Say why the on-device VLM is unavailable, ONCE per run. Per-step backstop
+   * logging otherwise repeats "model unavailable" on every action; the reason
+   * (download failed, init error, …) rarely changes mid-run, so the first
+   * occurrence carries the detail and later steps stay quiet.
+   */
+  private logVlmUnavailableOnce(reason: string): void {
+    if (this.vlmUnavailableLogged) return;
+    this.vlmUnavailableLogged = true;
+    this.log(`🔎 VLM unavailable this run (${reason}) - continuing on the deterministic backstop`);
   }
 
   private notify(): void {
@@ -733,10 +751,12 @@ export class AgentRunner {
                 this.log('✅ Task complete (vision-confirmed all checklist items done)');
                 this.doneWithOpenStreak = 0;
                 break;
+              } else if (verdict?.unavailableReason) {
+                this.logVlmUnavailableOnce(verdict.unavailableReason);
               } else if (verdict) {
                 this.log(`🔎 Vision: goal not yet confirmed (${verdict.detail ?? 'inconclusive'}) - continuing`);
               } else {
-                this.log('🔎 Vision unavailable - continuing with the deterministic loop');
+                this.logVlmUnavailableOnce('model unavailable');
               }
             } catch (e) {
               this.log(`⚠️ Vision confirm failed (${e instanceof Error ? e.message : String(e)}) - continuing`);
@@ -821,17 +841,19 @@ export class AgentRunner {
               if (g) g.done = true;
               this.log(`✅ VLM confirmed final goal on screen after ${action.type} - stopping early (${v.detail ?? 'on-device'})`);
               break;
+            } else if (v?.unavailableReason) {
+              // Model was unavailable - carry on on the deterministic
+              // backstop, but say WHY once per run (not every step).
+              this.logVlmUnavailableOnce(v.unavailableReason);
             } else if (v) {
               // Model ran and looked at the screen, but the goal is NOT there
               // yet - keep going. Logged so a human can see the VLM actively
               // checking (and saying no) rather than the loop just guessing.
               this.log(`🔎 VLM checked screen after ${action.type}: goal not on screen yet (${v.detail ?? 'not visible'}) - continuing`);
             } else {
-              // null = the on-device model was unavailable (not downloaded /
-              // WebGPU init pending / capture failed). The loop carries on on
-              // the deterministic backstop, but say it out loud so "VLM never
-              // ran" is not mistaken for "VLM checked and said no".
-              this.log(`🔎 VLM check after ${action.type}: on-device model unavailable this step - continuing on backstop`);
+              // null = the on-device model was unavailable. The loop carries
+              // on on the deterministic backstop - say so once per run.
+              this.logVlmUnavailableOnce('model unavailable');
             }
           } catch (e) {
             if (e instanceof EventTimeoutError) {

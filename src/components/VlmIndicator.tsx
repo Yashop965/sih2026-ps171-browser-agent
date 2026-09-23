@@ -14,12 +14,14 @@ import { browser } from 'wxt/browser';
 import '../lib/vision/florence2'; // types only (VisionStatus)
 
 interface VlmStatus {
-  state: 'idle' | 'loading' | 'ready' | 'unsupported' | 'unknown';
+  state: 'idle' | 'loading' | 'ready' | 'unsupported' | 'failed' | 'unknown';
   backend?: string;
   model?: string;
   lastOcrAt?: number;
   lastOcrOk?: boolean;
   lastOcrDetail?: string;
+  lastLoadError?: string;
+  loadFailedAt?: number;
 }
 
 const POLL_MS = 3000;
@@ -141,6 +143,20 @@ export default function VlmIndicator() {
             <span style={dot('var(--error)')}></span>
             <strong style={{ color: 'var(--text-primary)' }}>VLM unavailable</strong>
             <span style={{ opacity: 0.7 }}>no WebGPU on this browser</span>
+          </>
+        );
+        break;
+      case 'failed':
+        content = (
+          <>
+            <span style={dot('var(--error)')}></span>
+            <strong style={{ color: 'var(--text-primary)' }}>VLM load failed</strong>
+            <span style={{ opacity: 0.7 }}>
+              {st.lastLoadError ? `${st.lastLoadError}` : 'model download/initialization error'}
+            </span>
+            {st.loadFailedAt ? (
+              <span style={{ opacity: 0.5 }}>· {fmtAgo(st.loadFailedAt)}</span>
+            ) : null}
           </>
         );
         break;
