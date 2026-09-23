@@ -2,23 +2,28 @@
 //
 // Issue #101 / #132 / #137 / #139 — computer-use style "agent cursor" overlay.
 //
-// v5.1 (user iteration 2026-09-23): the pointer is the svgrepo "select"
-// cursor, MIRRORED so the tip points top-left (classic cursor direction).
-// Behaviors:
+// v5.3 (user iteration 2026-09-24, movement-engine rework → #139): the
+// pointer is the svgrepo "select" cursor, MIRRORED so its tip points
+// top-left (classic cursor direction). Behaviors:
 //
-//   Theme-aware colors: the shape inverts when the page under the tip is
-//     dark — dark/black shape + white outline on light sites, white shape
-//     + dark outline on dark sites (sampled live, per travel target).
+//   Theme-aware colors, themed off the PAGE: the shape inverts when the
+//     page background (html/body, with a local fallback) is dark — black
+//     shape + white outline on light sites, white shape + dark outline on
+//     dark sites (sampled live, per travel target). A dark card under the
+//     tip no longer flips the cursor white on a light page.
 //   Border-tracing working glow: a soft blue aura that HUGS the arrow's
 //     outline (a blurred blue stroke of the same path, painted behind the
 //     arrow — not a separate circular blob) and breathes while the agent
 //     is working/thinking ("the agent is doing something right now").
-//   Loop travel: every hop glides from A toward B and then completes a
-//     SINGLE CLOSED 360° LOOP around the destination B before landing on it
-//     — the cursor visibly swings one full circle at the target instead of
-//     snapping. Constant arc-length speed (deliberately slow, ~320px/s,
-//     floor 0.9s, cap 4s, no easing) so the movement is smooth and
-//     watchable. The loop joins the approach tangent-continuously (G1).
+//   Distance-aware travel (loopGeometry v5.3): the hop size picks the
+//     path — very close hops snap straight, short–mid hops take a gentle
+//     curve, far hops swing ONE small closed 360° loop, and very far hops
+//     swing TWO small loops ("a cheerful agent path"). The loop radius
+//     scales with the A→B distance, clamped to [36, 120]px, and the whole
+//     loop stays inside the tab viewport (8px margin); when a loop can't
+//     fit, the hop degrades to the simple curve. Constant arc-length speed
+//     (~320px/s, floor 0.9s, cap 4s, no easing) keeps it smooth and
+//     watchable; loop joins are G1 (tangent-continuous).
 //   No indicators: the v3 presence badge / center dot / sonar ring are
 //     GONE — the pointer + border glow + halo + label are the only nodes.
 //
@@ -149,62 +154,135 @@ export function travelDuration(dist: number): number {
   return Math.min(4, Math.max(0.9, dist / 320));
 }
 
+// ── v5.3 travel shaping: distance-aware loop counts + viewport fit ─────────
+/** Hops at or under this px travel a straight path (no loop to swing). */
+export const SNAP_MAX = 60;
+/** Hops at least this far swing ONE small loop; at least this far, TWO. */
+export const LOOP_FAR_1 = 260;
+export const LOOP_FAR_2 = 700;
+/** Loop radius: scaled with distance, clamped to this band (small loops). */
+export const LOOP_R = { min: 36, max: 120, factor: 0.25 };
+/** Keep the whole loop inside the tab viewport (px margin from the edge). */
+export const VIEWPORT_MARGIN = 8;
+/** Gentle-curve bow for mid hops (0 -> straight path on the shortest hops). */
+export const CURVE_BOW = { min: 24, max: 90, factor: 0.18 };
+
+export type TravelMode = 'snap' | 'curve' | 'loop';
+
 export interface LoopGeometry {
-  /** false when the hop is too short to loop (< 40px) — snap instead. */
+  /** How the hop is drawn: straight / single gentle bow / closed loop(s). */
+  mode: TravelMode;
+  /** Number of full 360° circles to swing (0/1/2); 'curve'/'snap' = 0. */
+  loops: number;
+  /** true only when mode === 'loop' (kept for back-compat). */
   loop: boolean;
-  /** Loop circle center (the mid-point of the hop, jitter-offset). */
+  /** Loop circle center (mid-point, jitter-offset); the curve ctrl otherwise. */
   cx: number;
   cy: number;
-  /** Loop radius (px). */
+  /** Loop radius (px); 0 for curve/snap. */
   r: number;
-  /** Tangent entry point on the circle (the approach A->entry joins here, G1). */
+  /** Entry point of the drawn middle (from-point for curve; loop tangent). */
   entry: { x: number; y: number };
-  /** Tangent exit point on the circle (the exit->B straight leaves here, G1). */
+  /** Exit point of the drawn middle (to-point for curve; loop tangent). */
   exit: { x: number; y: number };
-  /** Entry angle on the circle (radians, circle-relative). */
+  /** Entry angle on the loop circle (radians); 0 for curve/snap. */
   alpha0: number;
   /**
-   * Signed sweep angle (radians). Exactly ONE closed 360° loop plus the
-   * small connecting arc that carries the cursor from the loop to the
-   * destination's own tangent point — so entry AND exit are both
-   * tangent-continuous (the path never kinks) and the exit lands smoothly
-   * on B.
+   * Signed sweep (radians): `2π*loops` closed circles + the small connecting
+   * arc that carries the cursor to B's tangent point, so entry AND exit stay
+   * tangent-continuous (G1) and the exit lands smoothly on B. 0 for curve.
    */
   sweep: number;
-  /** Length of the straight approach A -> entry. */
+  /** Length of the straight approach A -> entry (loop mode only). */
   approachLen: number;
-  /** Length of the straight exit -> B segment. */
+  /** Length of the straight exit -> B segment (loop mode only). */
   finalLen: number;
-  /** Arc length of the whole circular portion (|sweep| * r). */
+  /** Length of the drawn middle: arc (loop) or curve (bezier). */
   arcLen: number;
-  /** Total path length the cursor rides (approach + arc + final). */
+  /** Total path length the cursor rides (approach + middle + final). */
   pathLen: number;
   /** Path share [0..1] of the straight approach segment. */
   approachShare: number;
-  /** Path share [0..1] of the circular segment. */
+  /** Path share [0..1] of the middle (arc/curve) segment. */
   arcShare: number;
+  /** Quadratic-bezier control point (only when mode === 'curve'). */
+  curveCtrl?: { x: number; y: number };
+}
+
+/** Pre-compute a quadratic-bezier arc-length LUT for constant-speed travel. */
+export function quadBezierLUT(
+  a: { x: number; y: number },
+  c: { x: number; y: number },
+  b: { x: number; y: number },
+  n = 32,
+): { pts: Array<{ x: number; y: number }>; cum: number[]; total: number } {
+  const pts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, mt = 1 - t;
+    pts.push({
+      x: mt * mt * a.x + 2 * mt * t * c.x + t * t * b.x,
+      y: mt * mt * a.y + 2 * mt * t * c.y + t * t * b.y,
+    });
+  }
+  const cum: number[] = new Array(pts.length).fill(0);
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    cum[i] = total;
+  }
+  return { pts, cum, total };
+}
+
+/** Constant-speed position along a quadratic bezier at progress u in [0,1]. */
+export function quadBezierPoint(
+  lut: { pts: Array<{ x: number; y: number }>; cum: number[]; total: number },
+  u: number,
+): { x: number; y: number } {
+  const { pts, cum, total } = lut;
+  if (total <= 0) return pts[0];
+  const target = Math.max(0, Math.min(1, u)) * total;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < target) lo = mid + 1; else hi = mid;
+  }
+  const i = Math.max(1, lo);
+  const seg = cum[i] - cum[i - 1];
+  const f = seg > 0 ? (target - cum[i - 1]) / seg : 0;
+  const p0 = pts[i - 1], p1 = pts[i];
+  return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
 }
 
 /**
- * v5.2: the single CLOSED loop travel. While traveling from A to B the
- * cursor completes one full closed loop (a 360° circle centred between
- * the two points), entering and exiting it tangent-continuously so the
- * whole path is smooth: straight approach -> one closed 360° loop ->
- * straight exit onto B.
+ * v5.3: the travel-shaping decision, by distance. While traveling from A to
+ * B the cursor takes the path that matches the hop size:
  *
- * - The rotation side is DETERMINISTIC (rightward travel loops on one
- *   side, leftward on the other), so the same A/B pair always takes the
- *   same loop — reproducible, and A->B vs B->A take opposite loops.
- * - `jitter` (default 0, clamped to [-1,1]) offsets the loop center
- *   perpendicularly and varies the radius a little, so consecutive hops
- *   differ organically. jitter=0 is purely deterministic (testable).
- * - Hops shorter than 40px snap instead (a loop needs room to read).
- * - Non-finite inputs degrade to snap geometry, never NaN.
+ * - **Very close (≤ SNAP_MAX)** → **snap**: no visible swing at all (a loop
+ *   would be larger than the hop). The engine places the cursor instantly.
+ * - **Short–mid hops (SNAP_MAX → LOOP_FAR_1)** → **curve**: a single gentle
+ *   quadratic bow (the "curved path"), bow scaled with the distance.
+ * - **Far hops (≥ LOOP_FAR_1)** → **loop**: one SMALL closed 360° loop, with
+ *   tangent-continuous (G1) entry/exit — the "agent" swing.
+ * - **Very far hops (≥ LOOP_FAR_2)** → **two small loops** (still bounded
+ *   by the radius clamp) — the "cheerful" long-haul path.
+ *
+ * The loop radius is scaled with the A→B distance and clamped to
+ * [LOOP_R.min, LOOP_R.max] (the loops stay small and readable). When a
+ * `viewport` is passed, the whole loop is kept inside it (center pulled in,
+ * radius capped to fit); if even the minimum radius no longer fits, the hop
+ * **degrades to the curve** instead of escaping the tab.
+ *
+ * - Rotation side is DETERMINISTIC (rightward travel swings one way,
+ *   leftward the other) — same A/B pair always takes the same path.
+ * - `jitter` (default 0, clamped [-1,1]) offsets the center/radius/bow
+ *   organically per hop; jitter=0 is deterministic (testable).
+ * - Non-finite inputs degrade to the snap geometry, never NaN.
  */
 export function loopGeometry(
   from: { x: number; y: number },
   to: { x: number; y: number },
   jitter = 0,
+  viewport?: { width: number; height: number },
 ): LoopGeometry {
   const fx = Number.isFinite(from.x) ? from.x : 0;
   const fy = Number.isFinite(from.y) ? from.y : 0;
@@ -214,31 +292,89 @@ export function loopGeometry(
   const dy = ty - fy;
   const len = Math.hypot(dx, dy);
   const jj = Number.isFinite(jitter) ? Math.max(-1, Math.min(1, jitter)) : 0;
-
-  const noLoop: LoopGeometry = {
-    loop: false, cx: tx, cy: ty, r: 0,
-    entry: { x: tx, y: ty }, exit: { x: tx, y: ty }, alpha0: 0, sweep: 0,
-    approachLen: 0, finalLen: 0, arcLen: 0, pathLen: len,
-    approachShare: 0, arcShare: 0,
-  };
-  // NaN guard: garbage A/B degrades to snap geometry, never NaN values.
-  if (!Number.isFinite(len) || len < 40) return noLoop;
-
-  // Loop center: mid-way along the hop, pushed sideways by the jitter so
-  // no two hops swing the loop in exactly the same place.
-  const ux = dx / len, uy = dy / len; // A -> B
+  const w = dx >= 0 ? 1 : -1; // deterministic rotation side
+  const ux = len > 0 ? dx / len : 1, uy = len > 0 ? dy / len : 0;
   const px = -uy, py = ux; // perpendicular (90° rotated, y-down screen)
-  const cxF = fx + ux * len / 2 + px * jj * 0.2 * len;
-  const cyF = fy + uy * len / 2 + py * jj * 0.2 * len;
-  const r = Math.max(40, Math.min(150, 0.35 * len)) * (1 + 0.1 * jj);
 
-  // Deterministic rotation: rightward travel sweeps CCW (in screen
-  // coords), leftward CW — back-and-forth hops loop in opposite ways.
-  const w = dx >= 0 ? 1 : -1;
+  // ── gentle quadratic-bow fallback (used by the curve band AND when a
+  //    loop can't fit the viewport). The bow scales with distance, stays
+  //    organic with jitter, and is capped by the viewport when given.
+  const curveFallback = (): LoopGeometry => {
+    let bow = Math.max(
+      CURVE_BOW.min,
+      Math.min(CURVE_BOW.max, CURVE_BOW.factor * len),
+    ) * (1 + 0.35 * jj);
+    bow = Math.max(12, bow);
+    if (viewport && viewport.width > 0 && viewport.height > 0) {
+      bow = Math.min(bow, Math.min(viewport.width, viewport.height) / 4);
+    }
+    const cx = (fx + tx) / 2 + px * bow * w;
+    const cy = (fy + ty) / 2 + py * bow * w;
+    const ctrl = { x: cx, y: cy };
+    const total = quadBezierLUT({ x: fx, y: fy }, ctrl, { x: tx, y: ty }, 24).total;
+    return {
+      mode: 'curve', loops: 0, loop: false,
+      cx, cy, r: 0,
+      entry: { x: fx, y: fy }, exit: { x: tx, y: ty },
+      alpha0: 0, sweep: 0,
+      approachLen: 0, finalLen: 0,
+      arcLen: total, pathLen: total,
+      approachShare: 0, arcShare: 1,
+      curveCtrl: ctrl,
+    };
+  };
+
+  // ── very close / garbage: no visible swing (engine places instantly).
+  if (!Number.isFinite(len) || len <= SNAP_MAX) {
+    return {
+      mode: 'snap', loops: 0, loop: false,
+      cx: tx, cy: ty, r: 0,
+      entry: { x: fx, y: fy }, exit: { x: tx, y: ty },
+      alpha0: 0, sweep: 0,
+      approachLen: len, finalLen: 0, arcLen: 0, pathLen: len,
+      approachShare: 1, arcShare: 0,
+    };
+  }
+
+  // ── short–mid hop: the curved path.
+  if (len < LOOP_FAR_1) return curveFallback();
+
+  // ── far hop: small closed loop(s), distance-scaled + clamped radius.
+  const loops = len >= LOOP_FAR_2 ? 2 : 1;
+  // Loop center: mid-way along the hop, pushed sideways by the jitter so no
+  // two hops swing the loop in exactly the same place.
+  let cxF = fx + ux * len / 2 + px * jj * 0.2 * len;
+  let cyF = fy + uy * len / 2 + py * jj * 0.2 * len;
+  // Radius: scaled with the A→B distance, clamped to the [min, max] band
+  // (loops stay small), jittered organically.
+  let r = Math.max(
+    LOOP_R.min,
+    Math.min(LOOP_R.max, LOOP_R.factor * len * (1 + 0.1 * jj)),
+  );
+  // Viewport containment: pull the center inside the margin box, cap r so
+  // the whole circle stays visible; if even the min radius no longer fits,
+  // degrade to the curve (the user's "becomes a simple curve" rule).
+  if (
+    viewport &&
+    viewport.width > 2 * VIEWPORT_MARGIN &&
+    viewport.height > 2 * VIEWPORT_MARGIN
+  ) {
+    const M = VIEWPORT_MARGIN;
+    cxF = Math.max(M, Math.min(viewport.width - M, cxF));
+    cyF = Math.max(M, Math.min(viewport.height - M, cyF));
+    const fit = Math.min(
+      cxF - M,
+      viewport.width - M - cxF,
+      cyF - M,
+      viewport.height - M - cyF,
+    );
+    r = Math.min(r, fit);
+    if (r < LOOP_R.min) return curveFallback();
+  }
 
   // Tangent point FROM an external point P to the circle (C, r):
-  //   T = C + (r²/D²)·(P−C) ± (r·√(D²−r²)/D)·perp(P−C)/D·D ...
-  // implemented numerically below; `side` picks which of the two tangents.
+  //   T = C + (r²/D²)·(P−C) ± (r·√(D²−r²)/D)·perp(P−C)/D
+  // implemented numerically; `side` picks which of the two tangents.
   const tangents = (Px: number, Py: number): Array<{ x: number; y: number }> => {
     const ddx = Px - cxF;
     const ddy = Py - cyF;
@@ -254,7 +390,7 @@ export function loopGeometry(
   };
   const tAs = tangents(fx, fy);
   const tBs = tangents(tx, ty);
-  if (tAs.length < 2 || tBs.length < 2) return noLoop;
+  if (tAs.length < 2 || tBs.length < 2) return curveFallback();
 
   // Pick the same SIDE for A and B (the loop sits on one side of the
   // line): side s is chosen by the rotation direction so the entry is
@@ -269,15 +405,15 @@ export function loopGeometry(
   // so the exit tangent continues the same rotation.
   let delta = (phiB - phiA) * w;
   delta = ((delta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  // ONE closed loop (2π) + the connecting arc to B's tangent point.
-  const sweep = w * (2 * Math.PI + delta);
+  // `loops` closed 360° circles + the connecting arc to B's tangent point.
+  const sweep = w * (2 * Math.PI * loops + delta);
 
   const approachLen = Math.hypot(entry.x - fx, entry.y - fy);
   const arcLen = Math.abs(sweep) * r;
   const finalLen = Math.hypot(tx - exit.x, ty - exit.y);
   const pathLen = approachLen + arcLen + finalLen;
   return {
-    loop: true, cx: cxF, cy: cyF, r,
+    mode: 'loop', loops, loop: true, cx: cxF, cy: cyF, r,
     entry, exit, alpha0: phiA, sweep,
     approachLen, finalLen, arcLen, pathLen,
     approachShare: pathLen > 0 ? approachLen / pathLen : 0,
@@ -286,17 +422,24 @@ export function loopGeometry(
 }
 
 /**
- * v5: sample whether the page area under a viewport point is dark.
+ * v5.3: sample whether the PAGE under a viewport point is dark — themed off
+ * the page-level background, not the local element under the tip.
  *
- * Walks up the element tree from the point (document.elementFromPoint)
- * and collects computed backgrounds; the first one with real coverage
- * (a non-transparent color) wins. Luminance (0.2126 R + 0.7152 G +
- * 0.0722 B, WCAG relative-luminance weights on 0-255 values) under 128
- * counts as "dark".
+ * 1) PAGE LEVEL (the theme of the site): the first non-transparent
+ *    background of `documentElement` / `body` wins — light page → dark
+ *    arrow, dark page → white arrow. This is the primary signal, so a
+ *    dark banner/card sitting under the cursor can no longer flip the
+ *    whole cursor white on a light site.
+ * 2) LOCAL fallback: sites that set their theme on a full-viewport div
+ *    instead of body/html (common with CSS resets that leave body
+ *    transparent) — walk up from `elementFromPoint` to the first opaque
+ *    background, exactly like the v5 implementation.
  *
- * Returns `null` when nothing sampleable is under the point (e.g. jsdom,
- * no layout) — callers fall back to the light theme (black arrow), which
- * is the safe default. Never throws: theme detection is presentation-only.
+ * Luminance (0.2126 R + 0.7152 G + 0.0722 B, WCAG weights on 0-255
+ * values) under 128 counts as "dark". Returns `null` when nothing is
+ * sampleable (e.g. jsdom, no layout) — callers fall back to the light
+ * theme (black arrow), the safe default. Never throws: theme detection
+ * is presentation-only.
  */
 export function samplePageDark(
   x: number,
@@ -304,8 +447,17 @@ export function samplePageDark(
   doc: Document = document,
 ): boolean | null {
   try {
-    if (!doc || !doc.elementFromPoint || !doc.defaultView) return null;
-    const win = doc.defaultView;
+    const win = doc?.defaultView;
+    if (!win || typeof win.getComputedStyle !== 'function') return null;
+    // 1) page-level background first.
+    for (const el of [doc?.documentElement, doc?.body]) {
+      if (!el) continue;
+      const lum = bgLuminance(win.getComputedStyle(el).backgroundColor);
+      if (lum !== null) return lum < 128;
+    }
+    // 2) local fallback (page background transparent: the theme lives on
+    //    a full-viewport div reached by walking up from the hit element).
+    if (typeof doc.elementFromPoint !== 'function') return null;
     let el = doc.elementFromPoint(x, y) as Element | null;
     for (let i = 0; i < 8 && el; i++) {
       const bg = win.getComputedStyle(el).backgroundColor;
@@ -565,24 +717,44 @@ function restAura(aura: HTMLElement | null): void {
 }
 
 /**
- * v5.1: the loop-travel engine. Every hop completes a single ~300°
- * circular loop based at the start point, then exits in a straight tail
- * to the destination — "a single loop (circular movement) completed
- * between start and destination".
+ * v5.3: the travel engine. Every hop glides from A to B on the path that
+ * `loopGeometry` chose for the distance:
  *
- * - The arrow + border aura ride the LOOP PATH (transform-only x/y via a
+ * - **snap** (very close): instant placement — no visible swing.
+ * - **curve** (short–mid, or a loop that couldn't fit the viewport): a
+ *   single gentle quadratic bow, constant speed along the arc length.
+ * - **loop** (far / very far): straight approach -> 1 or 2 small closed
+ *   360° loops (distance-scaled + clamped radius, kept inside the tab
+ *   viewport) -> straight exit onto B. G1 joins, constant ~320px/s —
+ *   deliberately slow and smooth so the working is watchable.
+ *
+ * - The arrow + border aura ride the chosen PATH (transform-only x/y via a
  *   progress sampler: GSAP tweens 0->1 and each frame we evaluate the
- *   arc + tail position and set transforms — no layout animates).
+ *   position and set transforms — no layout animates).
  * - The HALO (the target indicator) glides STRAIGHT to the element — it
  *   marks "where the action lands", not the pointer's scenic route.
  * - The LABEL fades in near arrival.
- * - Constant arc-length speed: the whole path is timed by its true
- *   length at ~380px/s (floor 0.9s / cap 4s) — deliberately slow and
- *   smooth, so the working is watchable. `ease:'none'` keeps velocity
- *   constant along the loop (the smoothest circular motion).
- * - Theme: the pointer is re-sampled at the loop's apex + on arrival
+ * - Constant speed: the whole path is timed by its true length at
+ *   ~320px/s (floor 0.9s / cap 4s). `ease:'none'` keeps velocity constant
+ *   along the whole travel (the smoothest circular motion).
+ * - Theme: the pointer is re-sampled at the target and the path's apex
  *   (applyTheme), so it inverts as it crosses a light->dark boundary.
  */
+/** The tab's current viewport (for the loop's containment check). */
+function currentViewport(): { width: number; height: number } | undefined {
+  try {
+    if (typeof window === 'undefined') return undefined;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+      return { width: w, height: h };
+    }
+  } catch {
+    /* no window (jsdom edge) */
+  }
+  return undefined;
+}
+
 function travelCurve(
   nodes: OverlayNodes,
   target: { x: number; y: number },
@@ -599,20 +771,20 @@ function travelCurve(
     x: (Number(onScreenX) || 0) + TIP_OFFSET.x,
     y: (Number(onScreenY) || 0) + TIP_OFFSET.y,
   };
-  // Presentation-only organic variation: each hop's loop varies slightly
-  // in radius + sweep (never the endpoints or timing contract). Skipped
-  // under reduced motion (then jitter=0 keeps the path deterministic).
+  // Presentation-only organic variation: each hop's path varies slightly
+  // (loop radius / center / curve bow — never the endpoints or the timing
+  // contract). Skipped under reduced motion (then jitter=0 keeps the path
+  // deterministic).
   const jitter = prefersReducedMotion() ? 0 : Math.random() * 2 - 1;
-  const geo = loopGeometry(from, target, jitter);
+  const geo = loopGeometry(from, target, jitter, currentViewport());
   const t = { x: target.x, y: target.y };
   const lx = cx + 14, ly = cy + 14; // label target
 
   const dist = geo.pathLen;
   const dur = travelDuration(dist);
-  const loopless = !geo.loop || dur <= 0;
 
   // Theme: sample at the target before travel so the pointer is already
-  // the right colour when it lands; re-sampled at the loop apex below.
+  // the right colour when it lands; re-sampled at the path apex below.
   applyTheme(nodes, cx, cy);
 
   travel?.kill();
@@ -620,8 +792,9 @@ function travelCurve(
 
   const arrowTo = { x: t.x - TIP_OFFSET.x, y: t.y - TIP_OFFSET.y };
 
-  if (prefersReducedMotion() || loopless) {
-    // No loop / no animation: instant placement (still themed + glowed).
+  // snap (very close hop) / reduced motion / no time: instant placement
+  // (still themed + glowed) — a 60px-or-less hop has no room to swing.
+  if (geo.mode === 'snap' || prefersReducedMotion() || dur <= 0) {
     gsap.set(nodes.arrow, { x: arrowTo.x, y: arrowTo.y, scale: 1, opacity: 1 });
     gsap.set(nodes.aura, { x: arrowTo.x, y: arrowTo.y, scale: GLOW.restScale, opacity: GLOW.restOpacity });
     gsap.set(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
@@ -631,37 +804,42 @@ function travelCurve(
     return;
   }
 
-  // Three-segment path, constant speed: straight approach A -> entry,
-  // then the closed-loop arc (alpha0 + sweep, exactly one 360° circle
-  // plus the connecting arc to B's tangent point), then the straight
-  // exit -> B. All joins are G1 (tangent-continuous), so at constant
-  // speed the motion reads as one smooth, unbroken swing.
-  const sA = geo.approachShare; // path share of the approach segment
-  const sF = sA + geo.arcShare; // approach + arc
-  const pathPos = (u: number): { x: number; y: number } => {
-    if (u <= 0) return { x: from.x, y: from.y };
-    if (u >= 1) return { x: t.x, y: t.y };
-    if (u < sA) {
-      const v = sA > 0 ? u / sA : 1;
+  // Position sampler for the chosen middle: the loop's 3-segment path
+  // (straight approach -> closed loop(s) -> straight exit, G1-continuous)
+  // or the curve's constant-speed quadratic bezier.
+  let pathPos: (u: number) => { x: number; y: number };
+  if (geo.mode === 'loop') {
+    const sA = geo.approachShare; // path share of the approach segment
+    const sF = sA + geo.arcShare; // approach + middle
+    pathPos = (u: number): { x: number; y: number } => {
+      if (u <= 0) return { x: from.x, y: from.y };
+      if (u >= 1) return { x: t.x, y: t.y };
+      if (u < sA) {
+        const v = sA > 0 ? u / sA : 1;
+        return {
+          x: from.x + (geo.entry.x - from.x) * v,
+          y: from.y + (geo.entry.y - from.y) * v,
+        };
+      }
+      if (u < sF) {
+        const au = sF - sA > 0 ? (u - sA) / (sF - sA) : 1;
+        const ang = geo.alpha0 + geo.sweep * au;
+        return {
+          x: geo.cx + geo.r * Math.cos(ang),
+          y: geo.cy + geo.r * Math.sin(ang),
+        };
+      }
+      const v = 1 - sF > 0 ? (u - sF) / (1 - sF) : 1;
       return {
-        x: from.x + (geo.entry.x - from.x) * v,
-        y: from.y + (geo.entry.y - from.y) * v,
+        x: geo.exit.x + (t.x - geo.exit.x) * v,
+        y: geo.exit.y + (t.y - geo.exit.y) * v,
       };
-    }
-    if (u < sF) {
-      const au = sF - sA > 0 ? (u - sA) / (sF - sA) : 1;
-      const ang = geo.alpha0 + geo.sweep * au;
-      return {
-        x: geo.cx + geo.r * Math.cos(ang),
-        y: geo.cy + geo.r * Math.sin(ang),
-      };
-    }
-    const v = 1 - sF > 0 ? (u - sF) / (1 - sF) : 1;
-    return {
-      x: geo.exit.x + (t.x - geo.exit.x) * v,
-      y: geo.exit.y + (t.y - geo.exit.y) * v,
     };
-  };
+  } else {
+    // curve: a gentle quadratic bow, sampled at constant ARC-LENGTH speed.
+    const lut = quadBezierLUT(from, geo.curveCtrl ?? { x: (from.x + t.x) / 2, y: (from.y + t.y) / 2 }, t, 32);
+    pathPos = (u: number): { x: number; y: number } => quadBezierPoint(lut, u);
+  }
 
   // The cursor + border aura ride the loop; the HALO (the target
   // indicator) glides straight — it marks "where the action lands".
