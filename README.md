@@ -10,7 +10,7 @@
 ![build: 1.33 MB](https://img.shields.io/badge/build-1.33%20MB%20chrome-mv3-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-23):** `main` clean · **438/438** vitest + **74/74**
+> **Current state (verified 2026-09-24):** `main` clean · **438/438** vitest + **74/74**
 > pytest passing · Chrome MV3 build **1.33 MB** · 0 PII off-device · agent cursor
 > v5.3 (distance-aware travel: snap/curve/1-loop/2-loops, page-level theme fix,
 > viewport-contained loops) · task-history cache · live VLM indicator ·
