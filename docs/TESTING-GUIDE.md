@@ -16,7 +16,7 @@
 
 ### Unit Tests
 ```
-429/429 passing (34 test files)
+438/438 passing (34 test files)
 - PAN detection: ✓
 - Email detection: ✓
 - Credit card Luhn validation (13–19 digits, widened in #130): ✓
@@ -30,8 +30,9 @@
 - Tolerant <select> option matching (matchSelectOption, #130): ✓
 - PII strict redaction contract (C3 [REDACTED] sentinel): ✓
 - 13/19-digit card egress firewall regression (C2): ✓
-- Agent cursor v5.2 (theme-aware select pointer, border-tracing working glow,
-  single closed 360° loop travel, loopGeometry + travelDuration, #137/#139): ✓
+- Agent cursor v5.3 (distance-aware travel: snap / curve / 1-loop / 2-loops,
+  page-level theme sampling, viewport containment, `loopGeometry` +
+  `travelDuration` + `quadBezierLUT`, #137/#139): ✓
 ```
 
 ### Build Status

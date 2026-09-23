@@ -1,28 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="760" height="636" viewBox="0 0 760 636" font-family="Segoe UI,Helvetica,Arial,sans-serif">
 <rect width="760" height="636" fill="#ffffff"/>
 <text x="20" y="30" font-size="18" font-weight="700" fill="#334155">Unit test coverage by module (vitest)</text>
-<text x="20" y="50" font-size="12" fill="#64748b">421/421 passing · 34 test files · verified 2026-09-22 (PR #137)</text>
+<text x="20" y="50" font-size="12" fill="#64748b">438/438 passing · 34 test files · verified 2026-09-24 (cursor v5.3)</text>
 <text x="210" y="74" font-size="13" fill="#334155" text-anchor="end">pii-sanitizer</text>
 <rect x="222" y="65" width="214" height="17" rx="4" fill="#22c55e"/>
 <text x="444" y="76" font-size="13" font-weight="600" fill="#64748b">63</text>
 <text x="210" y="108" font-size="13" fill="#334155" text-anchor="end">pii-recall-precision</text>
 <rect x="222" y="99" width="125" height="17" rx="4" fill="#22c55e"/>
 <text x="355" y="110" font-size="13" font-weight="600" fill="#64748b">37</text>
-<text x="210" y="142" font-size="13" fill="#334155" text-anchor="end">agent-runner</text>
-<rect x="222" y="133" width="102" height="17" rx="4" fill="#22c55e"/>
-<text x="332" y="144" font-size="13" font-weight="600" fill="#64748b">30</text>
-<text x="210" y="176" font-size="13" fill="#334155" text-anchor="end">pii-detector</text>
-<rect x="222" y="167" width="81" height="17" rx="4" fill="#22c55e"/>
-<text x="311" y="178" font-size="13" font-weight="600" fill="#64748b">24</text>
-<text x="210" y="210" font-size="13" fill="#334155" text-anchor="end">firefox-compatibility</text>
-<rect x="222" y="201" width="71" height="17" rx="4" fill="#22c55e"/>
-<text x="301" y="212" font-size="13" font-weight="600" fill="#64748b">21</text>
-<text x="210" y="244" font-size="13" fill="#334155" text-anchor="end">session-manager</text>
+<text x="210" y="142" font-size="13" fill="#334155" text-anchor="end">agent-cursor</text>
+<rect x="222" y="133" width="119" height="17" rx="4" fill="#22c55e"/>
+<text x="349" y="144" font-size="13" font-weight="600" fill="#64748b">35</text>
+<text x="210" y="176" font-size="13" fill="#334155" text-anchor="end">agent-runner</text>
+<rect x="222" y="167" width="102" height="17" rx="4" fill="#22c55e"/>
+<text x="332" y="178" font-size="13" font-weight="600" fill="#64748b">30</text>
+<text x="210" y="210" font-size="13" fill="#334155" text-anchor="end">pii-detector</text>
+<rect x="222" y="201" width="81" height="17" rx="4" fill="#22c55e"/>
+<text x="311" y="212" font-size="13" font-weight="600" fill="#64748b">24</text>
+<text x="210" y="244" font-size="13" fill="#334155" text-anchor="end">firefox-compatibility</text>
 <rect x="222" y="235" width="71" height="17" rx="4" fill="#22c55e"/>
 <text x="301" y="246" font-size="13" font-weight="600" fill="#64748b">21</text>
-<text x="210" y="278" font-size="13" fill="#334155" text-anchor="end">agent-cursor</text>
-<rect x="222" y="269" width="61" height="17" rx="4" fill="#22c55e"/>
-<text x="291" y="280" font-size="13" font-weight="600" fill="#64748b">18</text>
+<text x="210" y="278" font-size="13" fill="#334155" text-anchor="end">session-manager</text>
+<rect x="222" y="269" width="71" height="17" rx="4" fill="#22c55e"/>
+<text x="301" y="280" font-size="13" font-weight="600" fill="#64748b">21</text>
 <text x="210" y="312" font-size="13" fill="#334155" text-anchor="end">loop-detection</text>
 <rect x="222" y="303" width="51" height="17" rx="4" fill="#22c55e"/>
 <text x="281" y="314" font-size="13" font-weight="600" fill="#64748b">15</text>
