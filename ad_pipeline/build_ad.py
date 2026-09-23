@@ -839,6 +839,240 @@ class Scenes:
             img = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
         return img
 
+    # ---- run  ("watch it work" — mirrors the site hero mock) ----
+    def scene_run(self, img, d, t):
+        c = self.cfg.get("run", {})
+        p_head = ease(seg(t, 0.0, 0.22))
+        head = c.get("headline", "Watch it work.")
+        sub = c.get("sub", "")
+        hbase = fit_font(58, True, head, MAX_HEAD_W, floor=30)
+        img = self._fade_text(img, head, WIDTH // 2, 140, font(hbase, True), WHITE,
+                              p_head, glow=CYAN)
+        img = self._fade_text(img, sub, WIDTH // 2, 220,
+                              font(fit_font(30, False, sub, WIDTH - 420, floor=16)),
+                              GRAY, ease(seg(t, 0.05, 0.3)))
+
+        # centred browser-chrome panel
+        px0, py0, px1, py1 = 470, 300, 1450, 880
+        p_panel = ease(seg(t, 0.1, 0.4))
+        cells = None
+        if p_panel > 0:
+            layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ld = ImageDraw.Draw(layer)
+            rounded_panel(ld, [px0, py0, px1, py1], radius=22,
+                          fill=(*CHROME_FILL[:3], int(255 * p_panel)),
+                          outline=(*CYAN, int(200 * p_panel)), width=2)
+            barh = 56
+            for gx in range(3):  # three window dots
+                ld.ellipse([px0 + 24 + gx * 30, py0 + barh // 2 - 9,
+                            px0 + 24 + gx * 30 + 18, py0 + barh // 2 + 9],
+                           fill=(*DIM, int(220 * p_panel)))
+            url = "portal.acme.com"
+            uf = font(24, True)
+            ux0 = px0 + 120
+            ld.rounded_rectangle([ux0, py0 + 14, ux0 + uf.getlength(url) + 64, py0 + barh - 14],
+                                 radius=18, fill=(*FIELD_FILL, int(255 * p_panel)),
+                                 outline=(*DIM, int(160 * p_panel)), width=1)
+            ld.text((ux0 + uf.getlength(url) / 2 + 32, py0 + barh // 2), url,
+                    font=uf, fill=(*WHITE, int(255 * p_panel)), anchor="mm")
+            # 2x2 grid of task cells (reserve a footer strip below for log/timer)
+            pad, gap = 30, 26
+            footer_h = 74
+            gx0, gy0 = px0 + pad, py0 + barh + pad
+            gx1, gy1 = px1 - pad, py1 - pad - footer_h
+            cw = (gx1 - gx0 - gap) // 2
+            ch = (gy1 - gy0 - gap) // 2
+            cells = [
+                [gx0, gy0, gx0 + cw, gy0 + ch],
+                [gx0 + cw + gap, gy0, gx1, gy0 + ch],
+                [gx0, gy0 + ch + gap, gx0 + cw, gy0 + 2 * ch + gap],
+                [gx0 + cw + gap, gy0 + ch + gap, gx1, gy1],
+            ]
+            labels = [("LOGIN", "portal.acme.com"), ("DATA", "247 rows"),
+                      ("QUEUE", "12 filings"), ("SAVE + SUBMIT", "")]
+            for i, bx in enumerate(cells):
+                bx0, by0, bx1, by1 = bx
+                is_btn = i == 3
+                fcol = PURPLE if is_btn else CHROME_FILL
+                ocol = CYAN if is_btn else DIM
+                ld.rounded_rectangle([bx0, by0, bx1, by1], radius=14,
+                                     fill=(*fcol[:3], int(210 * p_panel)),
+                                     outline=(*ocol, int(150 * p_panel)),
+                                     width=2)
+                tt, ss = labels[i]
+                ld.text((bx0 + 20, by0 + (ch // 2) - (10 if ss else 0)), tt,
+                        font=font(30, True), fill=(*WHITE, int(255 * p_panel)), anchor="lm")
+                if ss:
+                    ld.text((bx0 + 20, by0 + (ch // 2) + 26), ss, font=font(22, False),
+                            fill=(*GRAY, int(230 * p_panel)), anchor="lm")
+            img = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+
+        # 3-step loop: move -> act -> ok
+        if cells is not None:
+            steps = [
+                (0.06, 0.34, 0, "STEP 01/03 · LOGIN", "› signed in · portal.acme.com"),
+                (0.36, 0.64, 1, "STEP 02/03 · PULL", "› pulled 247 rows · on-device"),
+                (0.66, 0.92, 3, "STEP 03/03 · SUBMIT", "› submitted · receipt #1042"),
+            ]
+            centers = [((cells[i][0] + cells[i][2]) // 2, (cells[i][1] + cells[i][3]) // 2)
+                       for i in range(4)]
+            prev_center = (px0 + 60, py0 + 140)
+            active_cell, active_p, hud, logline, active_ok = -1, 0.0, "", "", False
+            for (s0, s1, cell, h, lg) in steps:
+                lp = seg(t, s0, s1)
+                if lp > 0:
+                    active_cell, active_p, hud, logline = cell, lp, h, lg
+                    active_ok = lp >= 0.82
+            if active_cell >= 0:
+                d2 = ImageDraw.Draw(img, "RGBA")
+                bx0, by0, bx1, by1 = cells[active_cell]
+                cx, cy = centers[active_cell]
+                fx = ease(active_p)
+                cxp = int(prev_center[0] + (cx - prev_center[0]) * fx)
+                cyp = int(prev_center[1] + (cy - prev_center[1]) * fx)
+                d2.rounded_rectangle([bx0 - 4, by0 - 4, bx1 + 4, by1 + 4], radius=16,
+                                     outline=(*CYAN, int(200 * ease(active_p))), width=3)
+                d2.ellipse([cxp - 14, cyp - 14, cxp + 14, cyp + 14],
+                           fill=(*CYAN, 230), outline=WHITE, width=2)
+                hf = font(20, True)
+                d2.text((px1 - 16, py0 + 24), hud, font=hf, fill=(*WHITE, 235), anchor="rm")
+                if active_ok:
+                    d2.text((px1 - 16, py0 + 24), " · ok", font=hf,
+                            fill=(*GREEN, 255), anchor="lm")
+                shown = logline[: max(0, int(len(logline) * ease(active_p)))]
+                log_col = GREEN if active_ok else CYAN
+                if active_ok:
+                    shown = logline + " … ok"
+                d2.text((px0 + 24, py1 - 58), shown, font=font(22, True),
+                        fill=(*log_col, 235), anchor="lm")
+            prev_center = centers[active_cell] if active_cell >= 0 else prev_center
+
+        # timer chip, bottom-right of the panel (opposite the footer log line)
+        if p_panel > 0:
+            d3 = ImageDraw.Draw(img, "RGBA")
+            timer = f"T+{int(t * 12):02d}"
+            tf = font(20, True)
+            tw = tf.getlength(timer) + 40
+            tx0 = px1 - 16 - tw
+            d3.rounded_rectangle([tx0, py1 - 46, tx0 + tw, py1 - 14],
+                                 radius=15, fill=(*FIELD_FILL, 230),
+                                 outline=(*DIM, 160), width=1)
+            d3.text((tx0 + tw // 2, py1 - 30), timer, font=tf,
+                    fill=(*WHITE, 235), anchor="mm")
+
+        # DONE beat
+        p_done = ease(seg(t, 0.93, 1.0))
+        if p_done > 0:
+            dl = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            dd = ImageDraw.Draw(dl)
+            cx, cy = WIDTH // 2, 990
+            dd.ellipse([cx - 26, cy - 26, cx + 26, cy + 26],
+                       fill=(*GREEN, int(90 * p_done)), outline=GREEN, width=3)
+            dd.text((cx, cy), "✓", font=font(26, True), fill=GREEN, anchor="mm")
+            dd.text((cx + 44, cy), "TASK FINISHED · 12s", font=font(26, True),
+                    fill=(*WHITE, int(255 * p_done)), anchor="lm")
+            img = Image.alpha_composite(img.convert("RGBA"), dl).convert("RGB")
+        return img
+
+    # ---- receipts  (split screen: what the form holds vs what leaves) ----
+    def scene_receipts(self, img, d, t):
+        c = self.cfg.get("receipts", {})
+        head = c.get("headline", "The receipts.")
+        sub = c.get("sub", "")
+        p_head = ease(seg(t, 0.0, 0.2))
+        hbase = fit_font(58, True, head, MAX_HEAD_W, floor=30)
+        img = self._fade_text(img, head, WIDTH // 2, 140, font(hbase, True), WHITE,
+                              p_head, glow=CYAN)
+        img = self._fade_text(img, sub, WIDTH // 2, 214,
+                              font(fit_font(28, False, sub, WIDTH - 320, floor=15)),
+                              GRAY, ease(seg(t, 0.05, 0.28)))
+
+        px0, py0, px1, py1 = 210, 300, 920, 780      # left (form)
+        rx0, ry0, rx1, ry1 = 1000, 300, 1710, 780     # right (payload)
+        rows = [
+            ("NAME", "Amara Okafor", "••••• •••••"),
+            ("PHONE", "0803 555 0199", "••• ••• •••"),
+            ("EMAIL", "a.okafor@acme.co", "a•••@ac••.co"),
+            ("REF", "INV-2214", "INV-2214"),
+        ]
+        p_panel = ease(seg(t, 0.15, 0.4))
+        if p_panel > 0:
+            layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ld = ImageDraw.Draw(layer)
+            for (lx, ly, l1, l2, cap, panel) in (
+                    (px0, py0, px1, py1, "THE FORM", PANEL),
+                    (rx0, ry0, rx1, ry1, "THE PAYLOAD", CLOUD_FILL)):
+                rounded_panel(ld, [lx, ly, l1, l2], radius=22,
+                              fill=(*panel[:3], int(235 * p_panel)),
+                              outline=(*CYAN, int(120 * p_panel)), width=2)
+                ld.text((lx + 26, ly + 26), cap, font=font(22, True),
+                        fill=(*DIM, int(230 * p_panel)), anchor="lm")
+            # dashed divider
+            divx = (px1 + rx0) // 2
+            yy = py0 + 6
+            while yy < py1 - 6:
+                ld.line([(divx, yy), (divx, yy + 16)], fill=(*DIM, int(200 * p_panel)), width=2)
+                yy += 34
+            img = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+
+        rowh = 78
+        for i, (lab, raw, masked) in enumerate(rows):
+            ry = py0 + 90 + i * rowh
+            p_left = ease(seg(t, 0.15 + 0.08 * i, 0.45 + 0.08 * i))   # form values type in
+            p_right = ease(seg(t, 0.5 + 0.07 * i, 0.8 + 0.07 * i))    # masks sweep in
+            d2 = ImageDraw.Draw(img, "RGBA")
+            d2.text((px0 + 30, ry + 12), lab, font=font(24, True),
+                    fill=(*GRAY, int(255 * p_left)), anchor="lm")
+            if p_left > 0:
+                shown = raw[: max(0, int(len(raw) * p_left))]
+                d2.text((px0 + 30, ry + 44), shown, font=font(30),
+                        fill=(*WHITE, int(255 * p_left)), anchor="lm")
+            # right: masked value with a 2px indigo sweep bar (char-count reveal)
+            if p_right > 0:
+                d2.text((rx0 + 30, ry + 12), lab, font=font(24, True),
+                        fill=(*GRAY, int(255 * p_right)), anchor="lm")
+                mfont = font(30, True)
+                n_show = max(0, int(len(masked) * p_right))
+                mshown = masked[:n_show]
+                if mshown:
+                    d2.text((rx0 + 30, ry + 44), mshown, font=mfont,
+                            fill=(*PURPLE, int(255 * p_right)), anchor="lm")
+                mbar = mfont.getlength(mshown)
+                if p_right < 0.99 and mshown:
+                    d2.line([(rx0 + 32 + mbar, ry + 16), (rx0 + 32 + mbar, ry + 66)],
+                            fill=(*CYAN, int(220 * p_right)), width=2)
+        # seal: "0 PII crosses the line"
+        p_seal = ease(seg(t, 0.75, 0.92))
+        if p_seal > 0:
+            dl = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            dd = ImageDraw.Draw(dl)
+            cx = (px1 + rx0) // 2
+            dd.ellipse([cx - 64, 640 - 64, cx + 64, 640 + 64],
+                       fill=(*PANEL[:3], int(210 * p_seal)),
+                       outline=(*GREEN, int(255 * p_seal)), width=3)
+            dd.text((cx, 628), "0 PII", font=font(30, True),
+                    fill=(*GREEN, int(255 * p_seal)), anchor="mm")
+            dd.text((cx, 664), "crosses the line", font=font(16),
+                    fill=(*GRAY, int(255 * p_seal)), anchor="mm")
+            img = Image.alpha_composite(img.convert("RGBA"), dl).convert("RGB")
+
+        # sanitized-payload badge, bottom of right panel
+        p_badge = ease(seg(t, 0.85, 1.0))
+        if p_badge > 0:
+            dl = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            dd = ImageDraw.Draw(dl)
+            badge = c.get("badge", "SANITIZED PAYLOAD · 12 actions · 0 PII egress · receipt #1042")
+            bf = font(fit_font(24, True, badge, rx1 - rx0 - 60, floor=16))
+            bw = bf.getlength(badge) + 60
+            bx0 = (rx0 + rx1) // 2 - bw // 2
+            dd.rounded_rectangle([bx0, 820, bx0 + bw, 876], radius=28,
+                                 fill=(*PANEL[:3], int(235 * p_badge)),
+                                 outline=(*GREEN, int(220 * p_badge)), width=2)
+            dd.text(((rx0 + rx1) // 2, 848), badge, font=bf,
+                    fill=(*GREEN, int(255 * p_badge)), anchor="mm")
+            img = Image.alpha_composite(img.convert("RGBA"), dl).convert("RGB")
+        return img
+
     # ---- 6. metrics
     def scene_metrics(self, img, d, t):
         c = self.cfg["metrics"]
@@ -1065,6 +1299,17 @@ DEFAULT_CONFIG = {
         "url": "chrome-extension://···/popup",
         "headline": "This is the actual product.",
         "sub": "Task panel · live PII detections · tamper-proof privacy ledger.",
+    },
+    "run": {
+        "duration": 6,
+        "headline": "Watch it work.",
+        "sub": "One task, live — the agent sees, decides, acts.",
+    },
+    "receipts": {
+        "duration": 6,
+        "headline": "The receipts.",
+        "sub": "Left: what the form holds. Right: what leaves the machine.",
+        "badge": "SANITIZED PAYLOAD · 12 actions · 0 PII egress · receipt #1042",
     },
     "heatmap": {
         "duration": 8,
