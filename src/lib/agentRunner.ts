@@ -22,6 +22,53 @@ import type { SessionManager, SessionContext } from './sessionManager';
 import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
 import { goalBackstop } from './goalBackstop';
 
+// ── Per-event timeout (stall guard) ─────────────────────────────────────────
+//
+// Every event the planner issues (a /plan round-trip, or an on-device VLM
+// confirm) is bounded by a deadline. An event that outlasts it is logged +
+// skipped as a no-op; 3 consecutive timeouts stop the run as stalled, so a
+// hung event can never make the agent "look stuck" after performing one.
+
+/** Default per-event deadline (ms) - headroom over the ~14s planner calls. */
+export const DEFAULT_EVENT_TIMEOUT_MS = 90_000;
+
+/** Thrown by withTimeout() when a bounded event outlasts its deadline. */
+export class EventTimeoutError extends Error {
+  readonly label: string;
+  readonly ms: number;
+  constructor(label: string, ms: number) {
+    super(`event "${label}" timed out after ${ms}ms`);
+    this.name = 'EventTimeoutError';
+    this.label = label;
+    this.ms = ms;
+  }
+}
+
+/**
+ * Race `promise` against a deadline: resolves with the value when the event
+ * settles first, rejects with EventTimeoutError(label, ms) otherwise. The
+ * timer is cleared on settle, so a fast event leaves no dangling handle.
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new EventTimeoutError(label, ms)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 // ── Task state (shared + persisted so the SW can resume/report) ──────────────
 
 export interface PlanHistoryEntry {
@@ -259,6 +306,16 @@ export interface AgentRunnerDeps {
    * without one more LLM plan round-trip.
    */
   goalCheckEvery?: number;
+  /**
+   * Per-event timeout (ms): bounds a single planner event (fetchPlan) and
+   * the optional VLM confirms (confirmGoal). An event that outlasts the
+   * deadline is treated as TIMED OUT - the step is logged and skipped as a
+   * no-op instead of hanging the run, and 3 consecutive timeouts stop the
+   * run as stalled (so the agent never "looks stuck" after performing one
+   * event). Omit = the generous 90s default, which leaves headroom for the
+   * ~14s LLM planner calls.
+   */
+  eventTimeoutMs?: number;
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -291,6 +348,10 @@ export class AgentRunner {
   // #100 proactive verify: how many successful actions since the last on-device
   // goal check. Compares against deps.goalCheckEvery (default 1 = every action).
   private actionsSinceGoalCheck = 0;
+  // Streak of consecutive per-event timeouts (planner fetch / VLM confirm).
+  // A timely plan or an executed action resets it; 3 in a row stops the run
+  // as stalled instead of spinning the step budget on hung events.
+  private consecutiveEventTimeouts = 0;
 
   constructor(private readonly deps: AgentRunnerDeps) {
     this.state = emptyTaskState();
@@ -298,6 +359,11 @@ export class AgentRunner {
 
   getState(): AgentTaskState {
     return this.state;
+  }
+
+  /** Effective per-event deadline (ms): the dep when set, else the default. */
+  private eventTimeoutMs(): number {
+    return this.deps.eventTimeoutMs ?? DEFAULT_EVENT_TIMEOUT_MS;
   }
 
   private log(msg: string): void {
@@ -554,7 +620,36 @@ export class AgentRunner {
       }
       if (guard.redactedCount > 0) this.log(`Masked ${guard.redactedCount} PII field(s) before /plan egress`);
 
-      const plan = await d.fetchPlan(guard.payload, d.abortSignal);
+      let plan: any;
+      try {
+        plan = await withTimeout(
+          d.fetchPlan(guard.payload, d.abortSignal),
+          this.eventTimeoutMs(),
+          'planner event',
+        );
+      } catch (e) {
+        if (e instanceof EventTimeoutError) {
+          this.consecutiveEventTimeouts += 1;
+          this.log(
+            `⏱ ${e.message} - treating step as no-op ` +
+              `(consecutive timeouts ${this.consecutiveEventTimeouts}/3)`,
+          );
+          if (this.consecutiveEventTimeouts >= 3) {
+            this.log('⚠️ Stalled: 3 consecutive planner events timed out - stopping');
+            this.state.status = 'failed';
+            this.state.running = false;
+            this.finishSession(sessionId, 'stalled: repeated per-event timeouts');
+            this.notify();
+            return;
+          }
+          this.state.step = currentStep;
+          this.notify();
+          continue;
+        }
+        throw e; // a non-timeout error propagates as before
+      }
+      // A timely plan is progress - the stall streak is reset.
+      this.consecutiveEventTimeouts = 0;
       if (plan == null) {
         this.log('Planner error: no response (server offline or aborted)');
         break;
@@ -624,7 +719,11 @@ export class AgentRunner {
           if (this.doneWithOpenStreak === 1 && d.confirmGoal) {
             this.log('🔎 Asking on-device vision to confirm open goal(s)...');
             try {
-              const verdict = await d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: undone });
+              const verdict = await withTimeout(
+                d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: undone }),
+                this.eventTimeoutMs(),
+                'VLM confirm event',
+              );
               if (verdict?.confirmed) {
                 // The on-device proof says the goal content IS on screen -
                 // trust it for the open items (a screenshot-based check,
@@ -670,6 +769,7 @@ export class AgentRunner {
 
       // A real executed action is progress - the loop is broken.
       this.repeatedStreak = 0;
+      this.consecutiveEventTimeouts = 0;
       await this.executeAction(action, d, sessionId);
       this.state.step = currentStep;
       this.notify();
@@ -711,7 +811,11 @@ export class AgentRunner {
           : { id: 'task', description: d.task, done: false };
         if (!goalItem.done) {
           try {
-            const v = await d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: [goalItem] });
+            const v = await withTimeout(
+              d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: [goalItem] }),
+              this.eventTimeoutMs(),
+              'VLM confirm event',
+            );
             if (v?.confirmed) {
               const g = this.checklist.find((c) => c.id === goalItem.id);
               if (g) g.done = true;
@@ -729,8 +833,12 @@ export class AgentRunner {
               // ran" is not mistaken for "VLM checked and said no".
               this.log(`🔎 VLM check after ${action.type}: on-device model unavailable this step - continuing on backstop`);
             }
-          } catch {
-            this.log(`🔎 VLM check after ${action.type} threw - continuing on backstop`);
+          } catch (e) {
+            if (e instanceof EventTimeoutError) {
+              this.log(`🔎 VLM confirm after ${action.type} timed out (${e.ms}ms) - continuing on backstop`);
+            } else {
+              this.log(`🔎 VLM check after ${action.type} threw - continuing on backstop`);
+            }
           }
         }
       }

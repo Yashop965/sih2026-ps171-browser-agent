@@ -18,6 +18,9 @@ import {
   emptyTaskState,
   mergeChecklist,
   pageContentSignature,
+  withTimeout,
+  EventTimeoutError,
+  DEFAULT_EVENT_TIMEOUT_MS,
   type AgentRunnerDeps,
   type ChecklistItem,
 } from '../src/lib/agentRunner';
@@ -77,10 +80,10 @@ function makeRunner(planSteps: PlanStep[], opts: Partial<Record<string, any>> = 
       return { ok: true, ...(list[execIndex++ % list.length] ?? {}) };
     },
     navigate: async () => ({ ok: true }),
-    fetchPlan: async () => {
+    fetchPlan: opts.fetchPlan ?? (async () => {
       const step = planSteps[planIndex++] ?? { plan: { action: { type: 'DONE' } } };
       return step.plan;
-    },
+    }),
     delay: async () => {},
     sessionManager: sm,
     tabId: 1,
@@ -89,6 +92,8 @@ function makeRunner(planSteps: PlanStep[], opts: Partial<Record<string, any>> = 
     startUrl: '',
     onProgress: (state) => progress.push(state),
     isStopped: () => stopNow,
+    // Forward the per-event deadline when a test opts in (default 90s otherwise).
+    eventTimeoutMs: opts.eventTimeoutMs,
   };
   const runner = new AgentRunner(deps as AgentRunnerDeps);
   return {
@@ -871,5 +876,90 @@ describe('pageContentSignature (pure helper, #128)', () => {
     expect(pageContentSignature({})).toBe('0/0');
     // Two null-context steps must NOT clear memory (invariant signature).
     expect(pageContentSignature(null)).toBe(pageContentSignature(null));
+  });
+});
+
+describe('per-event timeout (stall guard)', () => {
+  it('withTimeout resolves with the value when the event settles before the deadline', async () => {
+    await expect(withTimeout(Promise.resolve('ok'), 50, 'evt')).resolves.toBe('ok');
+  });
+
+  it('withTimeout rejects with EventTimeoutError when the event outlasts the deadline', async () => {
+    const late = new Promise((r) => setTimeout(() => r('late'), 80));
+    await expect(withTimeout(late, 20, 'planner event')).rejects.toBeInstanceOf(EventTimeoutError);
+  });
+
+  it('withTimeout propagates a non-timeout rejection unchanged', async () => {
+    const boom = new Promise((_r, rej) => setTimeout(() => rej(new Error('boom')), 5));
+    await expect(withTimeout(boom, 50, 'evt')).rejects.toThrow('boom');
+  });
+
+  it('exposes a generous default deadline that leaves planner headroom', () => {
+    expect(DEFAULT_EVENT_TIMEOUT_MS).toBeGreaterThanOrEqual(90_000);
+  });
+
+  // A hung planner event: the step is skipped as a no-op, and 3 consecutive
+  // timeouts stop the run as stalled (never "looks stuck").
+  function makeStalledRunner(planSteps: PlanStep[], opts: Record<string, any> = {}) {
+    return makeRunner(planSteps, {
+      fetchPlan: async () => {
+        // Simulate a hung planner: never settles within the (small) deadline.
+        return new Promise(() => {});
+      },
+      eventTimeoutMs: 30,
+      ...opts,
+    } as any);
+  }
+
+  it('stops the run as stalled after 3 consecutive planner-event timeouts', async () => {
+    const { runner, sm } = makeStalledRunner([]);
+    await runner.run();
+    const s = runner.getState();
+    expect(s.running).toBe(false);
+    expect(s.status).toBe('failed');
+    expect(sm.__calls).toContain('failSession:stalled: repeated per-event timeouts');
+    expect(runner.getState().logs.some((l) => /consecutive planner events timed out/.test(l))).toBe(true);
+  });
+
+  it('a timely plan resets the stall streak (no stop after a single timeout)', async () => {
+    let hang = true;
+    const sm = makeSessionManagerStub();
+    const progress: any[] = [];
+    const deps: AgentRunnerDeps = {
+      extract: async () => ({
+        ok: true,
+        elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+        url: 'https://example.com',
+        title: 'Page',
+        context: null,
+      }),
+      execute: async () => ({ ok: true }),
+      navigate: async () => ({ ok: true }),
+      fetchPlan: async () => {
+        // First event hangs (timed out), the second returns a real DONE.
+        if (hang) {
+          hang = false;
+          return new Promise(() => {}); // hung
+        }
+        return { action: { type: 'DONE', reasoning: 'recovered' } };
+      },
+      delay: async () => {},
+      sessionManager: sm,
+      tabId: 1,
+      windowId: 1,
+      task: 't',
+      startUrl: '',
+      onProgress: (st) => progress.push(st),
+      isStopped: () => false,
+      eventTimeoutMs: 30,
+    };
+    const runner = new AgentRunner(deps as AgentRunnerDeps);
+    await runner.run();
+    const s = runner.getState();
+    // The single timeout is a no-op; the timely DONE completes the task.
+    expect(s.status).toBe('complete');
+    expect(s.running).toBe(false);
+    expect(s.logs.some((l) => /treating step as no-op/.test(l))).toBe(true);
+    expect(s.logs.some((l) => /timed out/.test(l) && /stalled/i.test(l))).toBe(false);
   });
 });
