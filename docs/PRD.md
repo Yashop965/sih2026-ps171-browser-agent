@@ -525,9 +525,11 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
 
 ### 5.1 Build Status
 
-> **Note (2026-09-22):** current `dist/chrome-mv3` build is **1.33 MB** after the
-> PII criticals (#130 C1–C3), the agent-cursor v3 make-over (#137), task history
-> (#134), live VLM indicator (#136), lower-section modernization (#135), and the
+> **Note (2026-09-24):** current `dist/chrome-mv3` build is **1.33 MB** after the
+> PII criticals (#130 C1–C3), the agent-cursor v5.3 movement-engine rework (#137→v5.3:
+> distance-aware travel — snap / curve / 1-loop / 2-loops, page-level theme sampling
+> that fixes the light-mode color bug, viewport-contained loops — issue #139), task
+> history (#134), live VLM indicator (#136), lower-section modernization (#135), and the
 > fast zero-reasoning planner model (#133). The breakdown below is the Sep-2 snapshot.
 
 ```
@@ -540,11 +542,12 @@ Total build size: 1.21 MB (Sep-2 snapshot)
 
 ### 5.2 Test Coverage Summary
 
-> **Note (2026-09-22):** the test suite has since grown to **421 tests across 34
+> **Note (2026-09-24):** the test suite has since grown to **438 tests across 34
 > files** (Chrome MV3 build **1.33 MB**), plus a 74-test Python server suite. The
 > table below is the Sep-2 snapshot list; the current full set adds the checklist,
 > port-retry, loop-detection, loopWarning-signal, WAIT-duration, autonomy,
-> goal-backstop, vision-confirm, agent-cursor v3 (presence badge + sonar ping),
+> goal-backstop, vision-confirm, agent-cursor v5.3 (distance-aware travel —
+> snap/curve/1-loop/2-loops, `loopGeometry`/`quadBezierLUT`),
 > task-history, tolerant select-matching, and PII redaction/egress regression
 > suites.
 
@@ -934,14 +937,16 @@ interface PlanResponse {
 | Issue | Feature | Status | Notes |
 |-------|---------|--------|-------|
 | #100 | Local Florence-2 / deterministic goal backstop to stop when the goal is on-screen | **In progress** (another agent) | Fast path = URL/title matching vs checklist (`src/lib/goalBackstop.ts`); optional Florence-2 OCR/VQA confirm; screenshot never leaves device |
-| #101 | Visual agent-cursor overlay (computer-use style) | Filed | Content-script overlay, `pointer-events:none`, no PII to logs |
+| #101 | Visual agent-cursor overlay (computer-use style) | **Done (v5.3)** · polish → #139 | "Select" pointer (mirrored, tip top-left, 24px), theme-aware **page-level** colors (black on light / white on dark — light-mode bug fixed), border-tracing working glow, distance-aware travel: snap / curve / 1-loop / 2-loops, viewport-contained. #139 tracks optional polish (exit-tail ease, shape variety) |
 | #102 | Local user-profile of fixed personal constants on-device | Filed | Raw values masked to tokens before `/plan` egress |
 | #103 | Heatmap visual redesign (modern, non-expert readable) | Filed | Presentation-only, no detection change |
 | #104 | PII false-positive regression test on `pii-test-page.html` | Filed | Context-aware detection + precision benchmark |
 
-> **Dependency order for the next builds:** #100 (vision stop) → #101 (cursor overlay)
-> → #104 (PII false-positives) → #103 (heatmap, after #104 so it shows clean data)
-> → #102 (user-profile, last — touches the outbound PII firewall, needs careful masking).
+> **Dependency order for the next builds:** #100 (vision stop) → #104 (PII
+> false-positives) → #103 (heatmap, after #104 so it shows clean data)
+> → #102 (user-profile, last — touches the outbound PII firewall, needs
+> careful masking). #101 (cursor overlay) is **done in v5.3** (PR #140) —
+> remaining #139 items are optional polish, not a dependency.
 
 ### Critical Path Items
 

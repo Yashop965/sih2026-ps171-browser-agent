@@ -252,7 +252,7 @@ export default defineBackground({
       url: string;
       title: string;
       openItems: ChecklistItem[];
-    }): Promise<{ confirmed: boolean; detail?: string } | null> => {
+    }): Promise<{ confirmed: boolean; detail?: string; unavailableReason?: string } | null> => {
       try {
         const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
         const tabId = activeTab?.id;
@@ -261,7 +261,20 @@ export default defineBackground({
           async () => await browser.tabs.sendMessage(tabId, { type: 'VISION_OCR' }),
           (v: any) => v === undefined,
         );
-        if (!ok || !value || !value.ok) return null; // model not ready / capture failed
+        if (!ok || !value) {
+          // No answer from the content script (chrome:// page, script not
+          // injected, …) - unavailable, and the runner should say so once.
+          return { confirmed: false, detail: 'unavailable', unavailableReason: 'content script unreachable' };
+        }
+        if (!value.ok) {
+          // "empty ocr" means the model RAN and read nothing - a verdict
+          // (goal not on screen), not an availability failure.
+          const err = String(value.error ?? 'model unavailable');
+          if (err === 'empty ocr') {
+            return { confirmed: false, detail: 'OCR returned no text' };
+          }
+          return { confirmed: false, detail: 'unavailable', unavailableReason: err };
+        }
         const ocrText: string = value.text ?? '';
         const items: VisionConfirmItem[] = input.openItems.map((i) => ({
           id: i.id,

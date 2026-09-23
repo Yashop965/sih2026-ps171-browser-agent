@@ -20,7 +20,54 @@ import { guardOutboundPlan } from './pii/outboundGuard';
 import { resolveProfileValue, type UserProfile } from './userProfile';
 import type { SessionManager, SessionContext } from './sessionManager';
 import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
-import { goalBackstop } from './goalBackstop';
+import { goalBackstop, quotedSpans, contentTokens, normalize } from './goalBackstop';
+
+// ── Per-event timeout (stall guard) ─────────────────────────────────────────
+//
+// Every event the planner issues (a /plan round-trip, or an on-device VLM
+// confirm) is bounded by a deadline. An event that outlasts it is logged +
+// skipped as a no-op; 3 consecutive timeouts stop the run as stalled, so a
+// hung event can never make the agent "look stuck" after performing one.
+
+/** Default per-event deadline (ms) - headroom over the ~14s planner calls. */
+export const DEFAULT_EVENT_TIMEOUT_MS = 90_000;
+
+/** Thrown by withTimeout() when a bounded event outlasts its deadline. */
+export class EventTimeoutError extends Error {
+  readonly label: string;
+  readonly ms: number;
+  constructor(label: string, ms: number) {
+    super(`event "${label}" timed out after ${ms}ms`);
+    this.name = 'EventTimeoutError';
+    this.label = label;
+    this.ms = ms;
+  }
+}
+
+/**
+ * Race `promise` against a deadline: resolves with the value when the event
+ * settles first, rejects with EventTimeoutError(label, ms) otherwise. The
+ * timer is cleared on settle, so a fast event leaves no dangling handle.
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new EventTimeoutError(label, ms)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 // ── Task state (shared + persisted so the SW can resume/report) ──────────────
 
@@ -132,6 +179,124 @@ export function mergeChecklist(
   return Array.from(byId.values());
 }
 
+// ── Completion evidence gate (planner over-claim defense) ────────────────────
+
+/** A completion gate that trusts the planner's DONE only when the FINAL sub-goal
+ *  has independent on-page evidence.
+ *
+ * Why this exists: rule 16 of the planner prompt tells the LLM to echo the
+ * checklist and flip `done` on the live page, and `mergeChecklist` ORs those
+ * flags in (sticky). A flaky model can assert "all items done" while sitting on
+ * the WRONG page (e.g. `Special:Search`) and the completion check then sees
+ * `undone.length === 0` and finishes with no evidence the terminal goal was
+ * ever reached. The per-step backstop only visits OPEN items, so a terminal
+ * item the planner just wrongly closed never gets re-checked.
+ *
+ * This gate re-checks the terminal item against the CURRENT page with the same
+ * deterministic backstop used per-step. It is deliberately conservative so it
+ * can only ADD a "keep going" verdict, never a false completion:
+ *   - A DESTINATION item (its quoted target / content tokens must appear on the
+ *     page) is only trusted when the backstop proves it is actually here.
+ *   - An ACTION item (no checkable target — e.g. "fill the form and submit",
+ *     a goal the URL/title can't express) is passed through, so form/completion
+ *     tasks that legitimately end on the same page are not blocked.
+ *
+ * Pure + exported: unit-testable with no live browser.
+ */
+export interface TerminalGateInput {
+  /** The checklist item that the planner marked done last (the goal to reach). */
+  terminalItem: { id: string; description?: string };
+  url: string;
+  title: string;
+}
+
+export interface TerminalGateVerdict {
+  /** true = keep going (terminal goal not provably on this page); false = let the task complete. */
+  block: boolean;
+  /** How we decided. */
+  reason: 'destination-not-on-page' | 'action-goal-passed' | 'no-checkable-target' | 'terminal-on-page';
+  score: number;
+}
+
+/** Quoted spans the backstop treats as an exact target name. */
+export function terminalTargetSpans(description: string): string[] {
+  return quotedSpans(description ?? '');
+}
+
+/** Destination phrasings: the item names a PAGE/ARTICLE it should land on. */
+const DESTINATION_SIGNALS = [
+  'open', 'opened', 'navigate', 'navigated', 'visit', 'visited',
+  'find', 'found', 'look up', 'lookup', 'looked', 'land', 'reached',
+  'reach', 'arrive', 'arrived', 'view', 'read', 'go to',
+];
+
+/** Does the description read like "get to destination X" (vs an action)? */
+export function isDestinationDescription(description: string): boolean {
+  const n = normalize(description ?? '');
+  if (!n) return false;
+  return DESTINATION_SIGNALS.some((s) => n.includes(s));
+}
+
+/**
+ * Decide whether a "planner said DONE" may be trusted on this page.
+ * Blocks (return {block:true}) only when the terminal item is a DESTINATION
+ * whose target is provably NOT on the current page. Never blocks action goals
+ * ("submit the form", "fill the fields") — the URL/title can't express those,
+ * so they pass through.
+ */
+export function gateTerminalCompletion(input: TerminalGateInput): TerminalGateVerdict {
+  const { terminalItem, url, title } = input;
+  const desc = (terminalItem.description ?? '').trim();
+
+  // No description to check: nothing the URL/title can prove; don't block.
+  if (!desc) return { block: false, reason: 'no-checkable-target', score: 0 };
+
+  const backstop = goalBackstop({ item: terminalItem, url, title });
+  if (backstop.done) {
+    // Independent on-page evidence for the terminal goal — trust the DONE.
+    return { block: false, reason: 'terminal-on-page', score: backstop.score };
+  }
+
+  // A quoted target the backstop failed to find on this page: hard signal
+  // the planner over-claimed. Block.
+  if (terminalTargetSpans(desc).length > 0) {
+    return { block: true, reason: 'destination-not-on-page', score: backstop.score };
+  }
+
+  // No quoted target. Only a destination that NAMES a real thing is blockable:
+  // "open the Hypertext article" (content token 'hypertext') can be checked
+  // against the page; a phrased-but-targetless item ("open article", where
+  // every word is a stopword) has nothing to match, so it passes through.
+  const content = contentTokens(desc);
+  if (content.length === 0) {
+    return { block: false, reason: 'action-goal-passed', score: backstop.score };
+  }
+  // Block only when the item reads like a destination ("open / navigate /
+  // …") AND its target words are largely absent from the current page. An
+  // action goal (no destination wording) always passes, so form/completion
+  // tasks that legitimately end on the same page are not blocked.
+  if (!isDestinationDescription(desc)) {
+    return { block: false, reason: 'action-goal-passed', score: backstop.score };
+  }
+  const overlap = tokenOverlapScore(desc, `${title} ${url}`);
+  if (overlap < 0.5) {
+    return { block: true, reason: 'destination-not-on-page', score: overlap };
+  }
+  // Target words are mostly present (0.5..0.8 — below the backstop's 0.8 bar
+  // but not clearly a different page): don't second-guess, let it complete.
+  return { block: false, reason: 'action-goal-passed', score: overlap };
+}
+
+// Small local mirror of goalBackstop's token-overlap (kept here so the gate is
+// self-contained + testable without importing the private helper).
+function tokenOverlapScore(a: string, b: string): number {
+  const at = contentTokens(a);
+  if (at.length === 0) return 0;
+  const bt = new Set(normalize(b).split(' ').filter(Boolean));
+  const hit = at.filter((t) => bt.has(t)).length;
+  return hit / at.length;
+}
+
 // Loop-detection + step-budget + scroll-guard now live in ./loopDetection so
 // they have a single source of truth the tests can exercise directly (issue
 // #76). Re-exported here for backward-compatible imports.
@@ -235,12 +400,15 @@ export interface AgentRunnerDeps {
    * visible on screen (OCR/grounding; screenshot never leaves the device).
    * Absent = not wired (fast path is the URL/title backstop only); a `null`
    * return means "model unavailable / inconclusive" - the loop just carries on.
+   * When unavailable, implementations SHOULD explain why via
+   * `unavailableReason` so the runner can say once why the VLM never ran
+   * (e.g. "model load failed: 401 …") instead of a generic line every step.
    */
   confirmGoal?: (input: {
     url: string;
     title: string;
     openItems: ChecklistItem[];
-  }) => Promise<{ confirmed: boolean; detail?: string } | null>;
+  }) => Promise<{ confirmed: boolean; detail?: string; unavailableReason?: string } | null>;
   /**
    * #102 local user profile (on-device). When the planner returns an action
    * whose value is a profile token (<EMAIL>, <ADDRESS> ...), the runner
@@ -259,6 +427,16 @@ export interface AgentRunnerDeps {
    * without one more LLM plan round-trip.
    */
   goalCheckEvery?: number;
+  /**
+   * Per-event timeout (ms): bounds a single planner event (fetchPlan) and
+   * the optional VLM confirms (confirmGoal). An event that outlasts the
+   * deadline is treated as TIMED OUT - the step is logged and skipped as a
+   * no-op instead of hanging the run, and 3 consecutive timeouts stop the
+   * run as stalled (so the agent never "looks stuck" after performing one
+   * event). Omit = the generous 90s default, which leaves headroom for the
+   * ~14s LLM planner calls.
+   */
+  eventTimeoutMs?: number;
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -291,6 +469,19 @@ export class AgentRunner {
   // #100 proactive verify: how many successful actions since the last on-device
   // goal check. Compares against deps.goalCheckEvery (default 1 = every action).
   private actionsSinceGoalCheck = 0;
+  // Streak of consecutive per-event timeouts (planner fetch / VLM confirm).
+  // A timely plan or an executed action resets it; 3 in a row stops the run
+  // as stalled instead of spinning the step budget on hung events.
+  private consecutiveEventTimeouts = 0;
+  // #136/D: the VLM-unavailable reason is said out loud ONCE per run so the
+  // per-step backstop log stays quiet (reasons rarely change mid-run).
+  private vlmUnavailableLogged = false;
+  // Completion evidence gate: how many DONE signals we've had to REJECT because
+  // the terminal sub-goal wasn't provably on the current page. Bounded so a
+  // planner that keeps over-claiming eventually completes best-effort (with a
+  // warning) instead of spinning the step budget forever.
+  private terminalGateStreak = 0;
+  private static readonly TERMINAL_GATE_MAX = 3;
 
   constructor(private readonly deps: AgentRunnerDeps) {
     this.state = emptyTaskState();
@@ -300,12 +491,29 @@ export class AgentRunner {
     return this.state;
   }
 
+  /** Effective per-event deadline (ms): the dep when set, else the default. */
+  private eventTimeoutMs(): number {
+    return this.deps.eventTimeoutMs ?? DEFAULT_EVENT_TIMEOUT_MS;
+  }
+
   private log(msg: string): void {
     this.state.logs.push(`${new Date().toLocaleTimeString()}: ${msg}`);
     // Keep the whole run's activity log (Bug D: the Copy button needs it all,
     // not just the last 200). 5000 short strings is still tiny.
     if (this.state.logs.length > 5000) this.state.logs = this.state.logs.slice(-5000);
     this.state.lastUpdate = Date.now();
+  }
+
+  /**
+   * Say why the on-device VLM is unavailable, ONCE per run. Per-step backstop
+   * logging otherwise repeats "model unavailable" on every action; the reason
+   * (download failed, init error, …) rarely changes mid-run, so the first
+   * occurrence carries the detail and later steps stay quiet.
+   */
+  private logVlmUnavailableOnce(reason: string): void {
+    if (this.vlmUnavailableLogged) return;
+    this.vlmUnavailableLogged = true;
+    this.log(`🔎 VLM unavailable this run (${reason}) - continuing on the deterministic backstop`);
   }
 
   private notify(): void {
@@ -554,7 +762,36 @@ export class AgentRunner {
       }
       if (guard.redactedCount > 0) this.log(`Masked ${guard.redactedCount} PII field(s) before /plan egress`);
 
-      const plan = await d.fetchPlan(guard.payload, d.abortSignal);
+      let plan: any;
+      try {
+        plan = await withTimeout(
+          d.fetchPlan(guard.payload, d.abortSignal),
+          this.eventTimeoutMs(),
+          'planner event',
+        );
+      } catch (e) {
+        if (e instanceof EventTimeoutError) {
+          this.consecutiveEventTimeouts += 1;
+          this.log(
+            `⏱ ${e.message} - treating step as no-op ` +
+              `(consecutive timeouts ${this.consecutiveEventTimeouts}/3)`,
+          );
+          if (this.consecutiveEventTimeouts >= 3) {
+            this.log('⚠️ Stalled: 3 consecutive planner events timed out - stopping');
+            this.state.status = 'failed';
+            this.state.running = false;
+            this.finishSession(sessionId, 'stalled: repeated per-event timeouts');
+            this.notify();
+            return;
+          }
+          this.state.step = currentStep;
+          this.notify();
+          continue;
+        }
+        throw e; // a non-timeout error propagates as before
+      }
+      // A timely plan is progress - the stall streak is reset.
+      this.consecutiveEventTimeouts = 0;
       if (plan == null) {
         this.log('Planner error: no response (server offline or aborted)');
         break;
@@ -624,7 +861,11 @@ export class AgentRunner {
           if (this.doneWithOpenStreak === 1 && d.confirmGoal) {
             this.log('🔎 Asking on-device vision to confirm open goal(s)...');
             try {
-              const verdict = await d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: undone });
+              const verdict = await withTimeout(
+                d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: undone }),
+                this.eventTimeoutMs(),
+                'VLM confirm event',
+              );
               if (verdict?.confirmed) {
                 // The on-device proof says the goal content IS on screen -
                 // trust it for the open items (a screenshot-based check,
@@ -634,10 +875,12 @@ export class AgentRunner {
                 this.log('✅ Task complete (vision-confirmed all checklist items done)');
                 this.doneWithOpenStreak = 0;
                 break;
+              } else if (verdict?.unavailableReason) {
+                this.logVlmUnavailableOnce(verdict.unavailableReason);
               } else if (verdict) {
                 this.log(`🔎 Vision: goal not yet confirmed (${verdict.detail ?? 'inconclusive'}) - continuing`);
               } else {
-                this.log('🔎 Vision unavailable - continuing with the deterministic loop');
+                this.logVlmUnavailableOnce('model unavailable');
               }
             } catch (e) {
               this.log(`⚠️ Vision confirm failed (${e instanceof Error ? e.message : String(e)}) - continuing`);
@@ -647,6 +890,41 @@ export class AgentRunner {
           this.state.step = currentStep;
           this.notify();
           continue;
+        }
+        // Completion evidence gate: trust "all items done" only when the
+        // TERMINAL sub-goal is provably on the current page (or is a
+        // non-destination action goal the URL/title can't express). A planner
+        // that over-claims DONE on the wrong page reopens the terminal item
+        // and keeps the loop alive, so the next plan is nudged to actually
+        // reach the goal. Bounded, so a stuck planner ends best-effort rather
+        // than spinning the step budget forever.
+        const terminalItem = this.checklist.length
+          ? this.checklist[this.checklist.length - 1]
+          : null;
+        if (terminalItem && (pageUrl || pageTitle)) {
+          const gate = gateTerminalCompletion({
+            terminalItem,
+            url: pageUrl,
+            title: pageTitle,
+          });
+          if (gate.block) {
+            if (this.terminalGateStreak >= AgentRunner.TERMINAL_GATE_MAX) {
+              this.log(
+                `⚠️ Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page after ${this.terminalGateStreak} rejections - completing best-effort (degraded)`,
+              );
+              this.plannerDegraded = true;
+              this.state.degraded = true;
+              break;
+            }
+            this.terminalGateStreak += 1;
+            terminalItem.done = false;
+            this.log(
+              `🚫 Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page (${gate.reason}) - reopened, keeping the loop alive`,
+            );
+            this.state.step = currentStep;
+            this.notify();
+            continue;
+          }
         }
         this.log('✅ Task complete (all checklist items done)');
         break;
@@ -670,6 +948,8 @@ export class AgentRunner {
 
       // A real executed action is progress - the loop is broken.
       this.repeatedStreak = 0;
+      this.consecutiveEventTimeouts = 0;
+      this.terminalGateStreak = 0;
       await this.executeAction(action, d, sessionId);
       this.state.step = currentStep;
       this.notify();
@@ -711,26 +991,36 @@ export class AgentRunner {
           : { id: 'task', description: d.task, done: false };
         if (!goalItem.done) {
           try {
-            const v = await d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: [goalItem] });
+            const v = await withTimeout(
+              d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: [goalItem] }),
+              this.eventTimeoutMs(),
+              'VLM confirm event',
+            );
             if (v?.confirmed) {
               const g = this.checklist.find((c) => c.id === goalItem.id);
               if (g) g.done = true;
               this.log(`✅ VLM confirmed final goal on screen after ${action.type} - stopping early (${v.detail ?? 'on-device'})`);
               break;
+            } else if (v?.unavailableReason) {
+              // Model was unavailable - carry on on the deterministic
+              // backstop, but say WHY once per run (not every step).
+              this.logVlmUnavailableOnce(v.unavailableReason);
             } else if (v) {
               // Model ran and looked at the screen, but the goal is NOT there
               // yet - keep going. Logged so a human can see the VLM actively
               // checking (and saying no) rather than the loop just guessing.
               this.log(`🔎 VLM checked screen after ${action.type}: goal not on screen yet (${v.detail ?? 'not visible'}) - continuing`);
             } else {
-              // null = the on-device model was unavailable (not downloaded /
-              // WebGPU init pending / capture failed). The loop carries on on
-              // the deterministic backstop, but say it out loud so "VLM never
-              // ran" is not mistaken for "VLM checked and said no".
-              this.log(`🔎 VLM check after ${action.type}: on-device model unavailable this step - continuing on backstop`);
+              // null = the on-device model was unavailable. The loop carries
+              // on on the deterministic backstop - say so once per run.
+              this.logVlmUnavailableOnce('model unavailable');
             }
-          } catch {
-            this.log(`🔎 VLM check after ${action.type} threw - continuing on backstop`);
+          } catch (e) {
+            if (e instanceof EventTimeoutError) {
+              this.log(`🔎 VLM confirm after ${action.type} timed out (${e.ms}ms) - continuing on backstop`);
+            } else {
+              this.log(`🔎 VLM check after ${action.type} threw - continuing on backstop`);
+            }
           }
         }
       }
