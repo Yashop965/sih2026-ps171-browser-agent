@@ -5,15 +5,15 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-![vitest: 429/429](https://img.shields.io/badge/vitest-429%2F429%20passing-22c55e?style=for-the-badge)
+![vitest: 438/438](https://img.shields.io/badge/vitest-438%2F438%20passing-22c55e?style=for-the-badge)
 ![pytest: 74/74](https://img.shields.io/badge/pytest-74%2F74%20passing-22c55e?style=for-the-badge)
 ![build: 1.33 MB](https://img.shields.io/badge/build-1.33%20MB%20chrome-mv3-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-23):** `main` clean · **429/429** vitest + **74/74**
+> **Current state (verified 2026-09-23):** `main` clean · **438/438** vitest + **74/74**
 > pytest passing · Chrome MV3 build **1.33 MB** · 0 PII off-device · agent cursor
-> v5.2 (theme-aware select pointer + border-tracing working glow + single closed
-> 360° loop travel, open in #139) · task-history cache · live VLM indicator ·
+> v5.3 (distance-aware travel: snap/curve/1-loop/2-loops, page-level theme fix,
+> viewport-contained loops) · task-history cache · live VLM indicator ·
 > planner on a zero-reasoning fast model · 3-hop live E2E passing end-to-end.
 > Repo:
 > [`github.com/Yashop965/sih2026-ps171-browser-agent`](https://github.com/Yashop965/sih2026-ps171-browser-agent).

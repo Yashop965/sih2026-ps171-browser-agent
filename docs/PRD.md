@@ -937,7 +937,7 @@ interface PlanResponse {
 | Issue | Feature | Status | Notes |
 |-------|---------|--------|-------|
 | #100 | Local Florence-2 / deterministic goal backstop to stop when the goal is on-screen | **In progress** (another agent) | Fast path = URL/title matching vs checklist (`src/lib/goalBackstop.ts`); optional Florence-2 OCR/VQA confirm; screenshot never leaves device |
-| #101 | Visual agent-cursor overlay (computer-use style) | **Done (v5.2)** · rework → #139 | Select pointer (mirrored, tip top-left), theme-aware colors, border-tracing working glow, single closed 360° loop travel; open #139 tracks the movement-engine rework + the light-mode color bug |
+| **Agent cursor v5.3** | Distance-aware travel with 4 modes: snap (≤60px), curve (60-260px), 1-loop (260-700px), 2-loops (700px+). Page-level theme detection fixes light-mode bug. Viewport containment with automatic degradation to curve. Tracked in **#139**. |
 | #102 | Local user-profile of fixed personal constants on-device | Filed | Raw values masked to tokens before `/plan` egress |
 | #103 | Heatmap visual redesign (modern, non-expert readable) | Filed | Presentation-only, no detection change |
 | #104 | PII false-positive regression test on `pii-test-page.html` | Filed | Context-aware detection + precision benchmark |
