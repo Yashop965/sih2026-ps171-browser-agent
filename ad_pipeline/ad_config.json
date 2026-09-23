@@ -2,7 +2,7 @@
   "output": "SIH2026_PS171_YC_Ad_v2.mp4",
   "title": {
     "duration": 4.5,
-    "kicker": "SIH 2026  \u00b7  PS171  \u00b7  BROWSER AGENT",
+    "kicker": "MACHINA  ·  BROWSER AGENT",
     "headline": "On-Device",
     "headline2": "Visual Perception",
     "subheadline": "Your browser. Your data. Never the cloud.",
@@ -35,9 +35,9 @@
   },
   "product": {
     "duration": 5,
-    "url": "chrome-extension://\u00b7\u00b7\u00b7/popup",
+    "url": "chrome-extension://···/popup",
     "headline": "This is the actual product.",
-    "sub": "Task panel \u00b7 live PII detections \u00b7 tamper-proof privacy ledger."
+    "sub": "Task panel · live PII detections · tamper-proof privacy ledger."
   },
   "architecture": {
     "duration": 7.5
@@ -46,24 +46,24 @@
     "duration": 6,
     "url": "localhost/pii-test-page",
     "headline": "Precision, not noise.",
-    "sub": "Context-aware filtering: price tables and headings are ignored."
+    "sub": "Context-aware filtering: 722 false positives down to 15."
   },
   "formfill": {
     "duration": 7.5,
     "url": "localhost/mock-form",
     "headline": "Autofill that never leaks.",
-    "done": "\u2713  Form filled \u00b7 0 PII uploaded"
+    "done": "✓  Form filled · 0 PII uploaded"
   },
   "metrics": {
     "duration": 6,
     "headline": "Battle-tested, production-grade.",
     "stats": [
       {
-        "value": 240,
-        "label": "unit + e2e tests passing"
+        "value": 512,
+        "label": "tests passing, zero flaky"
       },
       {
-        "value": 1.21,
+        "value": 1.33,
         "decimals": 2,
         "suffix": " MB",
         "label": "total build size"
@@ -74,18 +74,18 @@
         "label": "on-device, zero uploads"
       }
     ],
-    "sub": "Chromium + Firefox \u00b7 MV3 + MV2 \u00b7 30 fps ready"
+    "sub": "Chromium + Firefox · MV3 + MV2 · 30 fps ready"
   },
   "closing": {
     "duration": 7,
-    "headline": "The browser agent",
-    "sub": "Built by 6 engineers for SIH 2026 \u2014 ISRO challenge PS171.",
-    "repo": "github.com/Yashop965/sih2026-ps171-browser-agent",
+    "headline": "One machine, the work finished.",
+    "sub": "Built by Machina — AI-native web agents that log in and finish the job.",
+    "repo": "machina-ten.vercel.app",
     "badges": [
-      "ISRO \u00b7 SIH 2026",
-      "Open Source",
-      "v1.0"
+      "On-Device",
+      "Logged Receipts",
+      "Fixed Scope"
     ],
-    "credit": "Built with WXT + Playwright + ffmpeg"
+    "credit": "Machina · machina-ten.vercel.app"
   }
 }

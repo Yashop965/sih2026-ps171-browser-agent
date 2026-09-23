@@ -1,4 +1,4 @@
-/* Premium Extension Theme - Luxury Design System */
+/* MACHINA Extension Theme — strict 3-color system (porcelain / void / indigo) */
 
 * {
   margin: 0;
@@ -7,18 +7,24 @@
 }
 
 :root {
-  --bg-primary: #F5F4F1;
+  /* locked palette */
+  --void: #0A0C18;
+  --porcelain: #F4F9FB;
+  --indigo: #2E2C64;
+  /* derived (alpha tints of the 3 colors only) */
+  --bg-primary: #F4F9FB;
   --bg-secondary: #FFFFFF;
-  --bg-tertiary: #EDEBE7;
-  --text-primary: #0A0A0A;
-  --text-secondary: #6B6B6B;
-  --text-muted: #9A9A9A;
-  --border-light: #E2E0DB;
-  --border-medium: #D0CDC6;
-  --accent: #0A0A0A;
-  --success: #2D5A27;
-  --warning: #8B6914;
-  --error: #8B2E2E;
+  --bg-tertiary: #EAEFF2;
+  --text-primary: #0A0C18;
+  --text-secondary: #6B6D85;   /* indigo @ ~45% */
+  --text-muted: #9A9CB5;       /* indigo @ ~60% */
+  --border-light: rgba(46, 44, 100, 0.14);
+  --border-medium: rgba(46, 44, 100, 0.30);
+  --accent: #0A0C18;
+  --accent-indigo: #2E2C64;
+  --success: #2E2C64;          /* status = indigo, on-system */
+  --warning: #2E2C64;
+  --error: #1F1E43;           /* deep indigo */
 }
 
 .popup {

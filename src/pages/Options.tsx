@@ -32,7 +32,7 @@ function Options() {
 
   return (
     <div style={{ padding: '20px', maxWidth: '500px' }}>
-      <h1>SIH2026 PS171 Browser Agent Settings</h1>
+      <h1>MACHINA — Settings</h1>
       
       <div style={{ marginTop: '20px' }}>
         <label>Planner Server URL:</label>

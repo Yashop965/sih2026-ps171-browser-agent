@@ -66,10 +66,10 @@ NARRATION = [
     (18.0,  "This is the actual product."),
     (23.0,  "Privacy first by architecture."),
     (26.5,  "Zero PII ever crosses the line."),
-    (30.5,  "Context-aware, so price tables stay untouched."),
+    (30.5,  "Context-aware, false positives down to fifteen."),
     (37.0,  "Autofill that fills everything and uploads nothing."),
-    (44.0,  "Two forty tests, a one point two one megabyte build."),
-    (49.5,  "The browser agent that respects your privacy. SIH twenty twenty six."),
+    (44.0,  "Five hundred twelve tests, a one point three three megabyte build."),
+    (49.5,  "One machine, the work finished. Machina."),
 ]
 
 
@@ -420,7 +420,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", default=str(ROOT / "SIH2026_PS171_YC_Ad_project.mp4"))
     ap.add_argument("--out", default=str(ROOT / "SIH2026_PS171_YC_Ad_project_FINAL.mp4"))
-    ap.add_argument("--theme", default="black", choices=["project", "black", "light", "all"],
+    ap.add_argument("--theme", default="black", choices=["project", "black", "light", "machina", "all"],
                    help="theme name; picks the default video + out paths if not overridden. "
                         "'all' muxes every theme.")
     ap.add_argument("--music", default="pad", choices=["pad", "arpeggio"],

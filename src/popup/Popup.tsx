@@ -261,7 +261,7 @@ function Popup() {
   return (
     <div className="popup">
       <header className="popup-header">
-        <h1 className="popup-title">SIH2026 PS171</h1>
+        <h1 className="popup-title">MACHINA</h1>
         <p className="popup-subtitle">Browser Agent</p>
         {/* Status Indicator */}
         <div className="status-indicator" title={healthStatus === 'healthy' ? `Server OK (${serverLatency}ms)` : healthStatus === 'checking' ? 'Checking...' : 'Server Offline'}>

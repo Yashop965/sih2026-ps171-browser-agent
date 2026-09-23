@@ -1,8 +1,8 @@
 import { defineConfig } from 'wxt';
 
 export default defineConfig({
-  name: 'SIH2026 PS171 Browser Agent',
-  description: 'On-device Visual Perception for Light-weight Browser Agents',
+  name: 'MACHINA — Browser Agent',
+  description: 'On-device web agents that log in and finish the work. PII never leaves the machine.',
   manifest: {
     version: '1.0.0',
     permissions: [

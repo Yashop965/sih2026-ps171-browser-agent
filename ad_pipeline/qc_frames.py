@@ -36,7 +36,7 @@ SAFE_TOP = 40
 MAX_HEADLINE_FRAC = 0.80
 BITRATE_FLOOR = 500_000     # catch a broken encode, not pedantic 1080p targets
 
-THEMES = ("black", "project", "light")
+THEMES = ("black", "project", "light", "machina")
 # settled-state timestamps for the current 56.5s timeline
 DEFAULT_SAMPLES = [2.5, 8.0, 13.0, 18.0, 24.0, 30.0, 35.0, 42.0, 49.0, 54.0]
 

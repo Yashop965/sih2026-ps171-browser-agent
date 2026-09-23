@@ -240,7 +240,7 @@ export async function buildExport(
     const digest = await sha256Hex(JSON.stringify(records));
 
     return {
-        schema: 'ps171-privacy-ledger/1',
+        schema: 'machina-privacy-ledger/1',
         generatedAt: new Date().toISOString(),
         note: 'Structural metadata only. No detected values, page HTML, or query strings are present in this file.',
         summary: summarise(entries),

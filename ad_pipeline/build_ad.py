@@ -85,6 +85,17 @@ THEMES = {
         "ORB_ALPHA": 0.22, "PARTICLE_ALPHA": 0.28,
         "orbs": [("cyan", 380, 250, 240, 18), ("purple", 1560, 300, 260, 18)],
     },
+    "machina": {  # MACHINA site system: porcelain bg, void ink, strict 3-color (accents = indigo tints)
+        "BG_TOP": (244, 249, 251), "BG_BOTTOM": (235, 240, 243),
+        "CYAN": (46, 44, 100), "PURPLE": (96, 94, 143), "GREEN": (46, 44, 100),
+        "PINK": (31, 30, 67), "YELLOW": (110, 108, 160),
+        "WHITE": (10, 12, 24), "GRAY": (155, 157, 183), "DIM": (204, 208, 221),
+        "PANEL": (255, 255, 255, 235), "FIELD_FILL": (234, 239, 243),
+        "CHROME_FILL": (250, 252, 253), "BODY_FILL": (238, 242, 245),
+        "CLOUD_FILL": (224, 226, 240),
+        "ORB_ALPHA": 0.20, "PARTICLE_ALPHA": 0.24,
+        "orbs": [("cyan", 380, 250, 240, 16), ("purple", 1560, 300, 260, 16)],
+    },
 }
 
 # active palette (set by set_theme before rendering)
