@@ -20,7 +20,7 @@ import { guardOutboundPlan } from './pii/outboundGuard';
 import { resolveProfileValue, type UserProfile } from './userProfile';
 import type { SessionManager, SessionContext } from './sessionManager';
 import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
-import { goalBackstop } from './goalBackstop';
+import { goalBackstop, quotedSpans, contentTokens, normalize } from './goalBackstop';
 
 // ── Per-event timeout (stall guard) ─────────────────────────────────────────
 //
@@ -177,6 +177,124 @@ export function mergeChecklist(
   }
 
   return Array.from(byId.values());
+}
+
+// ── Completion evidence gate (planner over-claim defense) ────────────────────
+
+/** A completion gate that trusts the planner's DONE only when the FINAL sub-goal
+ *  has independent on-page evidence.
+ *
+ * Why this exists: rule 16 of the planner prompt tells the LLM to echo the
+ * checklist and flip `done` on the live page, and `mergeChecklist` ORs those
+ * flags in (sticky). A flaky model can assert "all items done" while sitting on
+ * the WRONG page (e.g. `Special:Search`) and the completion check then sees
+ * `undone.length === 0` and finishes with no evidence the terminal goal was
+ * ever reached. The per-step backstop only visits OPEN items, so a terminal
+ * item the planner just wrongly closed never gets re-checked.
+ *
+ * This gate re-checks the terminal item against the CURRENT page with the same
+ * deterministic backstop used per-step. It is deliberately conservative so it
+ * can only ADD a "keep going" verdict, never a false completion:
+ *   - A DESTINATION item (its quoted target / content tokens must appear on the
+ *     page) is only trusted when the backstop proves it is actually here.
+ *   - An ACTION item (no checkable target — e.g. "fill the form and submit",
+ *     a goal the URL/title can't express) is passed through, so form/completion
+ *     tasks that legitimately end on the same page are not blocked.
+ *
+ * Pure + exported: unit-testable with no live browser.
+ */
+export interface TerminalGateInput {
+  /** The checklist item that the planner marked done last (the goal to reach). */
+  terminalItem: { id: string; description?: string };
+  url: string;
+  title: string;
+}
+
+export interface TerminalGateVerdict {
+  /** true = keep going (terminal goal not provably on this page); false = let the task complete. */
+  block: boolean;
+  /** How we decided. */
+  reason: 'destination-not-on-page' | 'action-goal-passed' | 'no-checkable-target' | 'terminal-on-page';
+  score: number;
+}
+
+/** Quoted spans the backstop treats as an exact target name. */
+export function terminalTargetSpans(description: string): string[] {
+  return quotedSpans(description ?? '');
+}
+
+/** Destination phrasings: the item names a PAGE/ARTICLE it should land on. */
+const DESTINATION_SIGNALS = [
+  'open', 'opened', 'navigate', 'navigated', 'visit', 'visited',
+  'find', 'found', 'look up', 'lookup', 'looked', 'land', 'reached',
+  'reach', 'arrive', 'arrived', 'view', 'read', 'go to',
+];
+
+/** Does the description read like "get to destination X" (vs an action)? */
+export function isDestinationDescription(description: string): boolean {
+  const n = normalize(description ?? '');
+  if (!n) return false;
+  return DESTINATION_SIGNALS.some((s) => n.includes(s));
+}
+
+/**
+ * Decide whether a "planner said DONE" may be trusted on this page.
+ * Blocks (return {block:true}) only when the terminal item is a DESTINATION
+ * whose target is provably NOT on the current page. Never blocks action goals
+ * ("submit the form", "fill the fields") — the URL/title can't express those,
+ * so they pass through.
+ */
+export function gateTerminalCompletion(input: TerminalGateInput): TerminalGateVerdict {
+  const { terminalItem, url, title } = input;
+  const desc = (terminalItem.description ?? '').trim();
+
+  // No description to check: nothing the URL/title can prove; don't block.
+  if (!desc) return { block: false, reason: 'no-checkable-target', score: 0 };
+
+  const backstop = goalBackstop({ item: terminalItem, url, title });
+  if (backstop.done) {
+    // Independent on-page evidence for the terminal goal — trust the DONE.
+    return { block: false, reason: 'terminal-on-page', score: backstop.score };
+  }
+
+  // A quoted target the backstop failed to find on this page: hard signal
+  // the planner over-claimed. Block.
+  if (terminalTargetSpans(desc).length > 0) {
+    return { block: true, reason: 'destination-not-on-page', score: backstop.score };
+  }
+
+  // No quoted target. Only a destination that NAMES a real thing is blockable:
+  // "open the Hypertext article" (content token 'hypertext') can be checked
+  // against the page; a phrased-but-targetless item ("open article", where
+  // every word is a stopword) has nothing to match, so it passes through.
+  const content = contentTokens(desc);
+  if (content.length === 0) {
+    return { block: false, reason: 'action-goal-passed', score: backstop.score };
+  }
+  // Block only when the item reads like a destination ("open / navigate /
+  // …") AND its target words are largely absent from the current page. An
+  // action goal (no destination wording) always passes, so form/completion
+  // tasks that legitimately end on the same page are not blocked.
+  if (!isDestinationDescription(desc)) {
+    return { block: false, reason: 'action-goal-passed', score: backstop.score };
+  }
+  const overlap = tokenOverlapScore(desc, `${title} ${url}`);
+  if (overlap < 0.5) {
+    return { block: true, reason: 'destination-not-on-page', score: overlap };
+  }
+  // Target words are mostly present (0.5..0.8 — below the backstop's 0.8 bar
+  // but not clearly a different page): don't second-guess, let it complete.
+  return { block: false, reason: 'action-goal-passed', score: overlap };
+}
+
+// Small local mirror of goalBackstop's token-overlap (kept here so the gate is
+// self-contained + testable without importing the private helper).
+function tokenOverlapScore(a: string, b: string): number {
+  const at = contentTokens(a);
+  if (at.length === 0) return 0;
+  const bt = new Set(normalize(b).split(' ').filter(Boolean));
+  const hit = at.filter((t) => bt.has(t)).length;
+  return hit / at.length;
 }
 
 // Loop-detection + step-budget + scroll-guard now live in ./loopDetection so
@@ -358,6 +476,12 @@ export class AgentRunner {
   // #136/D: the VLM-unavailable reason is said out loud ONCE per run so the
   // per-step backstop log stays quiet (reasons rarely change mid-run).
   private vlmUnavailableLogged = false;
+  // Completion evidence gate: how many DONE signals we've had to REJECT because
+  // the terminal sub-goal wasn't provably on the current page. Bounded so a
+  // planner that keeps over-claiming eventually completes best-effort (with a
+  // warning) instead of spinning the step budget forever.
+  private terminalGateStreak = 0;
+  private static readonly TERMINAL_GATE_MAX = 3;
 
   constructor(private readonly deps: AgentRunnerDeps) {
     this.state = emptyTaskState();
@@ -767,6 +891,41 @@ export class AgentRunner {
           this.notify();
           continue;
         }
+        // Completion evidence gate: trust "all items done" only when the
+        // TERMINAL sub-goal is provably on the current page (or is a
+        // non-destination action goal the URL/title can't express). A planner
+        // that over-claims DONE on the wrong page reopens the terminal item
+        // and keeps the loop alive, so the next plan is nudged to actually
+        // reach the goal. Bounded, so a stuck planner ends best-effort rather
+        // than spinning the step budget forever.
+        const terminalItem = this.checklist.length
+          ? this.checklist[this.checklist.length - 1]
+          : null;
+        if (terminalItem && (pageUrl || pageTitle)) {
+          const gate = gateTerminalCompletion({
+            terminalItem,
+            url: pageUrl,
+            title: pageTitle,
+          });
+          if (gate.block) {
+            if (this.terminalGateStreak >= AgentRunner.TERMINAL_GATE_MAX) {
+              this.log(
+                `⚠️ Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page after ${this.terminalGateStreak} rejections - completing best-effort (degraded)`,
+              );
+              this.plannerDegraded = true;
+              this.state.degraded = true;
+              break;
+            }
+            this.terminalGateStreak += 1;
+            terminalItem.done = false;
+            this.log(
+              `🚫 Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page (${gate.reason}) - reopened, keeping the loop alive`,
+            );
+            this.state.step = currentStep;
+            this.notify();
+            continue;
+          }
+        }
         this.log('✅ Task complete (all checklist items done)');
         break;
       }
@@ -790,6 +949,7 @@ export class AgentRunner {
       // A real executed action is progress - the loop is broken.
       this.repeatedStreak = 0;
       this.consecutiveEventTimeouts = 0;
+      this.terminalGateStreak = 0;
       await this.executeAction(action, d, sessionId);
       this.state.step = currentStep;
       this.notify();
