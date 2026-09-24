@@ -7,6 +7,7 @@ import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 import { loadProfile } from '../lib/userProfile';
 import { emptyHandoff, harvestToHandoff, mergeHandoff, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
+import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
 
 /**
  * Background Service Worker
@@ -87,6 +88,15 @@ export default defineBackground({
     let activeTask: AgentTaskState = emptyTaskState();
     let stopFlag = { stopped: false };
     let abortController = new AbortController();
+    // #143 P2: resolves the runner's outbound-gate pause when the popup's
+    // CONFIRM / DISMISS / STOP reaches the SW. At most one gate pause is in
+    // flight at a time (the loop is serial), so a single resolver is enough.
+    let outboundConfirmResolver:
+      | ((d: { confirmed: boolean; dismissed?: boolean; stopRequested?: boolean }) => void)
+      | null = null;
+    const resetOutboundGate = (): void => {
+      outboundConfirmResolver = null;
+    };
 
     // Persist the live task state so a SW restart can still surface "what
     // happened" (best-effort; the run itself dies with the SW by design).
@@ -496,6 +506,33 @@ export default defineBackground({
         // SWITCH_TAB hops the run between open tabs, one driven at a time.
         openTabs: openTabsProvider,
         crossTabMemory: () => taskHandoff,
+        // #143 P2: outbound-send gate. Pauses the run for a human before a
+        // send-classified action on a user opt-in outbound domain. The
+        // allowlist is on-device; empty => gate off (zero behaviour change).
+        outboundGate: {
+          allowlist: loadOutboundAllowlist,
+          destination: async () => {
+            const tabId = await driveTab();
+            if (tabId === undefined) return { url: '', title: '' };
+            try {
+              const t = await browser.tabs.get(tabId);
+              return { url: t?.url || '', title: t?.title || '' };
+            } catch {
+              return { url: '', title: '' };
+            }
+          },
+          awaitConfirmation: async (_staged) => {
+            // Pause the loop until the popup resolves the gate. A new run (or
+            // a STOP) resets the resolver so a stale pause can't leak.
+            return await new Promise<{
+              confirmed: boolean;
+              dismissed?: boolean;
+              stopRequested?: boolean;
+            }>((resolve) => {
+              outboundConfirmResolver = (d) => resolve(d);
+            });
+          },
+        },
       });
       runner.run().catch((e) => {
         console.error('[agent-runner] unhandled loop error:', e);
@@ -727,6 +764,8 @@ export default defineBackground({
         case 'START_TASK':
           // Issue #71/#69: spawn the SW-owned runner. Fire-and-forget; the
           // runner reports progress via TASK_PROGRESS broadcasts.
+          // #143: a new run clears any stale gate pause from a prior run.
+          resetOutboundGate();
           startTask(message, sender);
           sendResponse({ ok: true, running: true });
           return true;
@@ -734,11 +773,44 @@ export default defineBackground({
         case 'STOP_TASK':
           stopFlag.stopped = true;
           abortController.abort();
+          // #143: a STOP released while the run is paused at the outbound gate
+          // resolves the pause as "stop requested" so the loop breaks cleanly.
+          if (outboundConfirmResolver) {
+            const r = outboundConfirmResolver;
+            resetOutboundGate();
+            r({ confirmed: false, stopRequested: true });
+          }
           sendResponse({ ok: true });
           return true;
 
         case 'GET_TASK_STATE':
           sendResponse(activeTask);
+          return true;
+
+        // #143 P2: the popup's outbound-gate buttons. Each resolves the runner's
+        // in-flight pause exactly once. Confirm -> execute the single send step;
+        // dismiss -> skip just that step (completed work preserved, run ends
+        // 'complete'); both are no-ops when no gate pause is in flight.
+        case 'CONFIRM_OUTBOUND':
+          if (outboundConfirmResolver) {
+            const r = outboundConfirmResolver;
+            resetOutboundGate();
+            r({ confirmed: true });
+            sendResponse({ ok: true, confirmed: true });
+          } else {
+            sendResponse({ ok: false, error: 'no outbound gate in flight' });
+          }
+          return true;
+
+        case 'DISMISS_OUTBOUND':
+          if (outboundConfirmResolver) {
+            const r = outboundConfirmResolver;
+            resetOutboundGate();
+            r({ confirmed: false, dismissed: true });
+            sendResponse({ ok: true, dismissed: true });
+          } else {
+            sendResponse({ ok: false, error: 'no outbound gate in flight' });
+          }
           return true;
 
         default:

@@ -5,6 +5,7 @@ import PrivacyLedger from '../components/PrivacyLedger';
 import ResourceMonitor from '../components/ResourceMonitor';
 import VlmIndicator from '../components/VlmIndicator';
 import { PROVIDERS, ProviderKey } from '../lib/providerConfig';
+import { OUTBOUND_STORAGE_KEY, normalizeDomains, saveOutboundAllowlist } from '../lib/outboundAllowlist';
 
 // #134: task-history shape (persisted under this key in browser.storage.local).
 const RECENT_TASKS_KEY = 'sih_recent_tasks';
@@ -26,11 +27,17 @@ function Popup() {
   const [latency, setLatency] = useState<number | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderKey>('custom');
   const [providerKey, setProviderKey] = useState('');
+  // #143 P2: the user's outbound-domain allowlist (opt-in). Comma-separated in
+  // the settings field; normalised + persisted on-device via outboundAllowlist.
+  const [outboundDomains, setOutboundDomains] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
   const [serverLatency, setServerLatency] = useState<number>(0);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [copyFlash, setCopyFlash] = useState(false);
+  // #143 P2: the staged outbound send the run is paused on. Mirrored from the
+  // runner's TASK_PROGRESS `awaiting` field; non-null -> the gate card shows.
+  const [awaitingOutbound, setAwaitingOutbound] = useState<any>(null);
 
   // #134 task history: recent prompts cached in storage, reusable with one
   // click. Newest first; each entry remembers its start URL + the final
@@ -44,12 +51,17 @@ function Popup() {
 
   // Load saved state from browser.storage
   useEffect(() => {
-    browser.storage.local.get(['task', 'startUrl', 'providerKey', 'apiKey', RECENT_TASKS_KEY])
+    browser.storage.local
+      .get(['task', 'startUrl', 'providerKey', 'apiKey', RECENT_TASKS_KEY, OUTBOUND_STORAGE_KEY])
       .then((result: Record<string, any>) => {
         if (result.task) setTask(result.task);
         if (result.startUrl) setStartUrl(result.startUrl);
         if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
         if (result.apiKey) setProviderKey(result.apiKey);
+        if (Array.isArray(result[OUTBOUND_STORAGE_KEY])) {
+          // #143: hydrate the outbound allowlist for the settings field.
+          setOutboundDomains((result[OUTBOUND_STORAGE_KEY] as string[]).join(', '));
+        }
         if (Array.isArray(result[RECENT_TASKS_KEY])) {
           setRecentTasks(result[RECENT_TASKS_KEY] as RecentTask[]);
         }
@@ -106,10 +118,24 @@ function Popup() {
     mirrorRef.current = state; // #134: keep the latest runner state for the history status-sync
     setStep(state.step ?? 0);
     setIsRunning(state.running === true);
+    // #143 P2: surface the staged outbound send while the run is paused on it.
+    setAwaitingOutbound(state.awaiting ?? null);
     const raw = Array.isArray(state.logs) ? state.logs : [];
     // Runner logs are chronological; keep the WHOLE run (Bug D: the Copy
     // button needs every entry, not just the last 50). Stored newest-first.
     setLogs([...raw].reverse());
+  }, []);
+
+  // #143 P2: resolve the SW's in-flight outbound-gate pause. Confirm -> the
+  // single send step executes; Dismiss -> just that step is skipped (the
+  // completed reads/fills are preserved and the run ends 'complete').
+  const confirmOutbound = useCallback(async () => {
+    setAwaitingOutbound(null);
+    await browser.runtime.sendMessage({ type: 'CONFIRM_OUTBOUND' }).catch(() => {});
+  }, []);
+  const dismissOutbound = useCallback(async () => {
+    setAwaitingOutbound(null);
+    await browser.runtime.sendMessage({ type: 'DISMISS_OUTBOUND' }).catch(() => {});
   }, []);
 
   // Bug D: copy the complete activity log (oldest → newest) to the clipboard.
@@ -309,10 +335,21 @@ function Popup() {
                 value={providerKey}
                 onChange={(e) => setProviderKey(e.target.value)}
               />
+              {/* #143 P2: outbound-domain allowlist (opt-in). Add a domain like
+                  web.whatsapp.com so a send there pauses for your confirm.
+                  Empty = gate off, automation behaves as before. */}
+              <input
+                className="api-key-input"
+                placeholder="Outbound domains (comma-sep, e.g. web.whatsapp.com)"
+                value={outboundDomains}
+                onChange={(e) => setOutboundDomains(e.target.value)}
+              />
               <button
                 className="save-key-button"
-                onClick={() => {
-                  browser.storage.local.set({ providerKey: selectedProvider, apiKey: providerKey });
+                onClick={async () => {
+                  await browser.storage.local.set({ providerKey: selectedProvider, apiKey: providerKey });
+                  // Persist the outbound allowlist on-device (normalised).
+                  await saveOutboundAllowlist(normalizeDomains(outboundDomains.split(/[\n,]/)));
                   setShowSettings(false);
                 }}
               >Save</button>
@@ -373,6 +410,53 @@ function Popup() {
             </ul>
           </div>
         )}
+
+        {/* #143 P2: outbound-send gate. While the run is paused waiting for
+            the user's call, show the exact staged payload (destination + the
+            value it would send, resolved on-device for display ONLY) and the
+            Confirm / Dismiss controls. This is the "your explicit send"
+            semantic: automation drafts and stages, the user releases it. */}
+        {awaitingOutbound ? (
+          <div className="outbound-gate" role="alertdialog" aria-label="Outbound send confirmation">
+            <div className="outbound-gate-title">📤 Sending off-device</div>
+            <p className="outbound-gate-sub">
+              The agent wants to send a message. Review the exact payload below — only your
+              Confirm sends it.
+            </p>
+            <div className="outbound-gate-detail">
+              <div className="og-row">
+                <span className="og-label">Destination</span>
+                <span className="og-value">
+                  {awaitingOutbound.destinationTitle || awaitingOutbound.destinationUrl || '—'}
+                </span>
+              </div>
+              {awaitingOutbound.elementLabel ? (
+                <div className="og-row">
+                  <span className="og-label">On</span>
+                  <span className="og-value">{awaitingOutbound.elementLabel}</span>
+                </div>
+              ) : null}
+              <div className="og-row">
+                <span className="og-label">Content</span>
+                <span className="og-value og-content">
+                  {awaitingOutbound.value ? (
+                    <code>{awaitingOutbound.value}</code>
+                  ) : (
+                    'this step sends without a value (e.g. a file/attachment)'
+                  )}
+                </span>
+              </div>
+            </div>
+            <div className="outbound-gate-actions">
+              <button className="og-btn confirm" onClick={confirmOutbound}>
+                ✅ Confirm &amp; send
+              </button>
+              <button className="og-btn dismiss" onClick={dismissOutbound}>
+                ↩ Dismiss (skip this step)
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {/* Controls */}
         <div className="controls">

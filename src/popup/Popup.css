@@ -731,3 +731,83 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* #143 P2: outbound-send gate card */
+.outbound-gate {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 196, 0, 0.12);
+  border: 1px solid rgba(255, 196, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.outbound-gate-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+.outbound-gate-sub {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.outbound-gate-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.og-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+}
+.og-label {
+  flex-shrink: 0;
+  width: 74px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+.og-value {
+  color: var(--text-primary, #fff);
+  word-break: break-word;
+}
+.og-value code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.outbound-gate-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.og-btn {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+}
+.og-btn.confirm {
+  background: #2563eb;
+}
+.og-btn.confirm:hover {
+  background: #1d4ed8;
+}
+.og-btn.dismiss {
+  background: rgba(255, 255, 255, 0.14);
+}
+.og-btn.dismiss:hover {
+  background: rgba(255, 255, 255, 0.24);
+}

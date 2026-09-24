@@ -23,6 +23,11 @@ import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetectio
 import { goalBackstop, quotedSpans, contentTokens, normalize } from './goalBackstop';
 import type { TabHandoff, OpenTabInfo } from './tabHandoff';
 import { handoffForPlanner, resolveHandoffValue } from './tabHandoff';
+import {
+  classifyOutboundSend,
+  stageOutbound,
+  type ElementLike,
+} from './outboundGate';
 
 // ── Per-event timeout (stall guard) ─────────────────────────────────────────
 //
@@ -95,11 +100,14 @@ export interface AgentTaskState {
   running: boolean;
   step: number;
   maxSteps: number;
-  status: 'idle' | 'running' | 'stopped' | 'complete' | 'failed' | 'degraded';
+  status: 'idle' | 'running' | 'stopped' | 'complete' | 'failed' | 'degraded' | 'awaiting-confirmation';
   logs: string[];
   degraded: boolean;
   sessionId: string | null;
   lastUpdate: number;
+  // #143: the staged outbound send the run is paused on (display-only value;
+  // the popup shows it and the user confirms/dismisses). Absent otherwise.
+  awaiting?: import('./outboundGate').StagedOutbound;
 }
 
 export function emptyTaskState(): AgentTaskState {
@@ -460,6 +468,28 @@ export interface AgentRunnerDeps {
    * handoff wired, TYPE/SELECT behave as before.
    */
   crossTabMemory?: () => TabHandoff | null;
+  /**
+   * #143 cross-tab orchestrator (P2) — the outbound-send gate. When the
+   * runner is about to execute a send-classified action on a user opt-in
+   * outbound domain (e.g. web.whatsapp.com), it pauses the run with status
+   * `awaiting-confirmation` and hands the staged payload to the view. The
+   * promise RESOLVES when the user confirms (execute) or dismisses (skip
+   * just this step; the run completes best-effort, not failed). Absent /
+   * null allowlist = gate OFF: single-domain, non-send behaviour is
+   * unchanged.
+   */
+  outboundGate?: {
+    /** The user's outbound-domain allowlist (opt-in, per domain). */
+    allowlist: () => Promise<string[]>;
+    /** The current outbound tab's url/title, for the staged payload display. */
+    destination: () => Promise<{ url: string; title: string }>;
+    /** Pause the run; resolves { confirmed, dismissed } on the user's call. */
+    awaitConfirmation: (staged: import('./outboundGate').StagedOutbound) => Promise<{
+      confirmed: boolean;
+      dismissed?: boolean;
+      stopRequested?: boolean;
+    }>;
+  };
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -489,6 +519,13 @@ export class AgentRunner {
   // (single source of truth, unit-tested) instead of an inline counter.
   private scrollGuard = new ScrollGuard(3);
   private plannerDegraded = false;
+  // #143 outbound gate: set when the user STOPS the run at the gate (⏹) or
+  // DISMISSES the send (↩). The run loop honors this at the top of the next
+  // iteration: stop -> session finished 'stopped'; dismiss -> the send step
+  // was skipped (completed reads/fills preserved) and the loop exits
+  // best-effort 'complete', NOT 'failed'.
+  private outboundGateStopped = false;
+  private outboundGateDismissed = false;
   // #100 proactive verify: how many successful actions since the last on-device
   // goal check. Compares against deps.goalCheckEvery (default 1 = every action).
   private actionsSinceGoalCheck = 0;
@@ -597,6 +634,18 @@ export class AgentRunner {
         this.state.status = 'stopped';
         this.state.running = false;
         this.finishSession(sessionId, 'stopped');
+        this.notify();
+        return;
+      }
+
+      // #143 outbound gate: the user stopped or dismissed the run at the
+      // gate on the PREVIOUS step. executeAction already stamped the status
+      // and broadcast it; finish the session and exit. A dismiss is NOT a
+      // failure - it exits 'complete' so the preserved reads/fills stand.
+      if (this.outboundGateStopped || this.outboundGateDismissed) {
+        const outcome = this.outboundGateStopped ? 'stopped' : 'complete';
+        this.log(`Outbound gate resolved as ${outcome} - ending the run`);
+        this.finishSession(sessionId, outcome);
         this.notify();
         return;
       }
@@ -986,7 +1035,7 @@ export class AgentRunner {
       this.repeatedStreak = 0;
       this.consecutiveEventTimeouts = 0;
       this.terminalGateStreak = 0;
-      await this.executeAction(action, d, sessionId);
+      await this.executeAction(action, d, sessionId, elements, pageUrl, pageTitle);
       this.state.step = currentStep;
       this.notify();
 
@@ -1100,6 +1149,9 @@ export class AgentRunner {
     action: AgentActionLike,
     d: AgentRunnerDeps,
     sessionId: string | null,
+    elements?: ElementLike[],
+    pageUrl?: string,
+    pageTitle?: string,
   ): Promise<void> {
     // #102: profile-token resolution, ON-DEVICE and at execution time. The
     // planner saw only the token (the outbound guard masks raw values before
@@ -1140,6 +1192,54 @@ export class AgentRunner {
       this.failedErrors.set(id, err ?? 'unknown');
       if (sessionId) d.sessionManager.recordFailedElement(sessionId, id);
     };
+
+    // #143 outbound-send gate (P2): before executing a send-classified action
+    // on a user opt-in outbound domain, PAUSE for a human. The allowlist is
+    // user opt-in; absent/empty -> the gate is fully off (zero change). The
+    // staged value shown to the user is the on-device-resolved value (display
+    // only) - the planner LLM never saw it (the #102/#141 token firewall
+    // holds through the gate).
+    if (d.outboundGate) {
+      const gate = d.outboundGate;
+      const allowlist = await gate.allowlist();
+      if (allowlist.length > 0) {
+        const hit = classifyOutboundSend(action, pageUrl, elements, allowlist);
+        if (hit.gated) {
+          const dest = await gate.destination();
+          const staged = stageOutbound(hit, action, dest.url, dest.title, action.value);
+          this.log(`⏸ Awaiting your confirmation to send to ${staged.destinationTitle || staged.destinationUrl} (${hit.reason})`);
+          this.state.status = 'awaiting-confirmation';
+          this.state.awaiting = staged;
+          this.notify();
+          const decision = await gate.awaitConfirmation(staged);
+          this.state.awaiting = undefined;
+          if (decision.stopRequested) {
+            // ⏹ Stop the whole run at the gate. The loop breaks next and
+            // finishes the session 'stopped' (see run()'s flag check).
+            this.log('⏹ Stopped at the outbound gate');
+            this.state.status = 'stopped';
+            this.state.running = false;
+            this.outboundGateStopped = true;
+            this.notify();
+            return;
+          }
+          if (!decision.confirmed) {
+            // ↔ Dismiss: abort JUST this send step. The completed reads/fills
+            // are preserved; the run exits best-effort (complete, not failed)
+            // so the rest of the task state is kept - see run()'s flag check.
+            this.log('↩️ Outbound send dismissed - skipping this step (completed work preserved)');
+            this.state.status = 'complete';
+            this.state.running = false;
+            this.outboundGateDismissed = true;
+            this.notify();
+            return;
+          }
+          // Confirmed: proceed to execute the single send step below.
+          this.log('✅ Outbound send confirmed - executing');
+          this.state.status = 'running';
+        }
+      }
+    }
 
     if (action.type === 'SCROLL') {
       const { allowed, consecutive } = this.scrollGuard.nextScroll();
