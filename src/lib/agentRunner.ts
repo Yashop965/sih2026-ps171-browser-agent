@@ -21,6 +21,8 @@ import { resolveProfileValue, type UserProfile } from './userProfile';
 import type { SessionManager, SessionContext } from './sessionManager';
 import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetection';
 import { goalBackstop, quotedSpans, contentTokens, normalize } from './goalBackstop';
+import type { TabHandoff, OpenTabInfo } from './tabHandoff';
+import { handoffForPlanner, resolveHandoffValue } from './tabHandoff';
 
 // ── Per-event timeout (stall guard) ─────────────────────────────────────────
 //
@@ -349,6 +351,11 @@ export interface AgentActionLike {
   key?: string;
   scrollDirection?: string;
   scrollAmount?: number;
+  // #141: SWITCH_TAB target - the tab to drive next. tabId is exact;
+  // urlHint is fuzzy (matched against open tabs' URLs + titles). Both absent
+  // = "the active web tab" (a no-op switch, never a failure).
+  tabId?: number;
+  urlHint?: string;
   [k: string]: unknown;
 }
 
@@ -437,6 +444,22 @@ export interface AgentRunnerDeps {
    * ~14s LLM planner calls.
    */
   eventTimeoutMs?: number;
+  /**
+   * #141 cross-tab orchestrator (P1). LIVE list of open web tabs for this
+   * task's window (url + title only - no DOM, no PII), so the planner can
+   * target a SWITCH_TAB by hint. Absent = the task is single-tab: the key
+   * is omitted from /plan and behaviour is unchanged.
+   */
+  openTabs?: () => Promise<OpenTabInfo[]>;
+  /**
+   * #141 cross-tab handoff (P1): on-device token memory filled by
+   * HARVEST_FIELDS on previously-visited tabs. The planner sees
+   * tokens + labels ONLY (handoffForPlanner strips the values - the LLM
+   * never reads harvested data); the runner resolves a token back to its
+   * value at execution time, like #102 profile tokens. Absent = no
+   * handoff wired, TYPE/SELECT behave as before.
+   */
+  crossTabMemory?: () => TabHandoff | null;
 }
 
 // ── The runner ────────────────────────────────────────────────────────────────
@@ -750,6 +773,19 @@ export class AgentRunner {
             this.repeatedStreak >= 2
               ? `The same action has been skipped ${this.repeatedStreak} consecutive times with no page change. Repeating it will do nothing. Switch to a DIFFERENT action - e.g. submit a filled search box (KEY "Enter" or CLICK the submit button), or click a visible result link. Typing the same value again is not progress.`
               : undefined,
+          // #141 cross-tab orchestrator (P1). Two optional sections, both
+          // PII-safe: the live open-tab list (url + title so the planner can
+          // target a SWITCH_TAB by hint) and the on-device handoff memory
+          // (token + label ONLY - handoffForPlanner strips the values, so
+          // harvested data never crosses to the LLM). Both are omitted when
+          // the task is single-tab (no openTabs provider / empty handoff),
+          // keeping the /plan payload byte-identical for existing runs.
+          ...(d.openTabs
+            ? { openTabs: await d.openTabs() }
+            : {}),
+          ...(d.crossTabMemory
+            ? { crossTabMemory: handoffForPlanner(d.crossTabMemory()) }
+            : {}),
         },
       });
       if (guard.blocked) {
@@ -1086,6 +1122,19 @@ export class AgentRunner {
       }
     }
 
+    // #141: cross-tab handoff tokens, resolved ON-DEVICE at execution time
+    // (like #102 profile tokens). The planner saw only the token + label -
+    // the /plan crossTabMemory section is values-free - so the harvested
+    // value never crossed to the LLM; type the real value here. Log the
+    // TOKEN, not the value (it can be personal data).
+    if (d.crossTabMemory && action.value !== undefined) {
+      const resolved = resolveHandoffValue(action.value, d.crossTabMemory());
+      if (resolved !== undefined) {
+        this.log(`🔗 Resolving cross-tab token ${emittedValue?.trim() ?? ''} on-device for element #${action.targetId ?? '?'}`);
+        action.value = resolved;
+      }
+    }
+
     const recordFailure = (id: string, err?: string) => {
       this.failedIds.add(id);
       this.failedErrors.set(id, err ?? 'unknown');
@@ -1213,6 +1262,32 @@ export class AgentRunner {
         await d.delay(600);
       } else {
         this.log(`❌ Navigate failed: ${r.error ?? 'unknown'}`);
+        this.state.status = 'failed';
+      }
+      return;
+    }
+
+    if (action.type === 'SWITCH_TAB') {
+      // #141 P1: hop to another OPEN tab (exact tabId, or urlHint matched by
+      // the SW against open web tabs). The channel activates the tab, waits
+      // for it to be usable, and re-perceives it next loop. A switch is a
+      // page-change: clear every per-page element memory (the new tab issues
+      // fresh ids) exactly like NAVIGATE does.
+      const where = action.tabId !== undefined ? `tab ${action.tabId}` : (action.urlHint ?? 'active web tab');
+      this.log(`⇄ Switching to ${where}`);
+      const r = await d.execute({
+        type: 'SWITCH_TAB',
+        tabId: action.tabId,
+        urlHint: action.urlHint,
+      });
+      if (r?.ok) {
+        this.log('✅ Switched tab (re-perceiving the new tab)');
+        this.scrollGuard.noteOtherAction();
+        this.recentActionHistory = [];
+        this.clearPageScopedElementMemory();
+        await d.delay(600);
+      } else {
+        this.log(`❌ Tab switch failed: ${r?.error ?? 'unknown'}`);
         this.state.status = 'failed';
       }
       return;
