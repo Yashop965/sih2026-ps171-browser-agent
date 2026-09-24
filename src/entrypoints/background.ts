@@ -120,10 +120,26 @@ export default defineBackground({
 
     // Rehydrate the last task snapshot so the popup shows the previous run's
     // result instead of a blank "idle".
+    // #143: a paused outbound gate is NON-recoverable across an SW restart -
+    // the run dies with the SW by design, and there is no resolver to answer
+    // a re-rendered gate card. Discard the awaiting payload on boot so the
+    // popup never shows a dead card whose Confirm/Dismiss hit "no gate in
+    // flight" (and so the display-only value doesn't linger re-served).
     (async () => {
       try {
         const snap = await browser.storage.local.get(TASK_STATE_KEY);
-        if (snap[TASK_STATE_KEY]) activeTask = snap[TASK_STATE_KEY];
+        if (snap[TASK_STATE_KEY]) {
+          const restored = snap[TASK_STATE_KEY] as AgentTaskState;
+          // A run cannot survive the SW, so a restored 'awaiting-confirmation'
+          // or 'running' is a finished run; drop the staged value + the pause
+          // and mark it as having ended (stopped) for the history view.
+          if (restored.status === 'awaiting-confirmation' || restored.status === 'running') {
+            restored.status = 'stopped';
+            restored.running = false;
+            restored.awaiting = undefined;
+          }
+          activeTask = restored;
+        }
       } catch {
         /* first launch */
       }
@@ -764,7 +780,14 @@ export default defineBackground({
         case 'START_TASK':
           // Issue #71/#69: spawn the SW-owned runner. Fire-and-forget; the
           // runner reports progress via TASK_PROGRESS broadcasts.
-          // #143: a new run clears any stale gate pause from a prior run.
+          // #143: release any in-flight gate pause from the PRIOR run FIRST -
+          // resolving it as "stop requested" so that loop breaks and its
+          // session is finished (finishSession) instead of being orphaned.
+          // Then clear the resolver slot for the new run.
+          if (outboundConfirmResolver) {
+            const r = outboundConfirmResolver;
+            r({ confirmed: false, stopRequested: true });
+          }
           resetOutboundGate();
           startTask(message, sender);
           sendResponse({ ok: true, running: true });

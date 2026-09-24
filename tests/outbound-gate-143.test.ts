@@ -124,17 +124,21 @@ describe('#143 outboundAllowlist — normalise + dedupe', () => {
 
 // ─── AgentRunner: the gate pauses the run for a human ───────────────────────
 import { AgentRunner, type AgentRunnerDeps } from '../src/lib/agentRunner';
-import { harvestToHandoff, emptyHandoff } from '../src/lib/tabHandoff';
 
 function runnerSmStub() {
-  return {
+  // Records session terminal outcomes so tests can assert the run ENDED with
+  // the right status (complete vs stopped vs failed) - a regression that
+  // flipped a dismiss to failSession('failed') would be caught here.
+  const sessionOutcomes: string[] = [];
+  const sm = {
     startSession: async () => 's',
     getContext: () => null,
     isTaskViable: () => true,
-    failSession: () => {},
-    completeSession: () => {},
+    failSession: (_id: string, reason: string) => sessionOutcomes.push(reason),
+    completeSession: (_id: string, reason: string) => sessionOutcomes.push(reason),
     recordFailedElement: () => {},
-  } as any;
+  };
+  return { sm, sessionOutcomes };
 }
 
 function makeGateRunner(
@@ -147,6 +151,7 @@ function makeGateRunner(
 ) {
   const executed: Array<Record<string, any>> = [];
   let planIndex = 0;
+  const { sm, sessionOutcomes } = runnerSmStub();
   const deps = {
     extract: async () => ({
       ok: true,
@@ -170,7 +175,7 @@ function makeGateRunner(
       return step.plan;
     },
     delay: async () => {},
-    sessionManager: runnerSmStub(),
+    sessionManager: sm,
     tabId: -1,
     windowId: 1,
     task: 'send the sheet',
@@ -185,7 +190,7 @@ function makeGateRunner(
     },
   };
   const runner = new AgentRunner(deps as unknown as AgentRunnerDeps);
-  return { runner, executed };
+  return { runner, executed, sessionOutcomes };
 }
 
 describe('#143 AgentRunner — outbound gate flow', () => {
@@ -216,7 +221,7 @@ describe('#143 AgentRunner — outbound gate flow', () => {
   });
 
   it('DISMISS: skips the send, does NOT execute it, run ends complete (work preserved)', async () => {
-    const { runner, executed } = makeGateRunner(
+    const { runner, executed, sessionOutcomes } = makeGateRunner(
       [
         { plan: { action: { type: 'CLICK', targetId: 1 } }, executeResults: [{ ok: true }] },
         { plan: { action: { type: 'DONE' } } },
@@ -230,6 +235,12 @@ describe('#143 AgentRunner — outbound gate flow', () => {
     await runner.run();
     // The send never executed; the loop ended before it.
     expect(executed.some((a) => a.type === 'CLICK')).toBe(false);
+    // Terminal outcome: a dismiss is NOT a failure - the run ends 'complete'
+    // so the preserved reads/fills stand (regression guard: a flip to
+    // failSession('failed') would push 'failed', not 'complete').
+    expect(sessionOutcomes).toContain('complete');
+    expect(sessionOutcomes).not.toContain('failed');
+    expect(sessionOutcomes).not.toContain('stopped');
   });
 
   it('allowlist OFF (empty): a send click is NOT gated - executes freely', async () => {
@@ -254,7 +265,7 @@ describe('#143 AgentRunner — outbound gate flow', () => {
   });
 
   it('STOP at the gate: the run ends stopped (the loop breaks, not continues)', async () => {
-    const { runner, executed } = makeGateRunner(
+    const { runner, executed, sessionOutcomes } = makeGateRunner(
       [
         { plan: { action: { type: 'CLICK', targetId: 1 } }, executeResults: [{ ok: true }] },
         { plan: { action: { type: 'DONE' } } },
@@ -267,5 +278,9 @@ describe('#143 AgentRunner — outbound gate flow', () => {
     );
     await runner.run();
     expect(executed.some((a) => a.type === 'CLICK')).toBe(false);
+    // Terminal outcome: a stop at the gate ends the run 'stopped' (a real
+    // abort), never 'complete' or 'failed'.
+    expect(sessionOutcomes).toContain('stopped');
+    expect(sessionOutcomes).not.toContain('complete');
   });
 });
