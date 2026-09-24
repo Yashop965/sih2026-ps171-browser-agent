@@ -123,6 +123,13 @@ class SanitizedPayload(BaseModel):
     # NPTEL "post-verify" loop signal: set by the runner when the planner keeps
     # re-issuing the same no-op action with no page change. PII-safe (no values).
     loopWarning: Optional[str] = None
+    # #141 cross-tab orchestrator: the user's other open tabs (id/title/url
+    # only - no page content, no PII) so the planner can SWITCH_TAB to one.
+    openTabs: Optional[List[Dict[str, Any]]] = None
+    # #141 cross-tab handoff: token + label for values read on other tabs. The
+    # live value is NOT part of this pair - /plan masks it as defence-in-depth
+    # so even a stray value can never reach the planner (see crossTabMemory mask).
+    crossTabMemory: Optional[List[Dict[str, Any]]] = None
 
 
 class PlanRequest(BaseModel):
@@ -146,6 +153,10 @@ class PlanRequest(BaseModel):
     checklist: Optional[List[Dict[str, Any]]] = None
     # NPTEL "post-verify" loop signal (flat payload root; PII-safe string).
     loopWarning: Optional[str] = None
+    # #141 cross-tab orchestrator (flat payload root): the user's other open
+    # tabs (id/title/url only) + the tokenised value handoff.
+    openTabs: Optional[List[Dict[str, Any]]] = None
+    crossTabMemory: Optional[List[Dict[str, Any]]] = None
 
     model_config = {"populate_by_name": True}
 
@@ -184,6 +195,8 @@ class PlanRequest(BaseModel):
             context=self.context,
             checklist=self.checklist,
             loopWarning=self.loopWarning,
+            openTabs=self.openTabs,
+            crossTabMemory=self.crossTabMemory,
         )
 
 
@@ -259,6 +272,11 @@ async def plan_action(request: PlanRequest):
         # scrollY/scrollHeight/viewport and whether more content is below the
         # fold, so it can issue SCROLL to reveal the next fields.
         page_context = payload.context
+        # #141 cross-tab orchestrator: the user's other open tabs + the
+        # tokenised value handoff. The values are masked in planner.plan()
+        # before the prompt is built (defence-in-depth over the on-device strip).
+        open_tabs = payload.openTabs or request.openTabs
+        cross_tab_memory = payload.crossTabMemory or request.crossTabMemory
 
         # Delegate planning to planner module
         planner_result: PlannerResult = await planner.plan(
@@ -271,6 +289,8 @@ async def plan_action(request: PlanRequest):
             context=page_context,
             checklist=checklist_list,
             loop_warning=loop_warning,
+            open_tabs=open_tabs,
+            cross_tab_memory=cross_tab_memory,
         )
 
         return PlanResponse(

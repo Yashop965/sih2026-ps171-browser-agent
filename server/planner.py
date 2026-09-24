@@ -11,7 +11,7 @@ Responsible for:
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 import json
 import re
@@ -25,7 +25,7 @@ logger = logging.getLogger("sih_agent_planner")
 # ===== Protocol Schema (Matches src/lib/actions.ts) =====
 
 class ActionSchema(BaseModel):
-    type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, WAIT, KEY, DONE
+    type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, WAIT, KEY, DONE, SWITCH_TAB
     targetId: Optional[int] = None
     value: Optional[str] = None
     scrollDirection: Optional[str] = None  # up, down, left, right
@@ -38,6 +38,11 @@ class ActionSchema(BaseModel):
     # or a single printable character). Issue #84: lets the agent submit a
     # filled search box instead of being stuck after TYPE-ing into it.
     key: Optional[str] = None
+    # SWITCH_TAB (#141): hop to another OPEN tab. tabId is exact; urlHint is
+    # fuzzy (matched against the open tabs' URLs + titles). Both absent = a
+    # harmless re-ground on the current tab. Carries no PII by construction.
+    tabId: Optional[int] = None
+    urlHint: Optional[str] = None
 
 
 class ChecklistItem(BaseModel):
@@ -133,6 +138,8 @@ class ActionPlanner:
         context: Optional[Dict[str, Any]] = None,
         checklist: Optional[List[Dict[str, Any]]] = None,
         loop_warning: Optional[str] = None,
+        open_tabs: Optional[List[Dict[str, Any]]] = None,
+        cross_tab_memory: Optional[List[Tuple[str, str]]] = None,
     ) -> str:
         """
         Builds a structured prompt for the LLM based on sanitized page metadata.
@@ -240,9 +247,56 @@ class ActionPlanner:
                 f"omittedElements={omitted}"
             )
 
+        # Cross-tab orchestrator sections (#141). Only rendered when the
+        # extension actually provides them - a single-tab task pays nothing.
+        # The open-tab list carries URL + title + id only (no content, no PII);
+        # a SWITCH_TAB action references one of those ids. The handoff carries
+        # TOKEN + LABEL only - the live value never reaches the planner, so the
+        # model can reference a harvested value but can never see or retype it.
+        open_tabs_block = ""
+        if open_tabs:
+            lines = [
+                "OPEN TABS (the user has these tabs open in this window; "
+                "use SWITCH_TAB to move the task to one of them):"
+            ]
+            for t in open_tabs:
+                lines.append(
+                    f"- tabId={t.get('id')}  \"{t.get('title', '')}\"  {t.get('url', '')}"
+                )
+            open_tabs_block = "\n".join(lines) + "\n"
+
+        handoff_block = ""
+        if cross_tab_memory:
+            lines = [
+                "VALUES READ ON OTHER TABS (handoff - reference by TOKEN; "
+                "the raw value never crosses to the planner, so to use one, "
+                "set it as a TYPE/SELECT value):"
+            ]
+            for token, label in cross_tab_memory:
+                lines.append(f"- {token} — {label or '(field)'}")
+            handoff_block = "\n".join(lines) + "\n"
+
+        switch_tab_instruction = (
+            "21. SWITCH_TAB: when the task needs a value or action on a DIFFERENT "
+            "open tab (listed under OPEN TABS), issue "
+            '{"type": "SWITCH_TAB", "tabId": <id from OPEN TABS>} '
+            "(or add \"urlHint\": \"<part of that tab's URL/title>\" if unsure). "
+            "The agent hops there and re-observes. To use a value already read on "
+            "another tab, set it as the value BY ITS TOKEN from VALUES READ ON OTHER "
+            "TABS, e.g. {\"type\": \"TYPE\", \"targetId\": 4, \"value\": \"<FIELD_1>\"} - "
+            "never retype the raw value. Do not repeat a SWITCH_TAB within two steps."
+        ) if open_tabs else ""
+
+        switch_tab_example = (
+            '- To move to the tab whose urlHint matches: {{"type": "SWITCH_TAB", "tabId": 7, "urlHint": "docs.google.com", "reasoning": "the form is in the Google Sheets tab"}}\n'
+            '- To type a harvested value by token: {{"type": "TYPE", "targetId": 4, "value": "<FIELD_1>", "reasoning": "fill name with the value read on the other tab"}}\n'
+        ) if cross_tab_memory else ""
+
         prompt = f"""URL: {url}
 PAGE TITLE: {title}
 PAGE GEOMETRY: {context_str}
+{open_tabs_block}
+{handoff_block}
 
 TASK: {task_str}
 
@@ -287,6 +341,7 @@ Use your full action vocabulary to act on whatever page you land on:
 18. COLLAPSED SEARCH BOX: if the task needs a search box but there is NO visible text input (the extractor reports 0 inputs), the site likely keeps its search field collapsed behind a visible "Search" toggle/link/button. Do NOT WAIT or SCROLL looking for a box - instead CLICK the visible element whose label is "Search" (or contains "search") to expand it, then TYPE the query and press Enter. On Wikipedia specifically, article pages collapse the header search to a small "Search" link; clicking it reveals the input. A page title/URL already containing the target does NOT need a search - apply rule 15 instead.
 19. EMPTY-LOOKING PAGE AFTER NAVIGATION: if the element table has 0-2 elements and the previous step was a NAVIGATE or CLICK that changed the page, the page is likely still rendering. Issue WAIT (~1000ms) instead of DONE or re-typing the last query, then re-check. The runner re-extracts automatically - it will recover the elements on the next step.
 20. SUBMIT A FILLED SEARCH / FORM, THEN VERIFY THE PAGE CHANGED: if your last action was TYPE into a search box or form field and you have NOT yet submitted it, your NEXT action MUST be the submit - press KEY "Enter" (or CLICK the form's Search/Go button), do NOT re-type the same value. Typing fills the field but does NOT advance the task. A search/submit is proven COMPLETE only by a DISTINCTIVE page-state change - the URL/title moving to the target article or a results page (e.g. "…/wiki/World_Wide_Web"), not by "I pressed Enter." If the history shows the same target re-typed with the page still on the same URL, STOP re-typing and issue the submit control a different way (press Enter on the focused field, or click the visible submit button). Repeated no-op fills on one element mean the SUBMIT is what's missing, not the fill.
+{switch_tab_instruction}
 
 ELEMENT TYPE RULES (MOST IMPORTANT - FOLLOW EXACTLY):
 - If tag == "input" AND type in ["text", "email", "password", "number"]: → TYPE the value
@@ -304,6 +359,7 @@ ACTION EXAMPLES:
 - To move into an autocomplete suggestion then submit: {{"type": "KEY", "key": "ArrowDown", "reasoning": "select the highlighted suggestion"}}
 - To go to another page: {{"type": "NAVIGATE", "url": "https://site.example/profile", "reasoning": "task continues on the profile page"}}
 - To let content load: {{"type": "WAIT", "waitMs": 2000, "reasoning": "page still loading, settle before next step"}}
+{switch_tab_example}
 
 YOUR NEXT ACTION MUST BE THE ONE THAT ADVANCES THE TASK:
 - TYPE into an UNFILLED text input field using the matching value from the task
@@ -358,7 +414,7 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
 
         # Normalize action type
         raw_type = str(data.get("type", "")).upper().strip()
-        valid_types = {"CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "KEY", "DONE"}
+        valid_types = {"CLICK", "TYPE", "SCROLL", "SELECT", "NAVIGATE", "WAIT", "KEY", "DONE", "SWITCH_TAB"}
         
         if raw_type not in valid_types:
             logger.warning(f"Invalid action type: {raw_type}")
@@ -497,7 +553,27 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
                 f"KEY target element #{target_id} not found on page"
             )
 
-        if raw_type in {"DONE", "WAIT", "KEY"}:
+        # SWITCH_TAB (#141): hop to another open tab. Neither target nor value
+        # makes sense - the tab is identified by exact tabId or a fuzzy
+        # urlHint (both optional). Drop targets/values so a confused model can't
+        # smuggle them through. A hop with no destination is a harmless
+        # re-ground, NOT a failure - so no NAVIGATE-style fallback.
+        switch_tab_id: Optional[int] = None
+        url_hint: Optional[str] = None
+        if raw_type == "SWITCH_TAB":
+            target_id = None
+            value = None
+            tab_id_raw = data.get("tabId")
+            if tab_id_raw is not None:
+                try:
+                    switch_tab_id = int(tab_id_raw)
+                except (ValueError, TypeError):
+                    switch_tab_id = None
+            hint_raw = data.get("urlHint")
+            if hint_raw is not None:
+                url_hint = str(hint_raw).strip() or None
+
+        if raw_type in {"DONE", "WAIT", "KEY", "SWITCH_TAB"}:
             confidence = 1.0
 
         # Cross-page task checklist: the LLM echoes its "what's done / what's
@@ -514,6 +590,8 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
             url=url,
             waitMs=wait_ms,
             key=key_name,
+            tabId=switch_tab_id,
+            urlHint=url_hint,
         )
 
         return PlannerResult(
@@ -830,6 +908,8 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
         context: Optional[Dict[str, Any]] = None,
         checklist: Optional[List[Dict[str, Any]]] = None,
         loop_warning: Optional[str] = None,
+        open_tabs: Optional[List[Dict[str, Any]]] = None,
+        cross_tab_memory: Optional[List[Tuple[str, str]]] = None,
     ) -> PlannerResult:
         """
         Main entry point for generating an action plan.
@@ -843,11 +923,41 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
         authors + maintains an ordered list of sub-goals, flipping items
         ``done`` as they are reached. It is fed back into the prompt so the
         model can't re-do a step it already completed (the thrashing bug).
+
+        ``open_tabs`` / ``cross_tab_memory`` (#141) let a single task span the
+        user's open tabs: the model sees the tab list (url/title/id only) and
+        can SWITCH_TAB to one of them, and reference harvested values by
+        TOKEN. Values are masked server-side before prompt building, so a raw
+        value can never reach the LLM even if the client ever sent one.
         """
         system_prompt = (
             "You are a browser automation assistant. Given sanitized webpage metadata, "
             "determine the single next action to execute in JSON format."
         )
+        # #141 PII mask: cross-tab memory crosses as (token, label) pairs ONLY.
+        # The runner already strips values on-device (handoffForPlanner), and
+        # this is defence-in-depth: anything that sneaks through in a "value"
+        # key is dropped here, before it can reach the LLM prompt.
+        masked_handoff: Optional[List[Tuple[str, str]]] = None
+        if cross_tab_memory:
+            masked_handoff = []
+            for entry in cross_tab_memory:
+                try:
+                    if isinstance(entry, dict):
+                        # The runner's payload shape: [{token, label}] — values
+                        # are stripped on-device; drop any stray "value" key so
+                        # it can never leak into the prompt.
+                        token = entry.get("token")
+                        label = entry.get("label")
+                    else:
+                        token, label = entry[0], entry[1]
+                    if not token:
+                        continue
+                    masked_handoff.append((str(token), str(label or "")))
+                except (TypeError, IndexError, AttributeError):
+                    # Malformed entry (not a dict / 2-tuple) - skip it, never
+                    # crash the plan over one bad handoff row.
+                    continue
         prompt = self.build_context_prompt(
             url=url,
             title=title,
@@ -857,6 +967,9 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
             history=history,
             context=context,
             checklist=checklist,
+            loop_warning=loop_warning,
+            open_tabs=open_tabs,
+            cross_tab_memory=masked_handoff,
         )
 
         try:

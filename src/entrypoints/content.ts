@@ -25,14 +25,16 @@ type AgentRequest =
     | { type: 'VISION_EXTRACT' } // New: DOM + Vision extraction
     | { type: 'VISION_OCR' } // #100: on-device OCR confirm
     | { type: 'CURSOR_THINKING'; on: boolean } // #132: agent-cursor breathing while the planner LLM is thinking
-    | { type: 'VISION_STATUS' }; // #136: on-device VLM live-indicator status
+    | { type: 'VISION_STATUS' } // #136: on-device VLM live-indicator status
+    | { type: 'HARVEST_FIELDS' }; // #141: label/value pairs from this tab for cross-tab handoff
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
     if (typeof msg !== 'object' || msg === null || !('type' in msg)) return false;
     const t = (msg as { type: unknown }).type;
     return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING'
         || t === 'capturePage' || t === 'HIGHLIGHT' || t === 'VISION_EXTRACT'
-        || t === 'VISION_OCR' || t === 'CURSOR_THINKING' || t === 'VISION_STATUS';
+        || t === 'VISION_OCR' || t === 'CURSOR_THINKING' || t === 'VISION_STATUS'
+        || t === 'HARVEST_FIELDS';
 }
 
 const HIGHLIGHT_ID = '__agent-highlight';
@@ -189,6 +191,73 @@ export default defineContentScript({
         // and what did the last OCR check conclude?
         function getVisionStatus() {
             return visionPipeline.status();
+        }
+
+        /**
+         * #141: cross-tab handoff harvest. Pull the page's labeled value
+         * pairs (definition lists, label→input, two-cell table rows,
+         * name/value lists) so the SW can carry them to a later tab as
+         * <FIELD_N> tokens. The VALUES cross to the SW only - the planner
+         * sees tokens + labels, and the executor resolves the value at
+         * write time. Passwords are never harvested. Capped at 50 fields,
+         * 200 chars per value (dense pages stay bounded).
+         */
+        function harvestFields(): Array<{ label: string; value: string }> {
+            const out: Array<{ label: string; value: string }> = [];
+            const seen = new Set<string>();
+            const add = (label: string, value: string) => {
+                const l = label.trim().replace(/\s+/g, ' ');
+                const v = value.trim().replace(/\s+/g, ' ');
+                if (!v || v.length > 200) return;
+                const key = l + '→' + v;
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push({ label: l, value: v });
+                if (out.length >= 50) return;
+            };
+            try {
+                // 1) definition lists: <dt>label</dt><dd>value</dd>
+                for (const dt of Array.from(document.querySelectorAll('dt'))) {
+                    const dd = dt.nextElementSibling;
+                    if (dd && dd.tagName === 'DD') add(dt.textContent || '', dd.textContent || '');
+                    if (out.length >= 50) break;
+                }
+                // 2) <label for=x>label</label> -> input/textarea#x
+                for (const lab of Array.from(document.querySelectorAll('label[for]'))) {
+                    const target = document.getElementById(lab.getAttribute('for') || '');
+                    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+                        const input = target as HTMLInputElement;
+                        if (input.type === 'password') continue;
+                        add(lab.textContent || '', input.value || '');
+                    }
+                    if (out.length >= 50) break;
+                }
+                // 3) two-cell table rows: <th>label</th><td>value</td>
+                for (const tr of Array.from(document.querySelectorAll('tr'))) {
+                    const cells = Array.from(tr.children);
+                    if (cells.length >= 2) {
+                        const first = cells[0];
+                        const isLabelCell = first.tagName === 'TH'
+                            || (first.tagName === 'TD'
+                                && (first.getAttribute('role') === 'rowheader' || (first.className && /label/i.test(String(first.className)))));
+                        if (isLabelCell) {
+                            add(first.textContent || '', cells[1].textContent || '');
+                        }
+                    }
+                    if (out.length >= 50) break;
+                }
+                // 4) name/value text pairs: "Label: value" lines in list items /
+                //    definition-like divs (the "Compliance report" shape).
+                for (const li of Array.from(document.querySelectorAll('li, dd, .field, .data, [class*="kv"], [class*="row"]'))) {
+                    const text = li.textContent || '';
+                    const m = text.match(/^([\w\s-]{2,40}?):\s+(.{1,200})$/);
+                    if (m) add(m[1], m[2]);
+                    if (out.length >= 50) break;
+                }
+            } catch {
+                /* harvest is best-effort; a broken page yields zero fields */
+            }
+            return out;
         }
 
         /**
@@ -402,6 +471,13 @@ export default defineContentScript({
                 // #136: return the on-device VLM pipeline status for the popup
                 // live indicator. Pure status - no pixels, no PII.
                 return Promise.resolve({ ok: true, status: getVisionStatus() });
+            }
+
+            if (message.type === 'HARVEST_FIELDS') {
+                // #141: label/value pairs of this tab for the cross-tab
+                // handoff. Best-effort, capped; the SW turns them into
+                // <FIELD_N> tokens. A chrome:// or broken page yields [].
+                return Promise.resolve({ ok: true, fields: harvestFields() });
             }
 
             return;

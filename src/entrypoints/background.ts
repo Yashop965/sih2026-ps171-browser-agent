@@ -6,6 +6,7 @@ import { AgentRunner, emptyTaskState, type AgentTaskState, type ChecklistItem } 
 import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 import { loadProfile } from '../lib/userProfile';
+import { emptyHandoff, harvestToHandoff, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
 
 /**
  * Background Service Worker
@@ -120,9 +121,85 @@ export default defineBackground({
 
     // Narrow channels the runner uses - each delegates to the existing
     // content/background plumbing.
+
+    // ─── #141 P1: cross-tab target (SWITCH_TAB) ──────────────────────────────
+    // The channels above used to hard-query the *active* web tab of the
+    // current window. That is the SINGLE-TAB assumption. P1 keeps that as the
+    // DEFAULT (so existing single-tab tasks behave byte-identically) but makes
+    // the target a per-run value: currentTargetTab. A SWITCH_TAB action
+    // (handled in executeChannel below) activates another open web tab and
+    // repoints the target - one tab driven at a time, never parallel. The
+    // task-scoped handoff below carries label/value pairs harvested (on
+    // device) from a tab as <FIELD_N> tokens; the runner resolves the token
+    // back to its value at write time, so harvested data never reaches the
+    // planner LLM.
+    let currentTargetTab: { tabId: number; windowId: number } | null = null;
+    let taskHandoff: TabHandoff = emptyHandoff();
+    const resetCrossTabState = (): void => {
+      currentTargetTab = null;
+      taskHandoff = emptyHandoff();
+    };
+
+    // Resolve which tab to drive next. When currentTargetTab is set (after a
+    // SWITCH_TAB) that tab IS the target, even if the user meanwhile clicked
+    // elsewhere - the agent owns the focus it moved. Otherwise (task start,
+    // or a target that got closed) fall back to the active web tab, exactly
+    // as before P1.
+    const driveTab = async (): Promise<number | undefined> => {
+      if (currentTargetTab) {
+        try {
+          const t = await browser.tabs.get(currentTargetTab.tabId);
+          if (t && t.url && (t.url.startsWith('http://') || t.url.startsWith('https://'))) {
+            return t.id;
+          }
+        } catch {
+          /* target closed - fall through to the active-tab default */
+        }
+        currentTargetTab = null;
+      }
+      const [active] = await browser.tabs.query({ active: true, currentWindow: true });
+      const isWeb = (u?: string) => !!u && (u.startsWith('http://') || u.startsWith('https://'));
+      return active?.id && isWeb(active.url) ? active.id : undefined;
+    };
+
+    // Harvest the target tab's labeled value pairs (HARVEST_FIELDS - content
+    // script, DOM-local, capped, password-excluded) into the task handoff.
+    // Best-effort: a chrome:// page or a closed port just yields no fields.
+    const harvestTabIntoHandoff = async (tabId: number): Promise<void> => {
+      const { ok, value } = await withPortRetry(
+        async () => await browser.tabs.sendMessage(tabId, { type: 'HARVEST_FIELDS' }),
+        (v: any) => v === undefined,
+      );
+      if (!ok || !value?.fields?.length) return;
+      let sourceUrl = '';
+      try {
+        sourceUrl = (await browser.tabs.get(tabId)).url || '';
+      } catch {
+        sourceUrl = '';
+      }
+      taskHandoff = harvestToHandoff(value.fields, sourceUrl);
+    };
+
+    // The runner's open-tab provider: live web tabs of the task's window,
+    // url + title only (no DOM, no PII). The planner uses this to pick a
+    // SWITCH_TAB target by hint. Capped so dense multi-tab windows stay
+    // bounded in the /plan payload.
+    const openTabsProvider = async (): Promise<OpenTabInfo[]> => {
+      const windowId =
+        currentTargetTab?.windowId ??
+        (await browser.tabs.query({ active: true, currentWindow: true }))?.[0]?.windowId ??
+        undefined;
+      const tabs = windowId !== undefined
+        ? await browser.tabs.query({ windowId })
+        : await browser.tabs.query({ currentWindow: true });
+      return tabs
+        .filter((t) => t.id !== undefined && t.url?.startsWith('http'))
+        .slice(0, 10)
+        .map((t) => ({ tabId: t.id as number, url: t.url || '', title: t.title || '' }));
+    };
+
     const extractChannel = async (): Promise<any> => {
-      const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-      const tabId = activeTab?.id;
+      const tabId = await driveTab();
       if (tabId === undefined) return { ok: false, error: 'No active tab' };
       // After a navigating CLICK/KEY the content port drops and the content
       // script re-injects on the new page; there is a brief window where
@@ -154,8 +231,75 @@ export default defineBackground({
     };
 
     const executeChannel = async (action: any): Promise<any> => {
-      const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-      const tabId = activeTab?.id;
+      // #141 P1: SWITCH_TAB - hop the agent's target to another open web tab.
+      // Harvests the LEAVING tab's labeled values into the task handoff first
+      // (on device; the planner later sees only <FIELD_N> tokens), activates
+      // the target, and waits for it to be usable. One tab driven at a time.
+      if (action?.type === 'SWITCH_TAB') {
+        const from = await driveTab();
+        if (from !== undefined) await harvestTabIntoHandoff(from);
+        let next: number | undefined;
+        if (typeof action.tabId === 'number') {
+          try {
+            const t = await browser.tabs.get(action.tabId);
+            if (t?.url && (t.url.startsWith('http://') || t.url.startsWith('https://'))) next = t.id;
+          } catch {
+            next = undefined;
+          }
+        }
+        if (next === undefined && typeof action.urlHint === 'string' && action.urlHint) {
+          const hint = action.urlHint.toLowerCase();
+          const tabs = await openTabsProvider();
+          const hit =
+            tabs.find((t) => t.url.toLowerCase().includes(hint)) ||
+            tabs.find((t) => t.title.toLowerCase().includes(hint));
+          next = hit?.tabId;
+        }
+        if (next === undefined) {
+          // No explicit target: settle on the active web tab (a no-op hop if
+          // already there - never a failure, so a planner that emits a bare
+          // SWITCH_TAB just re-grounds the run).
+          next = from;
+        }
+        if (next === undefined) return { ok: false, error: 'no web tab to switch to' };
+        try {
+          await browser.tabs.update(next, { active: true });
+          const target = await browser.tabs.get(next);
+          currentTargetTab = { tabId: next, windowId: target?.windowId ?? 0 };
+          // #141: track the tab's own session - SessionManager was built for
+          // multi-site tasks; the runner's task session (tabId -1) stays the
+          // loop's budget owner, these are the per-tab views. Update the
+          // active one if the task already visited this tab, otherwise open
+          // a fresh one. Bookkeeping only - a failure here never fails the hop.
+          try {
+            const existing = sessionManager.getSessionForTab(next);
+            if (existing) {
+              await sessionManager.updateSession(existing.sessionId, target?.url || '');
+            } else {
+              await sessionManager.startSession(
+                next,
+                target?.windowId ?? 0,
+                target?.url || '',
+                `cross-tab hop in task: ${'(' + (target?.title || 'untitled') + ')'}`,
+              );
+            }
+          } catch {
+            /* session bookkeeping is best-effort */
+          }
+          // A background tab is not mid-navigation, but give its content
+          // script a beat so the next EXTRACT finds the port attached.
+          await waitForTabLoad(next, 3_000);
+          privacyLedger.log({
+            timestamp: Date.now(), tabId: next, url: target?.url || '', type: 'EXECUTION',
+            selector: 'SWITCH_TAB', confidence: 1, verified: true, action: 'SUCCESS',
+          });
+          return { ok: true, note: 'tab switched - will re-extract the new tab' };
+        } catch (e) {
+          return { ok: false, error: String(e) };
+        }
+      }
+
+      const tabId = await driveTab();
       if (tabId === undefined) return { ok: false, error: 'No web tab found' };
       try {
         const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
@@ -198,12 +342,16 @@ export default defineBackground({
         } catch {
           return { ok: false, error: 'invalid url' };
         }
-        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (activeTab?.id === undefined) return { ok: false, error: 'No web tab found' };
-        await browser.tabs.update(activeTab.id, { url: target });
-        await waitForTabLoad(activeTab.id, 10_000);
+        const tabId = await driveTab();
+        if (tabId === undefined) return { ok: false, error: 'No web tab found' };
+        await browser.tabs.update(tabId, { url: target });
+        await waitForTabLoad(tabId, 10_000);
+        // #141: a navigation inside the task re-asserts the target so a later
+        // tabs.query fallback can't drift the run onto another tab.
+        const moved = await browser.tabs.get(tabId).catch(() => null);
+        currentTargetTab = { tabId, windowId: moved?.windowId ?? 0 };
         privacyLedger.log({
-          timestamp: Date.now(), tabId: activeTab.id, url: target, type: 'EXECUTION',
+          timestamp: Date.now(), tabId, url: target, type: 'EXECUTION',
           selector: 'NAVIGATE', confidence: 1, verified: true, action: 'SUCCESS',
         });
         return { ok: true };
@@ -217,8 +365,8 @@ export default defineBackground({
     // rather than the cursor sitting frozen. Best-effort fire-and-forget: it
     // targets the active web tab's content script and never blocks the plan.
     const setCursorThinking = (on: boolean) => {
-      void browser.tabs.query({ active: true, currentWindow: true })
-        .then(([t]) => (t?.id === undefined ? null : browser.tabs.sendMessage(t.id, { type: 'CURSOR_THINKING', on })))
+      void driveTab()
+        .then((id) => (id === undefined ? null : browser.tabs.sendMessage(id, { type: 'CURSOR_THINKING', on })))
         .catch(() => {});
     };
 
@@ -254,8 +402,7 @@ export default defineBackground({
       openItems: ChecklistItem[];
     }): Promise<{ confirmed: boolean; detail?: string; unavailableReason?: string } | null> => {
       try {
-        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-        const tabId = activeTab?.id;
+        const tabId = await driveTab();
         if (tabId === undefined) return null;
         const { ok, value } = await withPortRetry(
           async () => await browser.tabs.sendMessage(tabId, { type: 'VISION_OCR' }),
@@ -307,6 +454,10 @@ export default defineBackground({
       // Stop any previous run before starting a new one.
       stopFlag = { stopped: false };
       abortController = new AbortController();
+      // #141: a new run starts cross-tab-clean - no stale target tab, no
+      // previous task's harvested values (a fresh run must not type values
+      // it never read this task).
+      resetCrossTabState();
 
       // #102: load the on-device user profile so the planner can reference the
       // user's own constants by token. Never egressed raw - the outbound guard
@@ -333,6 +484,11 @@ export default defineBackground({
         confirmGoal,
         // #102: local user profile (on-device constants the agent can fill).
         profile: Object.keys(profile).length ? profile : undefined,
+        // #141 P1: cross-tab orchestrator. The planner sees the live open-tab
+        // list (url+title) and the token+label handoff (values never cross);
+        // SWITCH_TAB hops the run between open tabs, one driven at a time.
+        openTabs: openTabsProvider,
+        crossTabMemory: () => taskHandoff,
       });
       runner.run().catch((e) => {
         console.error('[agent-runner] unhandled loop error:', e);
