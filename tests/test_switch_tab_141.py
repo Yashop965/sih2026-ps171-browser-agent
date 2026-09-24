@@ -76,6 +76,10 @@ class TestSwitchTabParsing(unittest.TestCase):
 
 class TestOpenTabsPromptSection(unittest.TestCase):
     def test_open_tabs_rendered_when_provided(self):
+        # Regression (review of PR #146): the client's OpenTabInfo (src/lib/
+        # tabHandoff.ts) sends the key as "tabId" - this test MUST use the
+        # client's real shape or it hides the key-mismatch bug where the
+        # prompt renders "tabId=None" for every tab.
         planner = make_planner()
         prompt = planner.build_context_prompt(
             url="https://a.example",
@@ -84,15 +88,30 @@ class TestOpenTabsPromptSection(unittest.TestCase):
             accessibility_tree=[],
             task_description="fill the form on the other tab",
             open_tabs=[
-                {"id": 11, "title": "Data", "url": "https://data.example"},
-                {"id": 12, "title": "Sheet", "url": "https://sheets.example/f"},
+                {"tabId": 11, "title": "Data", "url": "https://data.example"},
+                {"tabId": 12, "title": "Sheet", "url": "https://sheets.example/f"},
             ],
         )
         self.assertIn("OPEN TABS", prompt)
-        self.assertIn("tabId=12", prompt)
+        self.assertIn("tabId=12", prompt)  # the EXACT id, not None
+        self.assertNotIn("tabId=None", prompt)
         self.assertIn("sheets.example", prompt)
         # Rule 21 + the action vocabulary are present only when orchestrating.
         self.assertIn("SWITCH_TAB", prompt)
+
+    def test_open_tabs_rendered_with_legacy_id_key(self):
+        # Older/test payloads may send "id" instead of "tabId" - both must
+        # resolve to the exact id in the prompt.
+        planner = make_planner()
+        prompt = planner.build_context_prompt(
+            url="https://a.example",
+            title="A",
+            interactive_elements=[],
+            accessibility_tree=[],
+            open_tabs=[{"id": 33, "title": "Legacy", "url": "https://legacy.example"}],
+        )
+        self.assertIn("tabId=33", prompt)
+        self.assertNotIn("tabId=None", prompt)
 
     def test_open_tabs_absent_keeps_single_tab_prompt_unchanged(self):
         planner = make_planner()

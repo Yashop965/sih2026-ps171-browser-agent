@@ -6,7 +6,7 @@ import { AgentRunner, emptyTaskState, type AgentTaskState, type ChecklistItem } 
 import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 import { loadProfile } from '../lib/userProfile';
-import { emptyHandoff, harvestToHandoff, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
+import { emptyHandoff, harvestToHandoff, mergeHandoff, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
 
 /**
  * Background Service Worker
@@ -164,6 +164,8 @@ export default defineBackground({
 
     // Harvest the target tab's labeled value pairs (HARVEST_FIELDS - content
     // script, DOM-local, capped, password-excluded) into the task handoff.
+    // MERGED (not replaced) so a multi-source task keeps values from every
+    // tab it has read - last-wins would clobber tab A when tab B is harvested.
     // Best-effort: a chrome:// page or a closed port just yields no fields.
     const harvestTabIntoHandoff = async (tabId: number): Promise<void> => {
       const { ok, value } = await withPortRetry(
@@ -177,7 +179,7 @@ export default defineBackground({
       } catch {
         sourceUrl = '';
       }
-      taskHandoff = harvestToHandoff(value.fields, sourceUrl);
+      taskHandoff = mergeHandoff(taskHandoff, harvestToHandoff(value.fields, sourceUrl));
     };
 
     // The runner's open-tab provider: live web tabs of the task's window,
@@ -185,8 +187,13 @@ export default defineBackground({
     // SWITCH_TAB target by hint. Capped so dense multi-tab windows stay
     // bounded in the /plan payload.
     const openTabsProvider = async (): Promise<OpenTabInfo[]> => {
+      // windowId 0 (a raced tabs.get during a hop) is not a real window -
+      // fall back to the active tab's window so the open-tab list isn't
+      // silently empty on the next plan call.
       const windowId =
-        currentTargetTab?.windowId ??
+        (currentTargetTab?.windowId && currentTargetTab.windowId > 0
+          ? currentTargetTab.windowId
+          : undefined) ??
         (await browser.tabs.query({ active: true, currentWindow: true }))?.[0]?.windowId ??
         undefined;
       const tabs = windowId !== undefined

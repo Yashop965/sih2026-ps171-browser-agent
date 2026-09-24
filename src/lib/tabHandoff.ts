@@ -94,6 +94,53 @@ export function harvestToHandoff(
 }
 
 /**
+ * Merge a fresh harvest into an existing handoff (multi-source tasks). A
+ * task that reads values from tab A AND tab B keeps both: tokens continue
+ * the base's numbering, dedupe is global by value (so the same value
+ * harvested on two tabs collapses to the FIRST token, which is what every
+ * earlier plan call already saw), and the cap still bounds the total.
+ * `harvestToHandoff` alone is last-tab-wins; use this one on the switch
+ * path so a bare re-ground never clobbers a prior harvest.
+ */
+export function mergeHandoff(
+  base: TabHandoff,
+  incoming: TabHandoff,
+): TabHandoff {
+  if (Object.keys(incoming.values).length === 0) return base;
+  const values: Record<string, string> = { ...base.values };
+  const labels: Record<string, string> = { ...base.labels };
+  const byValue = new Map<string, string>();
+  for (const [token, value] of Object.entries(base.values)) {
+    byValue.set(value, token);
+  }
+  // Continue numbering after the base's last token.
+  let n = Object.keys(base.values).length;
+  for (const [token, value] of Object.entries(incoming.values)) {
+    if (n >= MAX_HANDOFF_FIELDS) break;
+    const existing = byValue.get(value);
+    if (existing) continue; // already tokenised (possibly by an earlier hop)
+    // Re-number: the base's tokens keep their names; only NEW tokens are
+    // minted at <FIELD_n+1> so the merged handoff stays gap-free.
+    if (n === 0 || token !== fieldToken(n)) {
+      const fresh = fieldToken(n);
+      values[fresh] = value;
+      labels[fresh] = incoming.labels[token] ?? labels[token] ?? `field ${n + 1}`;
+      byValue.set(value, fresh);
+    } else {
+      values[token] = value;
+      labels[token] = incoming.labels[token] ?? labels[token] ?? `field ${n + 1}`;
+      byValue.set(value, token);
+    }
+    n += 1;
+  }
+  return {
+    values,
+    labels,
+    extractedAt: incoming.extractedAt,
+    sourceUrl: `${base.sourceUrl} → ${incoming.sourceUrl}`,
+  };
+}
+/**
  * The /plan payload section: what the planner may reference. Tokens + labels
  * ONLY — never the values (that would defeat the firewall). Empty handoff ->
  * undefined (the payload key is omitted, so single-tab tasks see no change).

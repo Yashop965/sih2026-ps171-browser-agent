@@ -260,8 +260,13 @@ class ActionPlanner:
                 "use SWITCH_TAB to move the task to one of them):"
             ]
             for t in open_tabs:
+                # The client (OpenTabInfo in src/lib/tabHandoff.ts) sends the
+                # key as "tabId"; older/test payloads may use "id". Render the
+                # exact id the model must reference in a SWITCH_TAB action -
+                # without it the flow silently degrades to urlHint-only.
+                tab_id = t.get("tabId", t.get("id"))
                 lines.append(
-                    f"- tabId={t.get('id')}  \"{t.get('title', '')}\"  {t.get('url', '')}"
+                    f"- tabId={tab_id}  \"{t.get('title', '')}\"  {t.get('url', '')}"
                 )
             open_tabs_block = "\n".join(lines) + "\n"
 

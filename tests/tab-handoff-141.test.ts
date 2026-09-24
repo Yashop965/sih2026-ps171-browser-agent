@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   emptyHandoff,
   harvestToHandoff,
+  mergeHandoff,
   handoffForPlanner,
   resolveHandoffValue,
   isHandoffToken,
@@ -79,6 +80,38 @@ describe('#141 tabHandoff core', () => {
     expect(resolveHandoffValue('plain text', h)).toBeUndefined(); // not a token
     expect(resolveHandoffValue(undefined, h)).toBeUndefined();
     expect(resolveHandoffValue('<FIELD_1>', null)).toBeUndefined();
+  });
+
+  it('mergeHandoff keeps BOTH source tabs values (multi-source task)', () => {
+    const a = harvestToHandoff(
+      [{ label: 'Name', value: 'Acme Ltd' }],
+      'https://tabA.example',
+    );
+    const b = harvestToHandoff(
+      [{ label: 'City', value: 'Pune' }],
+      'https://tabB.example',
+    );
+    const m = mergeHandoff(a, b);
+    expect(m.values).toEqual({ '<FIELD_1>': 'Acme Ltd', '<FIELD_2>': 'Pune' });
+    expect(m.labels['<FIELD_1>']).toBe('Name');
+    expect(m.labels['<FIELD_2>']).toBe('City');
+    expect(m.sourceUrl).toContain('→');
+    // Both tokens resolvable after the merge.
+    expect(resolveHandoffValue('<FIELD_1>', m)).toBe('Acme Ltd');
+    expect(resolveHandoffValue('<FIELD_2>', m)).toBe('Pune');
+  });
+
+  it('mergeHandoff dedupes globally by value across the two sources', () => {
+    const a = harvestToHandoff([{ label: 'A', value: 'Acme' }], 'a');
+    const b = harvestToHandoff([{ label: 'B', value: 'Acme' }], 'b');
+    const m = mergeHandoff(a, b);
+    expect(Object.values(m.values)).toEqual(['Acme']); // one token, not two
+  });
+
+  it('mergeHandoff keeps the base when the incoming harvest is empty', () => {
+    const a = harvestToHandoff([{ label: 'A', value: 'Acme' }], 'a');
+    const m = mergeHandoff(a, emptyHandoff());
+    expect(m).toBe(a); // same reference, unchanged
   });
 });
 
