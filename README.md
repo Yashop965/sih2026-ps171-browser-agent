@@ -5,16 +5,18 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-![vitest: 438/438](https://img.shields.io/badge/vitest-438%2F438%20passing-22c55e?style=for-the-badge)
-![pytest: 74/74](https://img.shields.io/badge/pytest-74%2F74%20passing-22c55e?style=for-the-badge)
-![build: 1.33 MB](https://img.shields.io/badge/build-1.33%20MB%20chrome-mv3-6366f1?style=for-the-badge)
+![vitest: 524/524](https://img.shields.io/badge/vitest-524%2F524%20passing-22c55e?style=for-the-badge)
+![pytest: 87/87](https://img.shields.io/badge/pytest-87%2F87%20passing-22c55e?style=for-the-badge)
+![build: ~24 MB](https://img.shields.io/badge/build-%7E24%20MB%20chrome-mv3%20(ORT%20wasm%20included)-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-24):** `main` clean · **438/438** vitest + **74/74**
-> pytest passing · Chrome MV3 build **1.33 MB** · 0 PII off-device · agent cursor
-> v5.3 (distance-aware travel: snap/curve/1-loop/2-loops, page-level theme fix,
-> viewport-contained loops) · task-history cache · live VLM indicator ·
-> planner on a zero-reasoning fast model · 3-hop live E2E passing end-to-end.
+> **Current state (verified 2026-09-25):** `main` clean · **524/524** vitest +
+> **87/87** pytest passing · Chrome MV3 build **~24 MB** (includes the on-device
+> Florence-2 model stack: 907 KB worker bundle + ORT wasm/loader) · 0 PII
+> off-device · **cross-tab orchestrator P1–P4 shipped** (sequenced multi-tab
+> handoff, outbound-send human gate, passive watch, VLM offscreen host) ·
+> agent cursor v5.3 · task-history cache · live VLM indicator · planner on a
+> zero-reasoning fast model · 3-hop live E2E passing end-to-end.
 > Repo:
 > [`github.com/Yashop965/sih2026-ps171-browser-agent`](https://github.com/Yashop965/sih2026-ps171-browser-agent).
 
@@ -67,12 +69,13 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 ### Feature highlights (post-deadline hardening)
 
+- **Cross-tab orchestrator P1–P4 (#141/#143/#144/#142):** the "multiple sites at once" epic, all merged. **P1 sequenced multi-tab (#141):** explicit `SWITCH_TAB` hops in order (read tab A → write tab B → tab C) with a `currentTargetTab` channel that defaults to today's active web tab (zero behavior change), per-tab sessions, and a PII-safe **token handoff** — a source tab's value is harvested as an opaque token, never the raw PII, and re-perceived in place so a later edit is picked up. **P2 outbound-send gate (#143):** send-classified actions on a user-opt-in outbound domain (e.g. WhatsApp Web) pause the run for a human — confirm executes the send once, dismiss skips just that step, stop ends the run; fail-closed so an unlabeled paper-plane is never fire-and-forget. **P3 passive watch (#144):** a `TabOrchestrator` task graph with watcher-triggered re-perception of open source tabs (DOM-only, no click/scroll/LLM, ≤3 tabs, ≥15s polling, cross-site guard), serial planner so a source tab that changes while the agent works on another updates the next write. **P4 VLM offscreen host (#142):** the on-device Florence-2 pipeline moved from the content-script isolated world (which can never `import()` the ORT module) into a dedicated **module worker owned by a blank offscreen document** — the one context with both `import()` and WebGPU; the SW captures pixels and relays OCR/status, pixels stay local, only text/boxes/cross back.
 - **Autonomy (#84/#85/#86):** goal-driven multi-page execution — `NAVIGATE` via background `NAVIGATE_TAB`, `WAIT` primitive, `KEY` primitive (press Enter/Tab/arrows so a search actually submits), and robust web-tab resolution so the agent never targets its own extension page.
 - **Cross-page memory (#99):** the planner is stateless across pages, so after each navigation it used to re-reason from scratch and re-do completed steps. Fix: the planner authors a small ordered **task checklist** of sub-goals; the runner tracks it (`mergeChecklist`, sticky-`done`), feeds it back to `/plan` each step, and **gates DONE** on it (3-strike cap → best-effort degraded).
 - **Planner loop-guard (#130):** the runner detects repeated no-op actions and feeds a PII-safe `loopWarning` back into the planner prompt (with NPTEL-style Rule 20: a submit is proven by a *distinctive page change*). Kills the "re-typing the same value forever" loop seen in live runs.
 - **Agent cursor v5.3 (#137 → v5.3, movement engine #139):** the visible agent cursor is the user-referenced "select" pointer (mirrored, tip top-left), **theme-aware off the page background** — a black shape + white outline on light sites, inverting to white + dark outline on dark sites (now sampled from `html`/`body` first, so a dark card under the tip no longer flips the whole cursor white — the light-mode bug is fixed) — with a **border-tracing blue working glow** that hugs the pointer's silhouette and breathes while the agent works/thinks. Travel is now **distance-aware** (a deliberate, "agent"-style path per hop): very-close hops **snap** straight, short–mid hops take a **gentle curve**, far hops swing **one small closed 360° loop**, and very-far hops swing **two small loops** ("a cheerful path") — loop radius scales with the A→B distance (clamped 36–120px), the whole loop is kept inside the tab viewport, and if it can't fit the hop degrades to the simple curve. Constant ~320px/s, G1-continuous joins. Transform-only, shadow-DOM + `all:initial` isolation so hostile page CSS can't hide it. #139 now tracks only optional polish (exit-tail ease, per-hop shape variety).
 - **Task history (#134):** the popup caches recent prompts (`sih_recent_tasks`, cap 8, deduped) with one-click re-run and outcome-tinted status rails — the last task is persisted and reusable across popup opens.
-- **Live VLM indicator (#136):** a compact popup pill shows the on-device vision pipeline state (ready / loading / idle / unavailable) plus the last OCR outcome, polled from the active tab. Pure status — no pixels or PII leave the device.
+- **Live VLM indicator (#136, reworked by #142):** a compact popup pill shows the on-device vision pipeline state (ready / loading / idle / unavailable) plus the last OCR outcome — now polled through the service worker's **offscreen host** (`VLM_STATUS` → offscreen-doc module worker), so it reflects the real pipeline instead of the broken content-script isolated world. Pure status — no pixels or PII leave the device, and a closed host honestly reports *idle* without allocating the model.
 - **Fast planner model (#133):** the planner runs on a zero-reasoning model that answers in ~3 s instead of the CoT default's ~5 s per step (~4× faster live, no degraded calls). Both options are documented in `server/.env.example` with measured timings.
 - **Lower-section modernization (#135):** the PII heatmap tab renders the real card component (the dead inline dot-grid is gone), and a "quiet" toggle hides low-confidence unverified detections so the ledger reads "what matters."
 - **PII criticals closed (#130):** audit C1–C3 fixed — logs never record resolved profile values, 13–19-digit cards are blocked at the last-line firewall (was 16-digit-only), and non-card PII detections store a fully `[REDACTED]` sentinel instead of a 4-character prefix.
@@ -139,6 +142,28 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 | **Tolerant `<select>` matching** | Normalized/unique-substring option matching (`matchSelectOption`) — stops the "no option matching" re-typing loop and closes audit M3 |
 | **`<all_urls>` host permission** | Unblocks `captureVisibleTab` for the on-device VLM path (#113 model load proven; live extension loop is the remaining piece) |
 | **Codebase audit + module reference** | `docs/audit/01-src-lib.md` (25 findings) · `docs/audit/02-server-and-entrypoints.md` (24 findings + API) · `docs/research/mouse-animation-libraries.md` (9-lib comparison) |
+
+### What shipped since the last dashboard (2026-09-22 → 09-25)
+
+The **cross-tab orchestrator + on-device VLM epic** — the "multiple sites at
+once" ask, P1–P4 all merged to `main` (design of record:
+`docs/CROSS-TAB-ORCHESTRATOR-DESIGN.md`). PII firewall intact throughout: only
+opaque tokens cross tab boundaries; outbound sends always pause for a human.
+
+| Change | Effect |
+|---|---|
+| **P1 sequenced multi-tab (#141 → #146)** | Explicit `SWITCH_TAB` hops in order (read tab A → write tab B → tab C). Channels target a `currentTargetTab` (defaults to today's active web tab → zero behavior change), per-tab `SessionManager` sessions, and a PII-safe **token handoff**: a source value is harvested as an opaque token, never raw PII |
+| **P2 outbound-send gate (#143 → #147)** | Send-classified actions on a user-opt-in outbound domain (e.g. WhatsApp Web) **pause for a human** — confirm executes the send once, dismiss skips just that step, stop ends the run. Fail-closed: an unlabeled send control on an outbound domain is gated, never fire-and-forget. Empty allowlist = gate fully off |
+| **P3 passive watch (#144 → #148)** | `TabOrchestrator` task graph with watcher-triggered re-perception of open source tabs (DOM-only — no click/scroll/LLM; ≤3 tabs, ≥15s polling, cross-site guard, event+poll race-serialized). A source tab that changes while the agent works on another tab updates the *next* write via label-keyed handoff refresh |
+| **P4 VLM offscreen host (#142 → #149)** | On-device Florence-2 moved to a **dedicated module worker owned by a blank offscreen document** — the one context that can `import()` the ORT module *and* expose WebGPU. SW captures pixels + relays OCR/status; pixels stay local, only text/boxes/status cross back. Offscreen doc closes when a run ends; the pill's status poll never allocates the host |
+| **Test + gate growth** | vitest 438 → **524**, pytest 74 → **87**; `wxt build` clean. New suites: `outbound-gate-143` (17), `passive-watch-144` (22), `vlm-host-142` (12) |
+
+**Live E2E remaining:** cross-tab + VLM paths are deterministic-tested; the
+live Chrome proof (load extension, run a 3-hop task across tabs, confirm the
+VLM pill hits *ready (webgpu)*, exercise a gated send) is the user's step.
+Follow-ups parked as **#151**: relay unit-test with a fake Worker, tighten
+`vlm/ort/*` WAR `matches`, optional LFS/build-time-download for the 21.6 MB
+`.wasm`.
 
 ---
 
@@ -501,15 +526,28 @@ privacy-first extension. Post-deadline hardening shipped in two waves:
   fixed** — `samplePageDark()` now reads the page background (`html`/`body`)
   first, so a dark card under the tip no longer flips the cursor white on a
   light page. **438/438** vitest · 74/74 pytest · 1.33 MB.
+- **Sep 24–25 (cross-tab orchestrator + on-device VLM epic, #141/#143/#144/#142):**
+  the "multiple sites at once" work, P1–P4 all squash-merged to `main`
+  (PRs #146/#147/#148/#149). **P1** sequenced `SWITCH_TAB` multi-tab with
+  PII-safe token handoff; **P2** outbound-send human gate (fail-closed,
+  on-device allowlist, execute-once on confirm); **P3** passive watch
+  re-perception of open source tabs (DOM-only, race-serialized, cross-site
+  guard); **P4** VLM offscreen host — Florence-2 moved into a dedicated module
+  worker owned by a blank offscreen document, the one context that can both
+  `import()` the ORT module and expose WebGPU. Closes the #113 symptom (goal
+  check silently no-ops). Each phase reviewed by a fresh-context subagent and
+  merged after its findings were fixed. **524/524** vitest · **87/87**
+  pytest · ~24 MB build (the ORT wasm/model stack is now shipped in dist).
 
-Open feature issues **#100–#104 / #113 / #115** (local vision stop,
+Open feature issues **#100–#104 / #115** (local vision stop,
 agent-cursor overlay hardening, local user-profile, heatmap visual polish,
-on-device VLM live loop, VLM fallback extractor) are scoped; the cursor
-movement engine (#139) is now **done in v5.3** (remaining items are optional
-polish). Most cursor/VLM pieces now have a
-proven standalone path. The on-device VLM *live end-to-end* loop (#113) is the
-one remaining open item — the model loads on-device and the new `VlmIndicator`
-(#136) surfaces its state, but the full OCR-confirmed run still needs a live pass.
+VLM fallback extractor) are scoped; the cursor
+movement engine (#139) is done in v5.3 (remaining items are optional
+polish). The on-device VLM live loop (#113) is now **hosted** by the #142
+offscreen module worker — the full OCR-confirmed run + cross-tab scenarios
+have deterministic test coverage; the live Chrome pass (extension load,
+3-hop task across tabs, VLM pill → *ready (webgpu)*, gated send) is the
+remaining user step.
 
 ---
 
