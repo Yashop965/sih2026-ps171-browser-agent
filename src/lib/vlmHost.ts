@@ -159,6 +159,18 @@ export function vlmHostDetect(dataUrl: string, query?: string, timeoutMs = 300_0
   return vlmHostSend({ type: 'VLM_HOST_DETECT', dataUrl, query }, timeoutMs, { create: true });
 }
 
+/**
+ * #115: Florence-2 PHRASE GROUNDING (<PG>) of a captured screenshot. Given a
+ * query like "find: search box, submit button, menu", returns the model's
+ * boxes (screenshot-pixel coords) + labels. The caller (SW) then hands them
+ * to the target tab's content script to bridge back to real DOM nodes via
+ * document.elementFromPoint - so only box coords + label text cross the
+ * boundary, never the pixels.
+ */
+export function vlmHostGround(dataUrl: string, query?: string, timeoutMs = 300_000): Promise<VlmHostReply> {
+  return vlmHostSend({ type: 'VLM_HOST_GROUND', dataUrl, query }, timeoutMs, { create: true });
+}
+
 /** Prewarm: load/initialize the model (first call may download ~150MB q4). */
 export function vlmHostInit(timeoutMs = 300_000): Promise<VlmHostReply> {
   return vlmHostSend({ type: 'VLM_HOST_INIT' }, timeoutMs, { create: true });

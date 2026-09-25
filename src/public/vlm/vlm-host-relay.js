@@ -97,6 +97,11 @@
         p = { type: 'DETECT', dataUrl: msg.dataUrl, query: msg.query };
         t = msg.timeoutMs ?? 300_000;
         break;
+      case 'VLM_HOST_GROUND':
+        // #115: Florence-2 phrase grounding (<PG>) - "find: button, input box".
+        p = { type: 'GROUND', dataUrl: msg.dataUrl, query: msg.query };
+        t = msg.timeoutMs ?? 300_000;
+        break;
       case 'VLM_HOST_CAPTION':
         p = { type: 'CAPTION', dataUrl: msg.dataUrl };
         t = msg.timeoutMs ?? 300_000;

@@ -61,6 +61,47 @@ export function getGuardForStableId(stableId: string): string | undefined {
     return stableGuardRegistry.get(stableId);
 }
 
+// #115: VLM grounding fallback - element ids reserved by the last extract()
+// run. Grounded (vision-bridged) elements continue the numbering so the
+// executor's targetId registry stays collision-free across a grounding pass.
+let nextGroundedId = 1;
+
+/**
+ * #115: register a vision-bridged DOM node (found via
+ * document.elementFromPoint on a Florence-2 grounding box) so the executor
+ * can act on it by targetId / stableId - the PII-safe fallback for near-empty
+ * DOM pages (canvas UIs, shadow-DOM widgets, 0-2 element pages).
+ *
+ * Returns an ExtractedElement-shaped record (id + geometry + masked label) to
+ * append to the page snapshot. The label is what the vision model reported,
+ * masked through clean() exactly like a DOM label would be.
+ */
+export function registerGroundedElement(el: Element, visionLabel: string): ExtractedElement | undefined {
+    const rect = el.getBoundingClientRect();
+    const id = nextGroundedId++;
+    const tag = el.tagName.toLowerCase();
+    const label = clean(visionLabel || tag || 'grounded control');
+    const stableId = `grounded|${tag}|${label.replace(/\s+/g, '_').slice(0, 30)}|${id}`;
+    registry.set(id, el);
+    stableIdRegistry.set(stableId, el);
+    const guard = captureElementGuard(el, new Map());
+    guardRegistry.set(id, guard);
+    stableGuardRegistry.set(stableId, guard);
+    return {
+        id,
+        stableId,
+        tag,
+        type: el.getAttribute('type'),
+        role: getRole(el),
+        label,
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        interactive: !isDisabled(el),
+    };
+}
+
 function isVisible(el: Element, rect: DOMRect): boolean {
     if (rect.width < 2 || rect.height < 2) return false;
 
@@ -382,6 +423,10 @@ export function extract(): ExtractedElement[] {
     if (elapsed > 10) {
         console.warn(`[dom] extraction took ${elapsed.toFixed(1)}ms (budget: 10ms)`);
     }
+
+    // #115: grounded (vision-bridged) elements continue the id sequence from
+    // the last extract() run so targetIds never collide across a grounding pass.
+    nextGroundedId = nextId;
 
     return results;
 }

@@ -38,7 +38,7 @@ export interface BoundingBox {
 }
 
 export interface VisionOptions {
-  task: 'object-detection' | 'ocr' | 'caption' | 'question-answering';
+  task: 'object-detection' | 'ocr' | 'caption' | 'question-answering' | 'grounding';
   query?: string;
   maxNewTokens?: number;
   temperature?: number;
@@ -281,7 +281,7 @@ class Florence2Pipeline {
   }
 
   async processImage(
-    image: HTMLCanvasElement | HTMLImageElement | string,
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string,
     options: VisionOptions
   ): Promise<VisionResult> {
     if (!this.initialized) {
@@ -312,6 +312,14 @@ class Florence2Pipeline {
       switch (options.task) {
         case 'object-detection':
           result = await this.runObjectDetection(image, options.query);
+          break;
+        case 'grounding':
+          // #115: Florence-2 phrase grounding (<PG>) - "find: search box, button,
+          // menu". Unlike COCO object-detection (<OD> finds cars/people/objects),
+          // phrase grounding finds NAMED UI widgets by their label. Runs in the
+          // offscreen module worker (#142), where the image processor decodes the
+          // blob/bitmap so boxes scale by the real pixel size.
+          result = await this.runGrounding(image, options.query || 'find: button, link, input box, text field, tab');
           break;
         case 'ocr':
           result = await this.runOCR(image);
@@ -353,7 +361,7 @@ class Florence2Pipeline {
   /** One Florence call: task prefix (+ optional query) -> raw text -> parsed.
    *  Mirrors the official onnx-community model-card recipe. */
   private async runTask(
-    image: HTMLCanvasElement | HTMLImageElement | string,
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string,
     task: string,
     query?: string,
   ): Promise<unknown> {
@@ -368,19 +376,26 @@ class Florence2Pipeline {
     return this.processor.post_process_generation(generated_text, task, img.size);
   }
 
-  private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | string, query?: string): Promise<unknown> {
+  private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string, query?: string): Promise<unknown> {
     return this.runTask(image, '<OD>', query);
   }
 
-  private async runOCR(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
+  // #115: phrase grounding (<PG>) - the "find: button / search box / menu" task.
+  // Output post-processes to {labels, bboxes} exactly like <OD>, so the same
+  // extractBoxes path handles both.
+  private async runGrounding(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string, query?: string): Promise<unknown> {
+    return this.runTask(image, '<PG>', query);
+  }
+
+  private async runOCR(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string): Promise<unknown> {
     return this.runTask(image, '<OCR>');
   }
 
-  private async runCaption(image: HTMLCanvasElement | HTMLImageElement | string): Promise<unknown> {
+  private async runCaption(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string): Promise<unknown> {
     return this.runTask(image, '<CAP>');
   }
 
-  private async runVQA(image: HTMLCanvasElement | HTMLImageElement | string, question: string): Promise<unknown> {
+  private async runVQA(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string, question: string): Promise<unknown> {
     return this.runTask(image, '<VQA>', question);
   }
 
@@ -427,20 +442,35 @@ class Florence2Pipeline {
       return parsedBoxes;
     }
 
-    // Handle object with bboxes property
+    // Handle object with bboxes property.
+    // transformers.js 3.8.1 post_process_generation returns the parsed answer
+    // NESTED under the task key: { '<PG>': { labels, bboxes } } (and '<OD>'
+    // for object-detection). So `result.bboxes` is undefined - the real
+    // container is one level down. Find it whether or not it's nested.
     if (typeof result === 'object' && result !== null) {
       const obj = result as Record<string, unknown>;
-      if (Array.isArray(obj.bboxes)) {
-        const labels = obj.labels as string[] | undefined;
-        const scores = obj.scores as number[] | undefined;
-        return obj.bboxes.map((bbox: number[] | Record<string, number>, i: number) => ({
-          x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
-          y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
-          width: (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) - (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
-          height: (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) - (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
-          label: labels?.[i] || `Item ${i + 1}`,
-          score: scores?.[i] || 0.5,
-        }));
+      const hasBoxes = (v: unknown): v is Record<string, unknown> =>
+        typeof v === 'object' && v !== null && Array.isArray((v as Record<string, unknown>).bboxes);
+      const container: Record<string, unknown> | undefined = hasBoxes(obj)
+        ? obj
+        : Object.values(obj).find(hasBoxes);
+      if (container) {
+        const labels = container.labels as string[] | undefined;
+        const scores = container.scores as number[] | undefined;
+        return (container.bboxes as Array<number[] | Record<string, number>>).map(
+          (bbox, i) => ({
+            x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
+            y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
+            width:
+              (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) -
+              (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
+            height:
+              (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) -
+              (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
+            label: labels?.[i] || `Item ${i + 1}`,
+            score: scores?.[i] || 0.5,
+          })
+        );
       }
     }
 
@@ -478,6 +508,7 @@ class Florence2Pipeline {
   private mapTaskToResultType(task: string): VisionResult['type'] {
     switch (task) {
       case 'object-detection':
+      case 'grounding':
       case 'ocr':
         return 'GROUNDING';
       case 'caption':
