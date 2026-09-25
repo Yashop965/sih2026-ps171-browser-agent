@@ -14,6 +14,7 @@ import {
   TabOrchestrator,
   watchTickFires,
   clampWatchTrigger,
+  hostOfUrl,
   MIN_WATCH_POLL_MS,
   MAX_WATCHED_TABS,
   type TaskGraph,
@@ -124,6 +125,14 @@ describe('#144 watchTickFires — trigger policy', () => {
     expect(clampWatchTrigger({ pollMs: 60000 }).pollMs).toBe(60000);
     expect(clampWatchTrigger({ urlChange: true }).urlChange).toBe(true);
     expect(clampWatchTrigger({ urlChange: true, pollMs: 500 }).pollMs).toBe(MIN_WATCH_POLL_MS);
+  });
+
+  it('hostOfUrl extracts a lower-cased host; unparseable urls yield ""', () => {
+    expect(hostOfUrl('https://WEB.WhatsApp.COM/chat/1')).toBe('web.whatsapp.com');
+    expect(hostOfUrl('http://a.example:8080/x')).toBe('a.example');
+    expect(hostOfUrl('chrome://extensions/')).toBe('extensions'); // WHATWG: non-special host part
+    expect(hostOfUrl('')).toBe('');
+    expect(hostOfUrl('not a url at all')).toBe('');
   });
 });
 

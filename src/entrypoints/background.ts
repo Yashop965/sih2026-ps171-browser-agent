@@ -7,7 +7,7 @@ import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 import { loadProfile } from '../lib/userProfile';
 import { emptyHandoff, harvestToHandoff, mergeHandoff, rePerceiveHandoff, rePerceptionChanged, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
-import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS } from '../lib/tabOrchestrator';
+import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS, hostOfUrl } from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
 
 /**
@@ -164,23 +164,35 @@ export default defineBackground({
     let taskHandoff: TabHandoff = emptyHandoff();
     // #144 P3: passive "watch" of the source tabs a task has harvested from.
     // While the agent works on another tab, a source tab that CHANGES (url
-    // change via tabs.onUpdated, or a title change seen by the bounded poll)
-    // is re-perceived DOM-ONLY (HARVEST_FIELDS: no cursor, no click, no
-    // scroll, no LLM) and re-merged into the task handoff LABEL-KEYED
+    // change via tabs.onUpdated, or a url/title change seen by the bounded
+    // poll) is re-perceived DOM-ONLY (HARVEST_FIELDS: no cursor, no click,
+    // no scroll, no LLM) and re-merged into the task handoff LABEL-KEYED
     // (rePerceiveHandoff) - so a value the user edited on the compliance tab
     // while the agent works reaches the agent's NEXT token write. Cost
     // caps: <= MAX_WATCHED_TABS watched tabs, poll >= MIN_WATCH_POLL_MS,
     // no-op re-perceptions (nothing changed) are skipped silently.
-    let watchedSourceTabs: Set<number> = new Set();
-    let watchedTabSnapshot: Record<number, { url: string; title: string; lastPollAt: number }> = {};
+    //
+    // Cross-site guard (review of #148): each watch records the ORIGIN
+    // host at registration. A watched tab that navigates to a DIFFERENT
+    // host has left the source page - re-perceiving it would clobber the
+    // source's handoff tokens with a foreign page's colliding labels
+    // (e.g. "Name" exists on every site), so it is dropped from the watch
+    // set instead ("source gone": stop watching, keep the tokens).
+    let watchedSourceTabs: Map<
+      number,
+      {
+        originHost: string;
+        snapshot: { url: string; title: string };
+        lastReperceive?: Promise<void>;
+      }
+    > = new Map();
     let watcherPollTimer: ReturnType<typeof setInterval> | null = null;
-    const watcherUrlListener = (tabId: number, changeInfo: any): void => {
-      // Only the event path re-perceives immediately - but for watched tabs
-      // only; everything else is handled by the session manager above.
-      if (!watchedSourceTabs.has(tabId) || currentTargetTab?.tabId === tabId) return;
-      if (changeInfo?.url) void rePerceiveWatchedTab(tabId);
-    };
-    const rePerceiveWatchedTab = async (tabId: number): Promise<void> => {
+    // Teardown generation (review of #148): an in-flight poll tick that
+    // outlives a task reset must not merge the PREVIOUS task's source
+    // values into the new task's fresh handoff. Every await re-checks the
+    // generation it captured.
+    let watcherGeneration = 0;
+    const doRePerceiveWatchedTab = async (tabId: number, gen: number): Promise<void> => {
       // Never re-perceive the tab the agent is driving (it re-grounds that
       // tab actively per step; a passive harvest there would only add noise).
       if (currentTargetTab?.tabId === tabId) return;
@@ -188,9 +200,24 @@ export default defineBackground({
         async () => await browser.tabs.sendMessage(tabId, { type: 'HARVEST_FIELDS' }),
         (v: any) => v === undefined,
       );
+      if (gen !== watcherGeneration) return; // task boundary crossed mid-harvest
       let url = '';
-      try { url = (await browser.tabs.get(tabId)).url || ''; } catch { url = ''; }
+      let title = '';
+      try {
+        const t = await browser.tabs.get(tabId);
+        url = t?.url || '';
+        title = t?.title || '';
+      } catch { /* tab gone - snapshot update below is a no-op */ }
       if (!ok || !value?.fields?.length) return;
+      const watch = watchedSourceTabs.get(tabId);
+      if (!watch) return; // unwatched since the harvest (task reset, or the
+      // cross-site drop already ran) - a queued chain step must not merge
+      // a foreign page's fields into the handoff.
+      // Cross-site guard: the tab left the source host - stop watching.
+      if (watch.originHost && hostOfUrl(url) && hostOfUrl(url) !== watch.originHost) {
+        watchedSourceTabs.delete(tabId);
+        return;
+      }
       const before = taskHandoff;
       taskHandoff = rePerceiveHandoff(taskHandoff, value.fields, url);
       // PII-safe log: destination + count only - never labels or values
@@ -198,21 +225,42 @@ export default defineBackground({
       if (rePerceptionChanged(before, taskHandoff) && activeTask && activeTask.status !== 'idle') {
         activeTask.logs = [
           ...(activeTask.logs || []).slice(-4999),
-          `${new Date().toLocaleTimeString()}: ⏪ watched source tab changed - ${Object.keys(taskHandoff.values).length} handoff value(s) now current (passive, DOM-only)`,
+          `${new Date().toLocaleTimeString()}: ⏪ watched source tab changed - handoff refreshed (passive, DOM-only)`,
         ];
         broadcastProgress({ ...activeTask, lastUpdate: Date.now() });
       }
-      watchedTabSnapshot[tabId] = { url, title: '', lastPollAt: Date.now() };
+      // Refresh the poll baseline (url AND title - the event path
+      // historically stored title:'' which made every next poll tick see a
+      // diff and fire one redundant no-op re-perception per event).
+      const entry = watchedSourceTabs.get(tabId);
+      if (entry) entry.snapshot = { url, title };
+    };
+    const rePerceiveWatchedTab = (tabId: number): void => {
+      // Event path + poll path can both want a re-perception of the same
+      // tab (a url change WHILE a poll tick is mid-flight). Serialize per
+      // tab: each call chains onto the previous one, and both paths re-read
+      // the CURRENT taskHandoff at merge time - last-writer on the FRESHEST
+      // base, never a stale-base clobber (review of #148).
+      const gen = watcherGeneration;
+      const entry = watchedSourceTabs.get(tabId);
+      if (!entry) return;
+      const prev = entry.lastReperceive ?? Promise.resolve();
+      entry.lastReperceive = prev.then(() => doRePerceiveWatchedTab(tabId, gen));
+      void entry.lastReperceive.catch(() => {}); // harvests never throw; no unhandled rejection
     };
     const startWatcherPoll = (): void => {
       if (watcherPollTimer !== null) return;
-      // Bounded poll: one pass over the watched tabs per interval. The
-      // per-tab pollMs floor is clamped by the caller (design §5: >=15s).
+      // Bounded poll: one pass over the watched tabs per interval
+      // (design §5: >=15s floor). Per-tab title-diffing is the cost saver -
+      // a re-perception happens only when something actually moved.
       watcherPollTimer = setInterval(async () => {
+        const gen = watcherGeneration;
         if (!watchedSourceTabs.size) return;
-        for (const tabId of watchedSourceTabs) {
+        for (const tabId of [...watchedSourceTabs.keys()]) {
+          if (gen !== watcherGeneration) return; // task reset mid-tick
           if (currentTargetTab?.tabId === tabId) continue; // focus tab
-          const prev = watchedTabSnapshot[tabId];
+          const watch = watchedSourceTabs.get(tabId);
+          if (!watch) continue;
           let next: { url: string; title: string } | null = null;
           try {
             const t = await browser.tabs.get(tabId);
@@ -220,28 +268,52 @@ export default defineBackground({
           } catch {
             // tab closed - drop it from the watch set.
             watchedSourceTabs.delete(tabId);
-            delete watchedTabSnapshot[tabId];
             continue;
           }
-          const fired =
-            (prev && next && (next.url !== prev.url || next.title !== prev.title)) ||
-            !prev; // first sighting: baseline + perceive once
-          if (fired) await rePerceiveWatchedTab(tabId);
+          if (gen !== watcherGeneration) return; // task reset mid-tick
+          // Cross-site guard (poll view of the same rule as the event path).
+          if (watch.originHost && hostOfUrl(next.url) && hostOfUrl(next.url) !== watch.originHost) {
+            watchedSourceTabs.delete(tabId);
+            continue;
+          }
+          const fired = next.url !== watch.snapshot.url || next.title !== watch.snapshot.title;
+          if (fired) rePerceiveWatchedTab(tabId);
         }
       }, MIN_WATCH_POLL_MS);
     };
     const stopWatcherPoll = (): void => {
       if (watcherPollTimer !== null) { clearInterval(watcherPollTimer); watcherPollTimer = null; }
     };
-    const registerWatchedSource = (tabId: number): void => {
-      if (currentTargetTab?.tabId === tabId) return; // the driven tab re-grounds itself
+    // Event path into the serialised re-perception: a URL change on a
+    // watched SOURCE tab (tabs.onUpdated) queues a DOM-only re-perception.
+    // No-op when the tab isn't watched or IS the agent's focus tab.
+    const watcherUrlListener = (tabId: number, changeInfo: any): void => {
+      if (!watchedSourceTabs.has(tabId) || currentTargetTab?.tabId === tabId) return;
+      if (changeInfo?.url) rePerceiveWatchedTab(tabId);
+    };
+    /**
+     * Register a harvested source tab for passive watching. The guard skips
+     * the tab the agent is about to drive NEXT (the caller passes it) - the
+     * leaving tab IS registered (it just stopped being the target), so every
+     * source hop after the first is watched too. Records the origin host for
+     * the cross-site guard. Cost cap: the first MAX_WATCHED_TABS win.
+     */
+    const registerWatchedSource = async (tabId: number, nextTargetTabId?: number): Promise<void> => {
+      if (nextTargetTabId !== undefined && tabId === nextTargetTabId) return; // will be the focus tab
       if (watchedSourceTabs.size >= MAX_WATCHED_TABS && !watchedSourceTabs.has(tabId)) return; // cost cap
-      watchedSourceTabs.add(tabId);
+      let url = '';
+      let title = '';
+      try {
+        const t = await browser.tabs.get(tabId);
+        url = t?.url || '';
+        title = t?.title || '';
+      } catch { /* already closed - nothing to watch */ }
+      watchedSourceTabs.set(tabId, { originHost: hostOfUrl(url), snapshot: { url, title } });
       startWatcherPoll();
     };
     const resetPassiveWatch = (): void => {
-      watchedSourceTabs = new Set();
-      watchedTabSnapshot = {};
+      watcherGeneration += 1; // any in-flight tick/chain outlives this
+      watchedSourceTabs = new Map();
       stopWatcherPoll();
     };
     const resetCrossTabState = (): void => {
@@ -290,10 +362,6 @@ export default defineBackground({
         sourceUrl = '';
       }
       taskHandoff = mergeHandoff(taskHandoff, harvestToHandoff(value.fields, sourceUrl));
-      // #144 P3: a tab the task has READ from becomes a passive watch target
-      // while the agent works elsewhere - a later change on it re-perceives
-      // the handoff (label-keyed) without driving that tab at all.
-      registerWatchedSource(tabId);
     };
 
     // The runner's open-tab provider: live web tabs of the task's window,
@@ -387,6 +455,14 @@ export default defineBackground({
           await browser.tabs.update(next, { active: true });
           const target = await browser.tabs.get(next);
           currentTargetTab = { tabId: next, windowId: target?.windowId ?? 0 };
+          // #144 P3: watch the LEAVING tab passively (registered AFTER the
+          // target repoint - so the leaving tab, which was just the focus
+          // tab, is a valid watch target, and a no-op hop (from === next)
+          // never watches the tab the agent is about to drive). A later
+          // change on it re-perceives the handoff without driving it.
+          if (from !== undefined && from !== next) {
+            await registerWatchedSource(from, next);
+          }
           // #141: track the tab's own session - SessionManager was built for
           // multi-site tasks; the runner's task session (tabId -1) stays the
           // loop's budget owner, these are the per-tab views. Update the
@@ -957,7 +1033,6 @@ export default defineBackground({
     browser.tabs.onRemoved.addListener((tabId) => {
       // #144 P3: drop a closed tab from the passive watch set.
       watchedSourceTabs.delete(tabId);
-      delete watchedTabSnapshot[tabId];
       // Find and mark session as completed
       for (const session of sessionManager.getActiveSessions()) {
         if (session.tabId === tabId) {

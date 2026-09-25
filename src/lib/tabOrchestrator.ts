@@ -124,10 +124,26 @@ export interface TabOrchestratorDeps {
 
 // ─── Watch trigger policy (pure, tested separately) ────────────────────────
 
-/** Bounded poll floor — watcher cost cap (design §5: poll ≥15s). */
+/** Bounded poll floor - watcher cost cap (design §5: poll ≥15s). */
 export const MIN_WATCH_POLL_MS = 15_000;
 /** Bounded watcher count cap (design §5: ≤3 watched tabs). */
 export const MAX_WATCHED_TABS = 3;
+
+/**
+ * The host a URL points at, lower-cased - '' when unparseable (chrome://,
+ * empty, relative). The P3 cross-site guard keys off this: a watched source
+ * tab that navigates to a DIFFERENT host has left the source page, so
+ * re-perceiving it would clobber the source's handoff tokens with a foreign
+ * page's colliding labels (e.g. "Name" exists on every site). Cross-host
+ * navigation = "source gone": stop watching, keep the tokens.
+ */
+export function hostOfUrl(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
 
 export interface TabSnapshot {
   url?: string;
