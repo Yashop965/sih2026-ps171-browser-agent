@@ -168,3 +168,99 @@ export function resolveHandoffValue(
   if (value === undefined || !isHandoffToken(value) || !h) return undefined;
   return h.values[value.trim()];
 }
+
+// ─── #144 P3: passive re-perception of a watched source tab ─────────────────
+
+/** Normalise a field label for cross-perception matching (case-insensitive). */
+export function labelKey(label: string | undefined | null): string {
+  return (label ?? '').trim().toLowerCase();
+}
+
+/**
+ * #144 P3: re-perceive a watched source tab into an existing handoff.
+ *
+ * P1's mergeHandoff dedupes by VALUE (first-wins) - right for additive
+ * multi-source tasks, wrong for "same label, value changed" (the user edits
+ * a compliance field while the agent works elsewhere). Re-perception keys by
+ * LABEL:
+ *   - a stable label with a NEW value updates that token's value (the page
+ *     is authoritative);
+ *   - a label no longer on the page keeps its token (the sink may still
+ *     reference it; the value just stops being re-asserted);
+ *   - a new label mints a new token, continuing the base's numbering.
+ * Pure: returns a fresh handoff; extractedAt/sourceUrl advance only when
+ * something actually changed (a no-op re-perception is detectable and the
+ * watcher skips its notification).
+ */
+export function rePerceiveHandoff(
+  base: TabHandoff,
+  fields: HarvestedField[],
+  sourceUrl: string,
+): TabHandoff {
+  const values: Record<string, string> = { ...base.values };
+  const labels: Record<string, string> = { ...base.labels };
+  // label key -> token (first token wins when two labels normalise alike).
+  const labelToToken = new Map<string, string>();
+  for (const [token, label] of Object.entries(base.labels)) {
+    const key = labelKey(label);
+    if (key && !labelToToken.has(key)) labelToToken.set(key, token);
+  }
+  let nextIndex = Object.keys(values).length;
+  let changed = false;
+  for (const f of fields) {
+    const value = (f.value ?? '').trim();
+    if (!value) continue;
+    const key = labelKey(f.label);
+    const existing = key ? labelToToken.get(key) : undefined;
+    if (existing) {
+      if (values[existing] !== value) {
+        values[existing] = value; // refreshed under the stable label
+        labels[existing] = (f.label ?? '').trim() || labels[existing];
+        changed = true;
+      }
+      continue;
+    }
+    const token = fieldToken(nextIndex);
+    values[token] = value;
+    labels[token] = (f.label ?? '').trim() || `field ${nextIndex + 1}`;
+    labelToToken.set(key, token);
+    nextIndex += 1;
+    changed = true;
+    if (nextIndex >= MAX_HANDOFF_FIELDS) break;
+  }
+  return {
+    values,
+    labels,
+    extractedAt: changed ? Date.now() : base.extractedAt,
+    sourceUrl: changed ? (base.sourceUrl ? `${base.sourceUrl} \u2192 ${sourceUrl}` : sourceUrl) : base.sourceUrl,
+  };
+}
+
+/**
+ * Did a re-perception actually change anything? The watcher uses this to
+ * skip pointless notifications when a triggered re-perception is a no-op
+ * (e.g. tabs.onUpdated fired on a favicon-only reload).
+ */
+export function rePerceptionChanged(before: TabHandoff, after: TabHandoff): boolean {
+  if (before.extractedAt !== after.extractedAt) return true;
+  const bv = before.values, av = after.values;
+  for (const token of Object.keys(av)) {
+    if (bv[token] !== av[token]) return true;
+  }
+  return false;
+}
+
+/**
+ * Apply a re-perception to a live handoff object IN PLACE (identity-stable).
+ * `rePerceiveHandoff` returns a fresh object; this copies its fields onto
+ * the shared handoff so every in-flight subtask that read the same
+ * reference sees the updated values WITHOUT re-seeding it. Returns the same
+ * (mutated) handoff for convenience.
+ */
+export function refreshHandoffInPlace(target: TabHandoff, fresh: TabHandoff): TabHandoff {
+  target.values = fresh.values;
+  target.labels = fresh.labels;
+  target.extractedAt = fresh.extractedAt;
+  target.sourceUrl = fresh.sourceUrl;
+  return target;
+}
