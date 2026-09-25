@@ -9,6 +9,7 @@ import { loadProfile } from '../lib/userProfile';
 import { emptyHandoff, harvestToHandoff, mergeHandoff, rePerceiveHandoff, rePerceptionChanged, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
 import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS, hostOfUrl } from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
+import { vlmHostOcr, vlmHostStatus, closeVlmHost } from '../lib/vlmHost';
 
 /**
  * Background Service Worker
@@ -589,37 +590,54 @@ export default defineBackground({
     };
 
     // #100 optional confirm: OCR the visible screen on-device and match the
-    // open goals. Screenshot stays local (SW capture -> content Florence-2
-    // OCR -> text back); only the OCR string moves, never the pixels. Any
-    // failure returns null so the runner falls back to the deterministic
-    // backstop loop - this can't make a task worse.
+    // open goals. Screenshot stays local (SW capture -> offscreen-host
+    // worker OCR -> text back; #142); only the OCR string moves, never the
+    // pixels. Any failure returns null so the runner falls back to the
+    // deterministic backstop loop - this can't make a task worse.
     const confirmGoal = async (input: {
       url: string;
       title: string;
       openItems: ChecklistItem[];
     }): Promise<{ confirmed: boolean; detail?: string; unavailableReason?: string } | null> => {
+      // #142: the on-device VLM now lives in the offscreen host (dedicated
+      // module worker) - the old content-script isolated-world pipeline
+      // could never load its ORT backend. The SW captures the focused tab
+      // (pixels stay on-device) and asks the host for OCR text; only the
+      // text + a pure status cross back. Any failure -> null (or the
+      // "unavailable" verdict) so the deterministic backstop carries on -
+      // this can't make a task worse.
       try {
         const tabId = await driveTab();
         if (tabId === undefined) return null;
-        const { ok, value } = await withPortRetry(
-          async () => await browser.tabs.sendMessage(tabId, { type: 'VISION_OCR' }),
-          (v: any) => v === undefined,
-        );
-        if (!ok || !value) {
-          // No answer from the content script (chrome:// page, script not
-          // injected, …) - unavailable, and the runner should say so once.
-          return { confirmed: false, detail: 'unavailable', unavailableReason: 'content script unreachable' };
+        let dataUrl = '';
+        try {
+          const t = await browser.tabs.get(tabId);
+          dataUrl = await browser.tabs.captureVisibleTab(t?.windowId);
+        } catch {
+          return { confirmed: false, detail: 'unavailable', unavailableReason: 'capture failed' };
         }
-        if (!value.ok) {
-          // "empty ocr" means the model RAN and read nothing - a verdict
-          // (goal not on screen), not an availability failure.
-          const err = String(value.error ?? 'model unavailable');
-          if (err === 'empty ocr') {
+        // The first run downloads the ~150MB q4 model and compiles the WASM
+        // fallback - minutes, far past the MV3 idle window. Hold the SW warm
+        // for the whole OCR call (same keepalive VISION_EXTRACT uses).
+        beginLongOp();
+        let res: { ok: boolean; text?: string; status?: unknown; error?: string };
+        try {
+          res = await vlmHostOcr(dataUrl, 300_000);
+        } finally {
+          endLongOp();
+        }
+        if (!res.ok) {
+          if (res.error === 'empty ocr') {
+            // The model RAN and read nothing - a verdict, not an availability
+            // failure (matches the pre-#142 content-script semantics).
             return { confirmed: false, detail: 'OCR returned no text' };
           }
-          return { confirmed: false, detail: 'unavailable', unavailableReason: err };
+          return { confirmed: false, detail: 'unavailable', unavailableReason: res.error || 'vlm host failed' };
         }
-        const ocrText: string = value.text ?? '';
+        const ocrText: string = res.text ?? '';
+        if (!ocrText) {
+          return { confirmed: false, detail: 'OCR returned no text' };
+        }
         const items: VisionConfirmItem[] = input.openItems.map((i) => ({
           id: i.id,
           description: i.description,
@@ -722,9 +740,16 @@ export default defineBackground({
           // source tab edited while the user reads the gate card is still
           // tracked - re-perception into the shared handoff is harmless).
           resetPassiveWatch();
+          // #142/#149 review: the run is done with the model - close the
+          // offscreen host so the 907KB worker + ~150MB model are reaped.
+          // The next task/OCR re-creates it lazily (ensureVlmHost), and a
+          // gate pause keeps it open (run() still pending). Closing is a
+          // no-op if the doc was never created.
+          void closeVlmHost();
         })
         .catch((e) => {
           resetPassiveWatch();
+          void closeVlmHost();
           console.error('[agent-runner] unhandled loop error:', e);
           broadcastProgress({
             ...emptyTaskState(),
@@ -773,6 +798,38 @@ export default defineBackground({
               sendResponse({ ok: false, error: String(e) });
             } finally {
               endLongOp();
+            }
+          })();
+          return true;
+
+        case 'VLM_STATUS':
+        case 'VLM_OCR':
+          // #142: popup-facing VLM access. The on-device pipeline lives in
+          // the offscreen host (dedicated module worker), NOT in the content
+          // script's isolated world - that context can never import() the
+          // ORT backend module. STATUS returns the pure VisionStatus (state +
+          // backend + last-OCR outcome; no pixels, no PII). OCR captures the
+          // active tab and returns text only.
+          (async () => {
+            try {
+              if (message.type === 'VLM_STATUS') {
+                // #149 review: vlmHostStatus NEVER creates the host - when
+                // the doc is closed it reports {state:'idle'} instead of
+                // allocating the 150MB-model host on a mere popup poll.
+                const status = await vlmHostStatus();
+                sendResponse({ ok: true, status });
+                return;
+              }
+              // VLM_OCR
+              const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+              if (activeTab?.id === undefined) { sendResponse({ ok: false, error: 'No active tab' }); return; }
+              const dataUrl = await browser.tabs.captureVisibleTab(activeTab.windowId);
+              beginLongOp();
+              let res;
+              try { res = await vlmHostOcr(dataUrl, 300_000); } finally { endLongOp(); }
+              sendResponse(res);
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e) });
             }
           })();
           return true;

@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <!--
+      #142: VLM offscreen document.
+
+      This blank extension page exists for ONE purpose: own a dedicated
+      module worker that hosts the on-device Florence-2 pipeline. The service
+      worker cannot spawn it (`Worker is not defined` on the SW scope -
+      probed in #113), and the content-script isolated world cannot
+      `import()` the onnxruntime-web loader module (the "no available
+      backend found" root cause). An extension page can do both, so the
+      heavy pipeline runs in `new Worker(vlm-host-worker.js, {type:'module'})`
+      and this page only relays messages.
+
+      PII boundary (unchanged from the #100 "screenshot stays local"
+      design): the SW captures the visible tab and posts the data-URL in;
+      only OCR TEXT + detection boxes + a pure status object come back.
+      Pixels never enter the page DOM (this body is intentionally empty)
+      and never reach the LLM.
+
+      The relay is an EXTERNAL classic script (MV3 CSP `script-src 'self'`
+      forbids inline scripts in offscreen documents). It ships verbatim
+      from src/public/vlm/ to the dist root as `vlm/vlm-host-relay.js`
+      (public assets are never bundled, so the file is CSP-safe). The
+      worker bundle (vlm-host-worker.js - IIFE with @huggingface/
+      transformers inlined by WXT) is a root-level resource.
+    -->
+    <script src="vlm/vlm-host-relay.js"></script>
+  </body>
+</html>

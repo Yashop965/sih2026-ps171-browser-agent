@@ -11,6 +11,24 @@ export default defineConfig({
       'storage',
       'scripting',
       'alarms',
+      // #142: the offscreen document that owns the dedicated module worker
+      // hosting the on-device VLM (Florence-2). The worker + ORT runtime
+      // live there because neither the SW scope (no new Worker) nor the
+      // content-script isolated world (no import() of module URLs) can.
+      'offscreen',
+    ],
+    // #141: expose the bundled onnxruntime-web loader + jsep .wasm to the
+    // content script so transformers.js can `import()` the ORT runtime from
+    // the extension's own origin (same-origin = CSP-clean, no jsdelivr).
+    // Without this, the content script's dynamic module import of a
+    // chrome-extension:// URL is refused -> "Failed to fetch dynamically
+    // imported module" -> "no available backend found" and the on-device
+    // VLM never loads.
+    web_accessible_resources: [
+      {
+        resources: ['vlm/ort/*'],
+        matches: ['*://*/*', 'file://*'],
+      },
     ],
     host_permissions: [
       'http://localhost:8000/*',

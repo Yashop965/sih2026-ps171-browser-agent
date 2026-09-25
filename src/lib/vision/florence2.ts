@@ -200,6 +200,42 @@ class Florence2Pipeline {
         env.useBrowserCache = true;
         env.logLevel = 'error';
 
+        // #141: load the onnxruntime-web runtime from the EXTENSION's own
+        // origin instead of the jsdelivr CDN. The content script's MV3 CSP is
+        // `script-src 'self'`, so a cross-origin dynamic `import()` of
+        // https://cdn.jsdelivr.net/.../ort-wasm-simd-threaded.jsep.mjs is
+        // blocked -> onnxruntime-web's backend init fails with
+        // "no available backend found" and the WebGPU + WASM fallbacks both
+        // die. Pointing wasmPaths at a same-origin chrome-extension:// URL
+        // (public/vlm/ort/ copied into the dist root by WXT) makes the
+        // import() same-origin and legal, so the ORT runtime + the 21MB
+        // jsep .wasm both load from inside the extension. Set BEFORE the
+        // first from_pretrained so transformers.js's lazy CDN-defaulting
+        // (which only fires when wasmPaths is unset) does not overwrite us.
+        try {
+          const g: any = globalThis;
+          const extApi: any = g.browser ?? g.chrome;
+          const baseUrl = extApi?.runtime?.getURL
+            ? extApi.runtime.getURL('vlm/ort/')
+            : undefined;
+          if (baseUrl) {
+            const ortWasm: any = (env as any).backends?.onnx?.wasm;
+            if (ortWasm) {
+              // `mjs` overrides the loader module transformers.js dynamically
+              // imports (the CSP-blocked one); `wasm` is where ORT fetches the
+              // jsep .wasm binary. Both ship inside the extension.
+              ortWasm.wasmPaths = {
+                mjs: `${baseUrl}ort-wasm-simd-threaded.jsep.mjs`,
+                wasm: `${baseUrl}ort-wasm-simd-threaded.jsep.wasm`,
+              };
+            }
+          }
+        } catch {
+          // If env.backends.onnx isn't shaped as expected, leave the
+          // transformers.js default in place — a load failure is still
+          // honestly reported by status() via lastLoadError.
+        }
+
         try {
           // v3.8.1 has NO pipeline task wired to AutoModelForImageTextToText,
           // so pipeline('image-to-text', ...) can never resolve florence2
