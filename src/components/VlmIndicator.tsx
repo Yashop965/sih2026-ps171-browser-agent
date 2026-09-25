@@ -100,7 +100,7 @@ export default function VlmIndicator() {
       <>
         <span style={dot('var(--text-muted)')}></span>
         <span>VLM</span>
-        <span style={{ opacity: 0.7 }}>no tab detected (open a page to monitor)</span>
+        <span style={{ opacity: 0.7 }}>host unreachable</span>
       </>
     );
   } else if (!st || st.state === 'unknown') {
@@ -162,6 +162,9 @@ export default function VlmIndicator() {
         );
         break;
       default:
+        // #142/#149: the host closes after each run ends, so 'idle' now
+        // usually means "model not loaded right now" - not that no tab was
+        // detected.
         content = (
           <>
             <span style={dot('var(--text-muted)')}></span>

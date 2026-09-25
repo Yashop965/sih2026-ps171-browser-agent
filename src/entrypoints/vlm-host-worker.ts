@@ -54,34 +54,30 @@ const TASK_MAP: Record<string, VisionOptions['task']> = {
   VQA: 'question-answering',
 };
 
-/**
- * Decode a data-URL screenshot into an ImageBitmap. Workers have no
- * `Image`/`canvas`, but `fetch` + `createImageBitmap` cover PNG decoding in
- * the worker context (both are same-origin / data-URL capable).
- */
-async function decodeImageDataUrl(dataUrl: string): Promise<ImageBitmap | string> {
-  if (!dataUrl) return '';
-  try {
-    const blob = await (await fetch(dataUrl)).blob();
-    return await createImageBitmap(blob);
-  } catch {
-    // Fall back to handing the raw data-URL to the pipeline (transformers.js
-    // decodes data URLs itself in a worker env).
-    return dataUrl;
-  }
-}
-
 export default defineUnlistedScript(() => {
   const selfRef = self as unknown as {
     onmessage: ((e: MessageEvent) => void) | null;
     postMessage: (m: VlmResponse) => void;
   };
 
+  // #149 review: serialize inference. The shared model is NOT
+  // concurrent-safe (a SW timeout + retry can overlap two runs), so a
+  // second work request while one is in flight is answered {busy} - the
+  // SW treats that as unavailable and the deterministic backstop carries
+  // on; the next check runs cleanly.
+  let busy = false;
+
   selfRef.onmessage = async (ev: MessageEvent) => {
     const req = ev.data as VlmRequest;
     const reply = (r: Omit<VlmResponse, 'id'>): void => {
       selfRef.postMessage({ id: req.id, ...r });
     };
+    const isWork = req.type === 'OCR' || req.type === 'DETECT' || req.type === 'CAPTION' || req.type === 'VQA';
+    if (isWork && busy) {
+      reply({ ok: false, error: 'busy', status: visionPipeline.status() });
+      return;
+    }
+    if (isWork) busy = true;
     try {
       switch (req.type) {
         case 'INIT': {
@@ -94,13 +90,16 @@ export default defineUnlistedScript(() => {
         case 'CAPTION':
         case 'VQA': {
           if (!visionPipeline.isInitialized()) await visionPipeline.initialize();
-          const image = req.dataUrl ? await decodeImageDataUrl(req.dataUrl) : '';
-          if (!image) {
-            visionPipeline.recordOcr(false, 'no image');
+          // #149 review: pass the data-URL STRING straight to the pipeline.
+          // transformers.js's browser AutoProcessor decodes data URLs itself
+          // (the documented path); a createImageBitmap detour was unverified
+          // and added no value.
+          if (!req.dataUrl) {
+            if (req.type === 'OCR') visionPipeline.recordOcr(false, 'no image');
             reply({ ok: false, error: 'no image', status: visionPipeline.status() });
             break;
           }
-          const res = await visionPipeline.processImage(image as never, {
+          const res = await visionPipeline.processImage(req.dataUrl, {
             task: TASK_MAP[req.type],
             query: req.query,
           });
@@ -128,8 +127,12 @@ export default defineUnlistedScript(() => {
         }
       }
     } catch (e) {
-      visionPipeline.recordOcr(false, String(e));
+      // #149 review: recordOcr is the OCR-specific indicator; other tasks'
+      // failures must not skew the "last OCR" the pill shows.
+      if (req.type === 'OCR') visionPipeline.recordOcr(false, String(e));
       reply({ ok: false, error: String(e), status: visionPipeline.status() });
+    } finally {
+      if (isWork) busy = false;
     }
   };
 });

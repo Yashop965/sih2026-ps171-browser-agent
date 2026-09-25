@@ -52,7 +52,16 @@
 
   const callWorker = (payload, timeoutMs) =>
     new Promise((resolve) => {
-      const w = getWorker();
+      let w;
+      try {
+        w = getWorker();
+      } catch (e) {
+        // Worker constructor threw (CSP refusal, missing file): fail
+        // FAST and honest instead of waiting out the full timeout with
+        // a generic "vlm host timeout" (review of #149).
+        resolve({ ok: false, error: 'vlm worker spawn failed: ' + e.message });
+        return;
+      }
       const id = ++seq;
       const timer = setTimeout(() => {
         pending.delete(id);
@@ -64,6 +73,13 @@
 
   // Message protocol (SW -> offscreen doc). Replies are the worker's
   // VlmResponse: {ok, text?, boxes?, status?, error?}.
+  //
+  // Timeouts come from the SW over the wire (msg.timeoutMs): the relay's
+  // timer is set to SW-budget - 1s by the SW (vlmHost.ts), so the relay
+  // pre-empts and replies {ok:false,'vlm host timeout'} instead of the SW
+  // call dying raw. Fixed 120s per-task values were wrong for the cold
+  // first run (model download runs minutes) - the SW owns the budget
+  // (review of #149).
   ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
     let p;
@@ -71,32 +87,32 @@
     switch (msg.type) {
       case 'VLM_HOST_INIT':
         p = { type: 'INIT' };
-        t = 300_000; // first run downloads the ~150MB q4 model
+        t = msg.timeoutMs ?? 300_000;
         break;
       case 'VLM_HOST_OCR':
         p = { type: 'OCR', dataUrl: msg.dataUrl };
-        t = 120_000;
+        t = msg.timeoutMs ?? 300_000;
         break;
       case 'VLM_HOST_DETECT':
         p = { type: 'DETECT', dataUrl: msg.dataUrl, query: msg.query };
-        t = 120_000;
+        t = msg.timeoutMs ?? 300_000;
         break;
       case 'VLM_HOST_CAPTION':
         p = { type: 'CAPTION', dataUrl: msg.dataUrl };
-        t = 120_000;
+        t = msg.timeoutMs ?? 300_000;
         break;
       case 'VLM_HOST_VQA':
         p = { type: 'VQA', dataUrl: msg.dataUrl, query: msg.query };
-        t = 120_000;
+        t = msg.timeoutMs ?? 300_000;
         break;
       case 'VLM_HOST_STATUS':
         p = { type: 'STATUS' };
-        t = 10_000;
+        t = msg.timeoutMs ?? 15_000;
         break;
       default:
         return; // not ours
     }
     callWorker(p, t).then(sendResponse);
-    return true; // hold the async sendResponse channel open
+    return true; // hold the async sendResponse channel open (MV3 contract)
   });
 })();

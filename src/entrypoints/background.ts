@@ -9,7 +9,7 @@ import { loadProfile } from '../lib/userProfile';
 import { emptyHandoff, harvestToHandoff, mergeHandoff, rePerceiveHandoff, rePerceptionChanged, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
 import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS, hostOfUrl } from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
-import { vlmHostOcr, vlmHostStatus } from '../lib/vlmHost';
+import { vlmHostOcr, vlmHostStatus, closeVlmHost } from '../lib/vlmHost';
 
 /**
  * Background Service Worker
@@ -590,10 +590,10 @@ export default defineBackground({
     };
 
     // #100 optional confirm: OCR the visible screen on-device and match the
-    // open goals. Screenshot stays local (SW capture -> content Florence-2
-    // OCR -> text back); only the OCR string moves, never the pixels. Any
-    // failure returns null so the runner falls back to the deterministic
-    // backstop loop - this can't make a task worse.
+    // open goals. Screenshot stays local (SW capture -> offscreen-host
+    // worker OCR -> text back; #142); only the OCR string moves, never the
+    // pixels. Any failure returns null so the runner falls back to the
+    // deterministic backstop loop - this can't make a task worse.
     const confirmGoal = async (input: {
       url: string;
       title: string;
@@ -740,9 +740,16 @@ export default defineBackground({
           // source tab edited while the user reads the gate card is still
           // tracked - re-perception into the shared handoff is harmless).
           resetPassiveWatch();
+          // #142/#149 review: the run is done with the model - close the
+          // offscreen host so the 907KB worker + ~150MB model are reaped.
+          // The next task/OCR re-creates it lazily (ensureVlmHost), and a
+          // gate pause keeps it open (run() still pending). Closing is a
+          // no-op if the doc was never created.
+          void closeVlmHost();
         })
         .catch((e) => {
           resetPassiveWatch();
+          void closeVlmHost();
           console.error('[agent-runner] unhandled loop error:', e);
           broadcastProgress({
             ...emptyTaskState(),
@@ -806,8 +813,11 @@ export default defineBackground({
           (async () => {
             try {
               if (message.type === 'VLM_STATUS') {
+                // #149 review: vlmHostStatus NEVER creates the host - when
+                // the doc is closed it reports {state:'idle'} instead of
+                // allocating the 150MB-model host on a mere popup poll.
                 const status = await vlmHostStatus();
-                sendResponse({ ok: status !== null, status: status ?? undefined, error: status ? undefined : 'vlm host unreachable' });
+                sendResponse({ ok: true, status });
                 return;
               }
               // VLM_OCR
