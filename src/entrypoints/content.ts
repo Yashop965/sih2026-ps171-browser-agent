@@ -1,8 +1,9 @@
 import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
-import { extract, getPageContext, maskLabel } from '../lib/dom';
+import { extract, getPageContext, maskLabel, registerGroundedElement, getElementById } from '../lib/dom';
 import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/actions';
 import { visionPipeline } from '../lib/vision/florence2';
+import { bridgeGroundBoxes, type GroundBox } from '../lib/visionGround';
 import { startThinkingPulse, stopThinkingPulse } from '../lib/agentCursor';
 
 /**
@@ -26,7 +27,8 @@ type AgentRequest =
     | { type: 'VISION_OCR' } // #100: on-device OCR confirm
     | { type: 'CURSOR_THINKING'; on: boolean } // #132: agent-cursor breathing while the planner LLM is thinking
     | { type: 'VISION_STATUS' } // #136: on-device VLM live-indicator status
-    | { type: 'HARVEST_FIELDS' }; // #141: label/value pairs from this tab for cross-tab handoff
+    | { type: 'HARVEST_FIELDS' } // #141: label/value pairs from this tab for cross-tab handoff
+    | { type: 'VISION_GROUND'; boxes: GroundBox[]; query?: string }; // #115: bridge Florence-2 boxes -> DOM nodes
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
     if (typeof msg !== 'object' || msg === null || !('type' in msg)) return false;
@@ -34,7 +36,7 @@ function isAgentRequest(msg: unknown): msg is AgentRequest {
     return t === 'EXTRACT' || t === 'EXECUTE' || t === 'PING'
         || t === 'capturePage' || t === 'HIGHLIGHT' || t === 'VISION_EXTRACT'
         || t === 'VISION_OCR' || t === 'CURSOR_THINKING' || t === 'VISION_STATUS'
-        || t === 'HARVEST_FIELDS';
+        || t === 'HARVEST_FIELDS' || t === 'VISION_GROUND';
 }
 
 const HIGHLIGHT_ID = '__agent-highlight';
@@ -478,6 +480,31 @@ export default defineContentScript({
                 // handoff. Best-effort, capped; the SW turns them into
                 // <FIELD_N> tokens. A chrome:// or broken page yields [].
                 return Promise.resolve({ ok: true, fields: harvestFields() });
+            }
+
+            if (message.type === 'VISION_GROUND') {
+                // #115: bridge the offscreen host's Florence-2 grounding boxes
+                // (screenshot-pixel coords) back to real DOM nodes so the
+                // executor can act on them by targetId. This is the PII-safe
+                // half of the near-empty-DOM fallback: pixels stayed in the
+                // offscreen worker; only box coords + label text cross here,
+                // and labels are masked through registerGroundedElement()
+                // exactly like a DOM label would be.
+                const domRecords = extract(); // (re)populate the node registry
+                const existingNodes: Element[] = domRecords
+                    .map((r) => getElementById(r.id))
+                    .filter((n): n is Element => !!n);
+                const dpr = window.devicePixelRatio || 1;
+                const bridged = bridgeGroundBoxes(document, message.boxes ?? [], dpr, existingNodes);
+                const elements = bridged
+                    .map((b) => registerGroundedElement(b.el, b.label))
+                    .filter((e): e is NonNullable<typeof e> => !!e);
+                return Promise.resolve({
+                    ok: true,
+                    elements,
+                    grounded: elements.length,
+                    boxes: message.boxes?.length ?? 0,
+                });
             }
 
             return;

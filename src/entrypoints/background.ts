@@ -9,7 +9,8 @@ import { loadProfile } from '../lib/userProfile';
 import { emptyHandoff, harvestToHandoff, mergeHandoff, rePerceiveHandoff, rePerceptionChanged, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
 import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS, hostOfUrl } from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
-import { vlmHostOcr, vlmHostStatus, closeVlmHost } from '../lib/vlmHost';
+import { vlmHostOcr, vlmHostStatus, closeVlmHost, vlmHostGround } from '../lib/vlmHost';
+import { groundQueryForContext } from '../lib/visionGround';
 
 /**
  * Background Service Worker
@@ -90,6 +91,10 @@ export default defineBackground({
     let activeTask: AgentTaskState = emptyTaskState();
     let stopFlag = { stopped: false };
     let abortController = new AbortController();
+    // #115: the current task text, for specializing the VLM grounding query.
+    // Cleared between runs; when empty, grounding falls back to the generic
+    // widget list. Planner-visible text only - not new PII.
+    let currentTaskText = '';
     // #143 P2: resolves the runner's outbound-gate pause when the popup's
     // CONFIRM / DISMISS / STOP reaches the SW. At most one gate pause is in
     // flight at a time (the loop is serial), so a single resolver is enough.
@@ -407,17 +412,122 @@ export default defineBackground({
       for (const pii of snapshot.detectedPII || []) {
         privacyLedger.log({
           timestamp: Date.now(), tabId, url: snapshot.url || '', type: pii.type || 'PII',
-          selector: pii.selector || '', confidence: pii.confidence || 1,
+          selector: pii.selector || '', confidence: pii.confidence ?? 1,
           verified: Boolean(pii.isVerified), action: 'DETECTED',
         });
       }
+      let elements: any[] = snapshot.interactiveElements || [];
+      const url: string = snapshot.url || '';
+
+      // #115: VLM grounding fallback. DOM extraction stays the source of
+      // truth (fast, exact labels, PII-safe, actionable by targetId). But on
+      // canvas UIs, heavy JS widgets, shadow-DOM, and near-empty pages
+      // (0-2 interactive elements) it's weak, so fire Florence-2 phrase
+      // grounding in the offscreen host and bridge its boxes back to real DOM
+      // nodes via the content script's document.elementFromPoint. Only box
+      // coords + label text cross the boundary; pixels stay on-device.
+      // Best-effort: any failure degrades to the DOM-only set (the
+      // deterministic backstop carries on - can't make a task worse).
+      if (elements.length <= 2 && currentTaskText) {
+        elements = await vlmGroundingFallback(tabId, url, elements);
+      }
+
       return {
         ok: true,
-        elements: snapshot.interactiveElements || [],
+        elements,
         context: snapshot.context,
-        url: snapshot.url || '',
+        url,
         title: snapshot.title || '',
       };
+    };
+
+    // #115: the VLM grounding fallback for near-empty DOM pages. Captures the
+    // tab (pixels stay on-device), asks the offscreen host for Florence-2
+    // phrase grounding boxes, and hands them to the target tab's content
+    // script to resolve to actionable DOM nodes (VISION_GROUND). Per-URL
+    // memo so the runner's 0-element retry loop doesn't re-pay a 2-5s model
+    // call on the unchanged page. Returns the DOM-only set on ANY failure.
+    let lastGroundedUrl = '';
+    let lastGroundedAt = 0;
+    let lastGroundedBoxes: any[] = [];
+    const GROUNDING_MEMO_MS = 30_000;
+
+    // Bridge already-cached grounding boxes to FRESH DOM nodes (no model
+    // call). Called on a per-URL memo hit so grounded controls persist across
+    // consecutive steps on the same page - otherwise the runner's same-URL
+    // re-extracts would return DOM-only and the fallback would be a one-shot.
+    const bridgeCachedBoxes = async (tabId: number, domElements: any[]): Promise<any[]> => {
+      if (!lastGroundedBoxes.length) return domElements;
+      const { ok: gOk, value: gRes } = await withPortRetry(
+        async () =>
+          await browser.tabs.sendMessage(tabId, {
+            type: 'VISION_GROUND',
+            boxes: lastGroundedBoxes,
+          }),
+        (v: any) => v === undefined,
+      );
+      const bridged: any[] = (gRes as any)?.elements ?? [];
+      if (!gOk || !bridged.length) return domElements;
+      return [...domElements, ...bridged];
+    };
+
+    const vlmGroundingFallback = async (
+      tabId: number,
+      url: string,
+      domElements: any[],
+    ): Promise<any[]> => {
+      // Memo: a freshly-grounded page (same URL) is bridged from the CACHED
+      // boxes (cheap, no model re-pay) instead of re-running grounding - the
+      // runner's 0-element recovery re-extracts up to 3x; paying the model 3
+      // times for the unchanged page is pure waste. A real navigation changes
+      // the URL and re-grounds.
+      if (url && url === lastGroundedUrl && Date.now() - lastGroundedAt < GROUNDING_MEMO_MS) {
+        return bridgeCachedBoxes(tabId, domElements);
+      }
+      try {
+        const t = await browser.tabs.get(tabId);
+        const dataUrl = await browser.tabs.captureVisibleTab(t?.windowId);
+        beginLongOp();
+        let ground: { ok: boolean; boxes?: any[]; error?: string };
+        try {
+          // Phrase grounding of the widgets an agent can actually act on.
+          // The task text is already planner-visible (not new PII), so using
+          // it to specialize the query is PII-safe.
+          ground = await vlmHostGround(dataUrl, groundQueryForContext(currentTaskText), 300_000);
+        } finally {
+          endLongOp();
+        }
+        lastGroundedUrl = url;
+        lastGroundedAt = Date.now();
+        if (!ground?.ok || !ground.boxes?.length) {
+          console.warn('[#115] grounding returned no boxes', ground?.error ?? '');
+          lastGroundedBoxes = []; // nothing to re-bridge on a memo hit
+          return domElements; // model unavailable / no boxes - DOM-only
+        }
+        lastGroundedBoxes = ground.boxes;
+        // Bridge the boxes to real DOM nodes in the target tab (content
+        // script has document.elementFromPoint + the node registry).
+        const { ok: gOk, value: gRes } = await withPortRetry(
+          async () =>
+            await browser.tabs.sendMessage(tabId, {
+              type: 'VISION_GROUND',
+              boxes: ground.boxes,
+            }),
+          (v: any) => v === undefined,
+        );
+        const bridged: any[] = (gRes as any)?.elements ?? [];
+        if (!gOk || !bridged.length) return domElements;
+        // Merge: DOM-first (source of truth), grounded additions appended.
+        // The caller (extractChannel) returns the merged table to the
+        // runner, which feeds it to the planner - no extra progress
+        // broadcast needed here.
+        const merged = [...domElements, ...bridged];
+        console.log(`[#115] grounded ${bridged.length} element(s) onto a ${domElements.length}-element page`);
+        return merged;
+      } catch (e) {
+        console.warn('[#115] grounding fallback failed, using DOM-only:', e);
+        return domElements;
+      }
     };
 
     const executeChannel = async (action: any): Promise<any> => {
@@ -673,6 +783,10 @@ export default defineBackground({
       // previous task's harvested values (a fresh run must not type values
       // it never read this task).
       resetCrossTabState();
+      // #115: remember the task text for the VLM grounding query
+      // specialization (planner-visible text; not new PII). Cleared when
+      // the run ends below.
+      currentTaskText = String(message.task || '');
 
       // #102: load the on-device user profile so the planner can reference the
       // user's own constants by token. Never egressed raw - the outbound guard
@@ -740,6 +854,7 @@ export default defineBackground({
           // source tab edited while the user reads the gate card is still
           // tracked - re-perception into the shared handoff is harmless).
           resetPassiveWatch();
+          currentTaskText = ''; // #115: no task to specialize grounding for
           // #142/#149 review: the run is done with the model - close the
           // offscreen host so the 907KB worker + ~150MB model are reaped.
           // The next task/OCR re-creates it lazily (ensureVlmHost), and a
@@ -749,6 +864,7 @@ export default defineBackground({
         })
         .catch((e) => {
           resetPassiveWatch();
+          currentTaskText = '';
           void closeVlmHost();
           console.error('[agent-runner] unhandled loop error:', e);
           broadcastProgress({

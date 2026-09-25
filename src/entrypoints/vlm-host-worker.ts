@@ -28,7 +28,7 @@ import type { VisionOptions } from '../lib/vision/florence2';
  * a module worker.
  */
 
-type VlmTaskType = 'INIT' | 'OCR' | 'DETECT' | 'CAPTION' | 'VQA' | 'STATUS';
+type VlmTaskType = 'INIT' | 'OCR' | 'DETECT' | 'GROUND' | 'CAPTION' | 'VQA' | 'STATUS';
 
 export interface VlmRequest {
   id?: number;
@@ -50,6 +50,7 @@ export interface VlmResponse {
 const TASK_MAP: Record<string, VisionOptions['task']> = {
   OCR: 'ocr',
   DETECT: 'object-detection',
+  GROUND: 'grounding',
   CAPTION: 'caption',
   VQA: 'question-answering',
 };
@@ -59,6 +60,18 @@ export default defineUnlistedScript(() => {
     onmessage: ((e: MessageEvent) => void) | null;
     postMessage: (m: VlmResponse) => void;
   };
+
+  // #115: box-producing tasks (GROUND/DETECT) need the image decoded to an
+  // ImageBitmap so Florence-2 can scale its bboxes by the real pixel size
+  // (img.size = [h, w]). The OCR/CAPTION/VQA text tasks are fine with the
+  // raw data-URL string. A dedicated worker has createImageBitmap (browser/
+  // webworker capability) and fetch(dataUrl) for same-origin PNGs.
+  async function decodeToBitmap(dataUrl: string): Promise<ImageBitmap> {
+    const blob = await (await fetch(dataUrl)).blob();
+    return await createImageBitmap(blob);
+  }
+
+  const isBoxTask = (t: VlmTaskType) => t === 'GROUND' || t === 'DETECT';
 
   // #149 review: serialize inference. The shared model is NOT
   // concurrent-safe (a SW timeout + retry can overlap two runs), so a
@@ -72,7 +85,7 @@ export default defineUnlistedScript(() => {
     const reply = (r: Omit<VlmResponse, 'id'>): void => {
       selfRef.postMessage({ id: req.id, ...r });
     };
-    const isWork = req.type === 'OCR' || req.type === 'DETECT' || req.type === 'CAPTION' || req.type === 'VQA';
+    const isWork = req.type === 'OCR' || req.type === 'DETECT' || req.type === 'GROUND' || req.type === 'CAPTION' || req.type === 'VQA';
     if (isWork && busy) {
       reply({ ok: false, error: 'busy', status: visionPipeline.status() });
       return;
@@ -87,19 +100,25 @@ export default defineUnlistedScript(() => {
         }
         case 'OCR':
         case 'DETECT':
+        case 'GROUND':
         case 'CAPTION':
         case 'VQA': {
           if (!visionPipeline.isInitialized()) await visionPipeline.initialize();
-          // #149 review: pass the data-URL STRING straight to the pipeline.
-          // transformers.js's browser AutoProcessor decodes data URLs itself
-          // (the documented path); a createImageBitmap detour was unverified
-          // and added no value.
           if (!req.dataUrl) {
             if (req.type === 'OCR') visionPipeline.recordOcr(false, 'no image');
             reply({ ok: false, error: 'no image', status: visionPipeline.status() });
             break;
           }
-          const res = await visionPipeline.processImage(req.dataUrl, {
+          let image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string;
+          if (isBoxTask(req.type)) {
+            // Decode to a bitmap so bbox scaling gets real dimensions.
+            image = await decodeToBitmap(req.dataUrl);
+          } else {
+            // #149 review: text tasks pass the data-URL string straight
+            // (the documented transformers.js browser path).
+            image = req.dataUrl;
+          }
+          const res = await visionPipeline.processImage(image, {
             task: TASK_MAP[req.type],
             query: req.query,
           });
@@ -113,10 +132,17 @@ export default defineUnlistedScript(() => {
               break;
             }
           }
+          const boxes = res?.boundingBoxes?.map((b) => ({
+            x: b.x,
+            y: b.y,
+            width: b.width,
+            height: b.height,
+            label: b.label ?? '',
+          }));
           reply({
-            ok: !!text || req.type !== 'OCR',
+            ok: isBoxTask(req.type) ? !!boxes && boxes.length > 0 : !!text || req.type !== 'OCR',
             text,
-            boxes: res?.boundingBoxes,
+            boxes: boxes,
             status: visionPipeline.status(),
           });
           break;
