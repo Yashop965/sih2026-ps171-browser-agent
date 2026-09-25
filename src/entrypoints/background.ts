@@ -444,22 +444,45 @@ export default defineBackground({
     // #115: the VLM grounding fallback for near-empty DOM pages. Captures the
     // tab (pixels stay on-device), asks the offscreen host for Florence-2
     // phrase grounding boxes, and hands them to the target tab's content
-    // script to resolve to actionable DOM nodes (VISION_GROUND). Memoized
-    // per URL so the runner's 0-element retry loop doesn't re-pay a 2-5s
-    // model call on the same page. Returns the DOM-only set on ANY failure.
+    // script to resolve to actionable DOM nodes (VISION_GROUND). Per-URL
+    // memo so the runner's 0-element retry loop doesn't re-pay a 2-5s model
+    // call on the unchanged page. Returns the DOM-only set on ANY failure.
     let lastGroundedUrl = '';
     let lastGroundedAt = 0;
+    let lastGroundedBoxes: any[] = [];
     const GROUNDING_MEMO_MS = 30_000;
+
+    // Bridge already-cached grounding boxes to FRESH DOM nodes (no model
+    // call). Called on a per-URL memo hit so grounded controls persist across
+    // consecutive steps on the same page - otherwise the runner's same-URL
+    // re-extracts would return DOM-only and the fallback would be a one-shot.
+    const bridgeCachedBoxes = async (tabId: number, domElements: any[]): Promise<any[]> => {
+      if (!lastGroundedBoxes.length) return domElements;
+      const { ok: gOk, value: gRes } = await withPortRetry(
+        async () =>
+          await browser.tabs.sendMessage(tabId, {
+            type: 'VISION_GROUND',
+            boxes: lastGroundedBoxes,
+          }),
+        (v: any) => v === undefined,
+      );
+      const bridged: any[] = (gRes as any)?.elements ?? [];
+      if (!gOk || !bridged.length) return domElements;
+      return [...domElements, ...bridged];
+    };
+
     const vlmGroundingFallback = async (
       tabId: number,
       url: string,
       domElements: any[],
     ): Promise<any[]> => {
-      // Memo: a freshly-grounded page (same URL) is skipped - the runner's
-      // 0-element recovery re-extracts up to 3x; paying the model 3 times for
-      // the unchanged page is pure waste. A real navigation changes the URL.
+      // Memo: a freshly-grounded page (same URL) is bridged from the CACHED
+      // boxes (cheap, no model re-pay) instead of re-running grounding - the
+      // runner's 0-element recovery re-extracts up to 3x; paying the model 3
+      // times for the unchanged page is pure waste. A real navigation changes
+      // the URL and re-grounds.
       if (url && url === lastGroundedUrl && Date.now() - lastGroundedAt < GROUNDING_MEMO_MS) {
-        return domElements;
+        return bridgeCachedBoxes(tabId, domElements);
       }
       try {
         const t = await browser.tabs.get(tabId);
@@ -478,8 +501,10 @@ export default defineBackground({
         lastGroundedAt = Date.now();
         if (!ground?.ok || !ground.boxes?.length) {
           console.warn('[#115] grounding returned no boxes', ground?.error ?? '');
+          lastGroundedBoxes = []; // nothing to re-bridge on a memo hit
           return domElements; // model unavailable / no boxes - DOM-only
         }
+        lastGroundedBoxes = ground.boxes;
         // Bridge the boxes to real DOM nodes in the target tab (content
         // script has document.elementFromPoint + the node registry).
         const { ok: gOk, value: gRes } = await withPortRetry(
