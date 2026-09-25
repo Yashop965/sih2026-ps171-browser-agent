@@ -161,7 +161,7 @@ opaque tokens cross tab boundaries; outbound sends always pause for a human.
 **Live E2E remaining:** cross-tab + VLM paths are deterministic-tested; the
 live Chrome proof (load extension, run a 3-hop task across tabs, confirm the
 VLM pill hits *ready (webgpu)*, exercise a gated send) is the user's step.
-Follow-ups parked as **#150**: relay unit-test with a fake Worker, tighten
+Follow-ups parked as **#151**: relay unit-test with a fake Worker, tighten
 `vlm/ort/*` WAR `matches`, optional LFS/build-time-download for the 21.6 MB
 `.wasm`.
 
