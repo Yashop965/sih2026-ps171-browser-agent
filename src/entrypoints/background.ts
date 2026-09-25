@@ -6,7 +6,8 @@ import { AgentRunner, emptyTaskState, type AgentTaskState, type ChecklistItem } 
 import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 import { loadProfile } from '../lib/userProfile';
-import { emptyHandoff, harvestToHandoff, mergeHandoff, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
+import { emptyHandoff, harvestToHandoff, mergeHandoff, rePerceiveHandoff, rePerceptionChanged, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
+import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS } from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
 
 /**
@@ -161,9 +162,92 @@ export default defineBackground({
     // planner LLM.
     let currentTargetTab: { tabId: number; windowId: number } | null = null;
     let taskHandoff: TabHandoff = emptyHandoff();
+    // #144 P3: passive "watch" of the source tabs a task has harvested from.
+    // While the agent works on another tab, a source tab that CHANGES (url
+    // change via tabs.onUpdated, or a title change seen by the bounded poll)
+    // is re-perceived DOM-ONLY (HARVEST_FIELDS: no cursor, no click, no
+    // scroll, no LLM) and re-merged into the task handoff LABEL-KEYED
+    // (rePerceiveHandoff) - so a value the user edited on the compliance tab
+    // while the agent works reaches the agent's NEXT token write. Cost
+    // caps: <= MAX_WATCHED_TABS watched tabs, poll >= MIN_WATCH_POLL_MS,
+    // no-op re-perceptions (nothing changed) are skipped silently.
+    let watchedSourceTabs: Set<number> = new Set();
+    let watchedTabSnapshot: Record<number, { url: string; title: string; lastPollAt: number }> = {};
+    let watcherPollTimer: ReturnType<typeof setInterval> | null = null;
+    const watcherUrlListener = (tabId: number, changeInfo: any): void => {
+      // Only the event path re-perceives immediately - but for watched tabs
+      // only; everything else is handled by the session manager above.
+      if (!watchedSourceTabs.has(tabId) || currentTargetTab?.tabId === tabId) return;
+      if (changeInfo?.url) void rePerceiveWatchedTab(tabId);
+    };
+    const rePerceiveWatchedTab = async (tabId: number): Promise<void> => {
+      // Never re-perceive the tab the agent is driving (it re-grounds that
+      // tab actively per step; a passive harvest there would only add noise).
+      if (currentTargetTab?.tabId === tabId) return;
+      const { ok, value } = await withPortRetry(
+        async () => await browser.tabs.sendMessage(tabId, { type: 'HARVEST_FIELDS' }),
+        (v: any) => v === undefined,
+      );
+      let url = '';
+      try { url = (await browser.tabs.get(tabId)).url || ''; } catch { url = ''; }
+      if (!ok || !value?.fields?.length) return;
+      const before = taskHandoff;
+      taskHandoff = rePerceiveHandoff(taskHandoff, value.fields, url);
+      // PII-safe log: destination + count only - never labels or values
+      // (same discipline as the #143 gate log line).
+      if (rePerceptionChanged(before, taskHandoff) && activeTask && activeTask.status !== 'idle') {
+        activeTask.logs = [
+          ...(activeTask.logs || []).slice(-4999),
+          `${new Date().toLocaleTimeString()}: ⏪ watched source tab changed - ${Object.keys(taskHandoff.values).length} handoff value(s) now current (passive, DOM-only)`,
+        ];
+        broadcastProgress({ ...activeTask, lastUpdate: Date.now() });
+      }
+      watchedTabSnapshot[tabId] = { url, title: '', lastPollAt: Date.now() };
+    };
+    const startWatcherPoll = (): void => {
+      if (watcherPollTimer !== null) return;
+      // Bounded poll: one pass over the watched tabs per interval. The
+      // per-tab pollMs floor is clamped by the caller (design §5: >=15s).
+      watcherPollTimer = setInterval(async () => {
+        if (!watchedSourceTabs.size) return;
+        for (const tabId of watchedSourceTabs) {
+          if (currentTargetTab?.tabId === tabId) continue; // focus tab
+          const prev = watchedTabSnapshot[tabId];
+          let next: { url: string; title: string } | null = null;
+          try {
+            const t = await browser.tabs.get(tabId);
+            next = { url: t?.url || '', title: t?.title || '' };
+          } catch {
+            // tab closed - drop it from the watch set.
+            watchedSourceTabs.delete(tabId);
+            delete watchedTabSnapshot[tabId];
+            continue;
+          }
+          const fired =
+            (prev && next && (next.url !== prev.url || next.title !== prev.title)) ||
+            !prev; // first sighting: baseline + perceive once
+          if (fired) await rePerceiveWatchedTab(tabId);
+        }
+      }, MIN_WATCH_POLL_MS);
+    };
+    const stopWatcherPoll = (): void => {
+      if (watcherPollTimer !== null) { clearInterval(watcherPollTimer); watcherPollTimer = null; }
+    };
+    const registerWatchedSource = (tabId: number): void => {
+      if (currentTargetTab?.tabId === tabId) return; // the driven tab re-grounds itself
+      if (watchedSourceTabs.size >= MAX_WATCHED_TABS && !watchedSourceTabs.has(tabId)) return; // cost cap
+      watchedSourceTabs.add(tabId);
+      startWatcherPoll();
+    };
+    const resetPassiveWatch = (): void => {
+      watchedSourceTabs = new Set();
+      watchedTabSnapshot = {};
+      stopWatcherPoll();
+    };
     const resetCrossTabState = (): void => {
       currentTargetTab = null;
       taskHandoff = emptyHandoff();
+      resetPassiveWatch();
     };
 
     // Resolve which tab to drive next. When currentTargetTab is set (after a
@@ -206,6 +290,10 @@ export default defineBackground({
         sourceUrl = '';
       }
       taskHandoff = mergeHandoff(taskHandoff, harvestToHandoff(value.fields, sourceUrl));
+      // #144 P3: a tab the task has READ from becomes a passive watch target
+      // while the agent works elsewhere - a later change on it re-perceives
+      // the handoff (label-keyed) without driving that tab at all.
+      registerWatchedSource(tabId);
     };
 
     // The runner's open-tab provider: live web tabs of the task's window,
@@ -550,15 +638,25 @@ export default defineBackground({
           },
         },
       });
-      runner.run().catch((e) => {
-        console.error('[agent-runner] unhandled loop error:', e);
-        broadcastProgress({
-          ...emptyTaskState(),
-          status: 'failed',
-          logs: [`${new Date().toLocaleTimeString()}: Run error: ${e instanceof Error ? e.message : String(e)}`],
-          lastUpdate: Date.now(),
+      runner.run()
+        .then(() => {
+          // #144 P3: the run ended (complete / stopped / failed) - tear down
+          // the passive watchers. While a run PAUSES at the #143 outbound
+          // gate, run() is still pending, so the watchers stay live (a
+          // source tab edited while the user reads the gate card is still
+          // tracked - re-perception into the shared handoff is harmless).
+          resetPassiveWatch();
+        })
+        .catch((e) => {
+          resetPassiveWatch();
+          console.error('[agent-runner] unhandled loop error:', e);
+          broadcastProgress({
+            ...emptyTaskState(),
+            status: 'failed',
+            logs: [`${new Date().toLocaleTimeString()}: Run error: ${e instanceof Error ? e.message : String(e)}`],
+            lastUpdate: Date.now(),
+          });
         });
-      });
     };
 
     // Hydrate after construction (non-blocking: the SW keeps running even if
@@ -850,9 +948,16 @@ export default defineBackground({
           await sessionManager.updateSession(session.sessionId, changeInfo.url);
         }
       }
+      // #144 P3: passive watch - a URL change on a watched SOURCE tab
+      // re-perceives it (DOM-only) into the task handoff. No-op when the
+      // tab isn't watched or IS the agent's focus tab.
+      watcherUrlListener(tabId, changeInfo);
     });
 
     browser.tabs.onRemoved.addListener((tabId) => {
+      // #144 P3: drop a closed tab from the passive watch set.
+      watchedSourceTabs.delete(tabId);
+      delete watchedTabSnapshot[tabId];
       // Find and mark session as completed
       for (const session of sessionManager.getActiveSessions()) {
         if (session.tabId === tabId) {
