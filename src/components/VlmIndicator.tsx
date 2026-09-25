@@ -1,10 +1,12 @@
 // src/components/VlmIndicator.tsx
 //
-// #136: live on-device VLM indicator for the popup. Polls the active tab's
-// content script (VISION_STATUS) every few seconds and renders a compact
-// status pill: ready / loading / idle / unavailable, plus the last OCR
-// outcome when the model is live. Pure status — the pixels never leave the
-// device and no PII reaches the UI.
+// #136: live on-device VLM indicator for the popup. #142: the pipeline now
+// lives in the offscreen host (dedicated module worker), so the pill polls
+// the service worker (VLM_STATUS) every few seconds instead of the broken
+// content-script isolated-world pipeline. Renders a compact status pill:
+// ready / loading / idle / unavailable, plus the last OCR outcome when the
+// model is live. Pure status — the pixels never leave the device and no PII
+// reaches the UI.
 //
 // Tints follow the popup design tokens (success / warning / error / muted)
 // so it reads alongside the ResourceMonitor above it.
@@ -44,18 +46,17 @@ export default function VlmIndicator() {
     mounted.current = true;
     const poll = async () => {
       try {
-        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.id) {
-          setReachable(false);
-          return;
-        }
-        const res: any = await browser.tabs.sendMessage(tab.id, { type: 'VISION_STATUS' });
+        // #142: query the service worker (offscreen host) - the content
+        // script's isolated-world pipeline can never load its ORT backend,
+        // so VLM_STATUS via the content script was always "idle/failed".
+        const res: any = await browser.runtime.sendMessage({ type: 'VLM_STATUS' });
         if (!mounted.current) return;
         if (res?.ok && res.status) {
           setSt(res.status);
           setReachable(true);
         } else {
-          // Content script not present on this tab (e.g. chrome:// page).
+          // Host unreachable (offscreen API missing, doc failed to open).
+          setSt(null);
           setReachable(false);
         }
       } catch {
