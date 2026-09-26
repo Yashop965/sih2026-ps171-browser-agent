@@ -282,7 +282,9 @@ export class PIIManager {
       [/^\d{12}$/, 'AADHAAR', 0.7],
       [/^[A-Z]{5}\d{4}[A-Z]{1}$/, 'PAN', 0.8],
       [/^\d{16}$/, 'CREDIT_CARD', 0.7],
-      [/^[A-Z]{4}0[A-Z0-9]{7}$/, 'IFSC', 0.85],
+      // 11 characters, not 12: a real IFSC is 4 letters + '0' + 6 alphanumerics.
+      // The old {7} meant this could never match a real IFSC (#163, #168).
+      [/^[A-Z]{4}0[A-Z0-9]{6}$/, 'IFSC', 0.85],
       [/^\+?[1-9]\d{10}$/, 'PHONE', 0.6],
       [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'EMAIL', 0.95],
     ];
