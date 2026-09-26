@@ -5,12 +5,12 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-![vitest: 524/524](https://img.shields.io/badge/vitest-524%2F524%20passing-22c55e?style=for-the-badge)
+![vitest: 543/543](https://img.shields.io/badge/vitest-543%2F543%20passing-22c55e?style=for-the-badge)
 ![pytest: 87/87](https://img.shields.io/badge/pytest-87%2F87%20passing-22c55e?style=for-the-badge)
 ![build: ~24 MB](https://img.shields.io/badge/build-%7E24%20MB%20chrome-mv3%20(ORT%20wasm%20included)-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-25):** `main` clean · **524/524** vitest +
+> **Current state (verified 2026-09-26):** `main` clean · **543/543** vitest +
 > **87/87** pytest passing · Chrome MV3 build **~24 MB** (includes the on-device
 > Florence-2 model stack: 907 KB worker bundle + ORT wasm/loader) · 0 PII
 > off-device · **cross-tab orchestrator P1–P4 shipped** (sequenced multi-tab
@@ -24,21 +24,23 @@
 
 ## 🎬 See It Work
 
-<video
-  src="SIH2026_PS171_YC_Ad_project_FINAL.mp4"
-  poster="media/poster-project.jpg"
-  controls muted autoplay loop playsinline
-  preload="metadata"
-  style="max-width: 720px; width: 100%; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); background:#0b0d17;"
-></video>
+<!-- GitHub's README sanitizer does not render <video> tags - it either strips
+     them or shows the raw HTML as text. Reliable pattern: a tracked poster
+     image (renders via raw.githubusercontent.com) + direct links to the real
+     .mp4 files at the repo root. The mp4s stay tracked so the links resolve. -->
+<p align="center">
+  <img src="media/poster-project.jpg"
+       alt="SIH2026 PS171 — 90-second programmatic launch ad, project theme (poster frame)"
+       width="720"
+       style="border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.25); background:#0b0d17;">
+</p>
 
 <p align="center">
   <sub>90-second programmatic launch-ad — real extension footage, no stock assets.
-  Switch theme: <a href="SIH2026_PS171_YC_Ad_black_FINAL.mp4"><b>black</b></a> ·
-  <a href="SIH2026_PS171_YC_Ad_light_FINAL.mp4"><b>light</b></a> ·
-  <a href="SIH2026_PS171_YC_Ad_project_FINAL.mp4"><b>project (above)</b></a>
-  — pipeline: <a href="./ad_pipeline/README.md"><code>ad_pipeline/</code></a>
-</sub>
+  ▶ <a href="https://github.com/Yashop965/sih2026-ps171-browser-agent/raw/main/SIH2026_PS171_YC_Ad_project_FINAL.mp4"><b>watch the demo (project theme)</b></a> ·
+  <a href="https://github.com/Yashop965/sih2026-ps171-browser-agent/raw/main/SIH2026_PS171_YC_Ad_black_FINAL.mp4"><b>black</b></a> ·
+  <a href="https://github.com/Yashop965/sih2026-ps171-browser-agent/raw/main/SIH2026_PS171_YC_Ad_light_FINAL.mp4"><b>light</b></a>
+  · pipeline: <a href="./ad_pipeline/README.md"><code>ad_pipeline/</code></a></sub>
 </p>
 
 ---
