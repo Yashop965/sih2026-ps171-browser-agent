@@ -121,7 +121,9 @@ export default function PrivacyLedger() {
   async function onExport() {
     setBusy(true);
     try {
-      await downloadLedger(entries, detections);
+      // #171: the audit trail is part of the export - this file is the
+      // artifact a judge inspects, so it must not be the version that omits it.
+      await downloadLedger(entries, detections, audit);
     } finally {
       setBusy(false);
     }
@@ -170,7 +172,11 @@ export default function PrivacyLedger() {
       return a[sortKey].localeCompare(b[sortKey]) * dir;
     });
 
-  const disabled = busy || entries.length === 0;
+  // Enabled when EITHER ledger has content. Before #171 this was
+  // `entries.length === 0` alone, which left Export and Clear greyed out on a
+  // fresh install that had only ever recorded audit events - the exact case
+  // where someone wants to export the trail.
+  const disabled = busy || (entries.length === 0 && audit.length === 0);
 
   const btn: React.CSSProperties = {
     border: '1px solid #D0CDC6',

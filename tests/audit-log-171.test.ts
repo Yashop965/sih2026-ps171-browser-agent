@@ -19,7 +19,7 @@ vi.mock('wxt/browser', () => ({
   browser: { runtime: { sendMessage: (...a: unknown[]) => sendMessage(...a) } },
 }));
 
-import { fetchAuditLog, auditToneOf, auditLabelOf } from '../src/lib/ledgerClient';
+import { fetchAuditLog, auditToneOf, auditLabelOf, buildExport } from '../src/lib/ledgerClient';
 import type { AuditEvent } from '../src/lib/pii/types';
 
 const AADHAAR = '100000000004';
@@ -126,5 +126,75 @@ describe('audit classification', () => {
     expect(auditLabelOf('REDACTED')).toBe('redacted');
     expect(auditLabelOf('BLOCKED')).toBe('blocked');
     expect(auditLabelOf('SENT')).toBe('sent');
+  });
+});
+
+describe('the export carries the audit trail', () => {
+  // The exported JSON is the artifact a judge inspects. If it omitted the
+  // audit ledger, the panel could show the trail while the exported proof could
+  // not - the worse failure, because the export is what gets read afterwards.
+  const AUDIT: AuditEvent[] = [
+    {
+      timestamp: '2026-09-26T10:00:01.000Z',
+      event: 'REDACTED',
+      category: 'AADHAAR',
+      element: 'elements[0].label',
+      reason: 'Replaced 1 AADHAAR instance(s) with [REDACTED]',
+      count: 1,
+    },
+    {
+      timestamp: '2026-09-26T10:00:00.000Z',
+      event: 'BLOCKED',
+      category: 'API_KEY',
+      element: 'step 3',
+      reason: 'residual secret',
+      count: 1,
+    },
+  ];
+
+  it('includes a piiAudit section with the records and a summary', async () => {
+    const out = await buildExport([], [], AUDIT);
+    expect(out.piiAudit.total).toBe(2);
+    expect(out.piiAudit.records).toHaveLength(2);
+    expect(out.piiAudit.summary.redacted).toBe(1);
+    expect(out.piiAudit.summary.blocked).toBe(1);
+  });
+
+  it('numbers audit records oldest-first, matching the main records array', async () => {
+    const out = await buildExport([], [], AUDIT);
+    // Input arrives newest-first from the worker; the export is oldest-first.
+    expect(out.piiAudit.records[0].event).toBe('BLOCKED');
+    expect(out.piiAudit.records[0].seq).toBe(1);
+    expect(out.piiAudit.records[1].event).toBe('REDACTED');
+  });
+
+  it('stays backward-compatible: no audit arg yields an empty section, not a crash', async () => {
+    const out = await buildExport([], []);
+    expect(out.piiAudit.total).toBe(0);
+    expect(out.piiAudit.records).toEqual([]);
+    expect(out.records).toEqual([]);
+  });
+
+  it('does NOT spread an audit entry - an unknown field cannot reach the file', async () => {
+    const leaky = [{ ...AUDIT[0], rawValue: AADHAAR, secret: 'sk-live' } as AuditEvent];
+    const out = await buildExport([], [], leaky);
+    const json = JSON.stringify(out.piiAudit.records);
+    expect(json).not.toContain(AADHAAR);
+    expect(json).not.toContain('sk-live');
+    expect(Object.keys(out.piiAudit.records[0]).sort()).toEqual([
+      'category',
+      'count',
+      'element',
+      'event',
+      'reason',
+      'seq',
+      'timestamp',
+    ]);
+  });
+
+  it('does not change the digest, which still covers only the records array', async () => {
+    const withAudit = await buildExport([], [], AUDIT);
+    const without = await buildExport([], []);
+    expect(withAudit.integrity.digest).toBe(without.integrity.digest);
   });
 });

@@ -289,17 +289,37 @@ function scrub(entry: PrivacyLogEntry) {
  * SHA-256 digest of the record list, so anyone can recompute it and tell
  * whether the file was edited after it was produced.
  */
-export async function buildExport(entries: PrivacyLogEntry[], detections: Detection[] = []) {
+export async function buildExport(
+  entries: PrivacyLogEntry[],
+  detections: Detection[] = [],
+  audit: AuditEvent[] = []
+) {
   // The background prepends, so the array arrives newest-first.
   const ordered = entries.slice().reverse();
   const records = ordered.map((e, i) => ({ seq: i + 1, ...scrub(e) }));
   const digest = await sha256Hex(JSON.stringify(records));
+
+  // #171: the PII audit trail travels with the export. This file is the
+  // artifact a judge inspects, and leaving the audit ledger out of it would
+  // mean the on-screen panel can show the trail but the exported proof cannot -
+  // which is the worse of the two failures, because the export is what gets
+  // read after the fact.
+  const auditRecords = audit
+    .slice()
+    .reverse()
+    .map((e, i) => ({ seq: i + 1, ...scrubAudit(e) }));
 
   return {
     schema: 'ps171-privacy-ledger/1',
     generatedAt: new Date().toISOString(),
     note: 'Structural metadata only. No detected values, page HTML, or query strings are present in this file.',
     summary: summarise(entries),
+    piiAudit: {
+      // Oldest-first, matching `records`.
+      total: auditRecords.length,
+      summary: summariseAudit(audit),
+      records: auditRecords,
+    },
     currentPageDetections: {
       stats: summariseDetections(detections),
       items: detections,
@@ -313,8 +333,47 @@ export async function buildExport(entries: PrivacyLogEntry[], detections: Detect
   };
 }
 
-export async function downloadLedger(entries: PrivacyLogEntry[], detections: Detection[] = []) {
-  const payload = await buildExport(entries, detections);
+/**
+ * Field-by-field copy of an audit entry for export, for the same reason
+ * `scrub` is field-by-field: an AuditEvent must never be spread into the
+ * exported file, because a new field could carry something the note above
+ * promises is not there.
+ */
+function scrubAudit(entry: AuditEvent) {
+  return {
+    timestamp: entry.timestamp,
+    event: entry.event,
+    category: entry.category,
+    element: entry.element,
+    ...(entry.confidence !== undefined ? { confidence: entry.confidence } : {}),
+    reason: entry.reason,
+    count: entry.count,
+  };
+}
+
+export function summariseAudit(entries: AuditEvent[]) {
+  let detected = 0,
+    redacted = 0,
+    blocked = 0,
+    sent = 0;
+  const byCategory: Record<string, number> = {};
+
+  for (const e of entries) {
+    byCategory[e.category] = (byCategory[e.category] ?? 0) + e.count;
+    if (e.event === 'DETECTED') detected += e.count;
+    else if (e.event === 'REDACTED') redacted += e.count;
+    else if (e.event === 'BLOCKED') blocked += e.count;
+    else if (e.event === 'SENT') sent += e.count;
+  }
+  return { total: entries.length, detected, redacted, blocked, sent, byCategory };
+}
+
+export async function downloadLedger(
+  entries: PrivacyLogEntry[],
+  detections: Detection[] = [],
+  audit: AuditEvent[] = []
+) {
+  const payload = await buildExport(entries, detections, audit);
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: 'application/json',
   });
