@@ -740,9 +740,17 @@ export default defineBackground({
       const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
       setCursorThinking(true);
       try {
+        // Issue #172: /plan is authenticated with a shared token. Absent the
+        // header the server replies 401, which we treat exactly like a
+        // non-OK response (return null) so the runner logs an offline/abort
+        // rather than crashing on a plan it never received.
+        const token = import.meta.env.VITE_SERVER_API_TOKEN || '';
         const response = await fetch(`${serverUrl}/plan`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'X-Agent-Token': token } : {}),
+          },
           body: JSON.stringify(payload),
           signal,
         });
