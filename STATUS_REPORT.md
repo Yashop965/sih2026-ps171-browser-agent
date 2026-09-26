@@ -1,8 +1,10 @@
 # SIH2026 PS171 - Final Status Report
 
-> **⏱ Submission snapshot (2026-09-02):** 240 tests / 1.21 MB. Current repo state is
-> **324/324 tests / 1.23 MB** (post-deadline hardening: autonomy #84–#86, planner
-> checklist #99, port-retry #105, vision-stop #107). Figures below are the submission state.
+> **⏱ Submission snapshot (2026-09-02):** 240 tests / 1.21 MB. The repo has since grown well past that
+> (current gates: **543/543 vitest + 87/87 pytest, ~24 MB build** — post-deadline hardening through
+> autonomy #84–#86, planner checklist #99, port-retry #105, vision-stop #107, then the cross-tab
+> orchestrator + on-device VLM epic #141–#144 / #142 / #115). Live truth is in the README; the figures
+> below are the 09-02 submission state.
 
 ## Video Assets
 

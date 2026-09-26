@@ -1,8 +1,10 @@
 # SIH2026 PS171 - Final Submission Package
 
 > **⏱ This is the 2026-09-02 submission snapshot** (240 tests / 1.21 MB). The repo has since
-> moved to **324/324 tests / 1.23 MB** build after post-deadline hardening (autonomy
-> #84–#86, planner checklist #99, port-retry #105, vision-stop #107). Figures below are the submission state.
+> grown well past that (current gates: **543/543 vitest + 87/87 pytest, ~24 MB build** — post-deadline
+> hardening through autonomy #84–#86, planner checklist #99, port-retry #105, vision-stop #107, and
+> later the cross-tab orchestrator + on-device VLM epic #141–#144 / #142 / #115). Live truth lives in
+> the README; the figures below are the 09-02 submission state.
 
 ## ✅ VERIFIED & READY FOR SUBMISSION
 

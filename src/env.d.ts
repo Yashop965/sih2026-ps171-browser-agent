@@ -1,15 +1,15 @@
 /// <reference types="vite/client" />
 
-interface ImportMetaEnv {
-  readonly SERVER_URL: string;
-  readonly VITE_SERVER_URL: string;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}
-
 declare global {
+  interface ImportMetaEnv {
+    readonly SERVER_URL: string;
+    readonly VITE_SERVER_URL: string;
+  }
+
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
+
   interface GPUAdapter {
     name?: string;
     features?: any;

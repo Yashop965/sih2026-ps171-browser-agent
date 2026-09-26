@@ -1,9 +1,10 @@
 # SIH2026 PS171 - Final Status Report
 
-> **Current state (2026-09-17):** tests now **324/324**, build **1.23 MB**
+> **Current state (2026-09-26):** gates **543/543 vitest + 87/87 pytest, ~24 MB build**
 > (post-deadline hardening: autonomy #84–#86, checklist #99, port-retry #105,
-> goal-backstop + on-device vision confirm #107).
-> The metrics below reflect the submission snapshot of 2026-09-02.
+> goal-backstop + on-device vision confirm #107, then the cross-tab orchestrator +
+> on-device VLM epic #141–#144 / #142 / #115).
+> The metrics below reflect the 09-02 submission snapshot.
 
 ## ✅ COMPLETE AND READY FOR SUBMISSION
 

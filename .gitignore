@@ -69,6 +69,12 @@ ad_pipeline/frames_*/
 
 # Transient Chrome/extension UI capture (regenerated ad-hoc for debugging)
 screenshots/*.png
+screenshots/
+
+# #126 item 5: Playwright debug output (error-context.md + per-test failed
+# screenshots). Regenerated on every `npm run test:e2e`; was git-tracked by
+# accident, bloating history. Untracked now (files kept on disk for debug).
+test-results/
 
 # issue #100 verification artifacts (large local ONNX mirror, screenshots)
 scripts/verify/local-model/
