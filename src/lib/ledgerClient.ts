@@ -12,6 +12,7 @@
 
 import { browser } from 'wxt/browser';
 import type { PrivacyLogEntry } from '../types';
+import type { AuditEvent } from './pii/types';
 
 export type LedgerTone = 'blocked' | 'clean' | 'warning';
 
@@ -53,6 +54,64 @@ export function labelOf(entry: PrivacyLogEntry): string {
 export async function fetchEntries(): Promise<PrivacyLogEntry[]> {
   const result = await browser.runtime.sendMessage({ type: 'GET_PRIVACY_LEDGER' });
   return Array.isArray(result) ? (result as PrivacyLogEntry[]) : [];
+}
+
+/**
+ * #171: the richer audit trail (src/lib/pii/audit.ts).
+ *
+ * This is a DIFFERENT ledger from GET_PRIVACY_LEDGER, and the distinction
+ * matters: that one records what the extension did (executions, server calls),
+ * while this one records what happened to PII specifically - DETECTED,
+ * REDACTED, BLOCKED, SENT. Until the runner forwarded the outbound guard's
+ * events, this ledger was constructed, persisted and never written to, so a
+ * judge looking at the panel saw a blank audit trail.
+ *
+ * Rebuilt field by field, not spread, so a new field on AuditEvent can never
+ * reach the UI unexamined.
+ */
+export async function fetchAuditLog(): Promise<AuditEvent[]> {
+  const result = await browser.runtime.sendMessage({ type: 'GET_AUDIT_LOG' });
+  if (!Array.isArray(result)) return [];
+  return (result as Record<string, unknown>[]).map((e) => ({
+    timestamp: String(e?.timestamp ?? ''),
+    event: String(e?.event ?? 'UNKNOWN') as AuditEvent['event'],
+    category: String(e?.category ?? 'UNKNOWN'),
+    element: String(e?.element ?? ''),
+    confidence: typeof e?.confidence === 'number' ? e.confidence : undefined,
+    reason: String(e?.reason ?? ''),
+    count: typeof e?.count === 'number' ? e.count : 1,
+  }));
+}
+
+/** Human phrase + tone for one audit event. */
+export function auditToneOf(event: AuditEvent['event']): LedgerTone {
+  switch (event) {
+    case 'BLOCKED':
+      // The most important line in the whole panel: the agent was stopped.
+      return 'blocked';
+    case 'REDACTED':
+    case 'DETECTED':
+      return 'warning';
+    case 'SENT':
+      return 'clean';
+    default:
+      return 'warning';
+  }
+}
+
+export function auditLabelOf(event: AuditEvent['event']): string {
+  switch (event) {
+    case 'DETECTED':
+      return 'detected';
+    case 'REDACTED':
+      return 'redacted';
+    case 'BLOCKED':
+      return 'blocked';
+    case 'SENT':
+      return 'sent';
+    default:
+      return String(event).toLowerCase();
+  }
 }
 
 export async function clearLedger(): Promise<void> {

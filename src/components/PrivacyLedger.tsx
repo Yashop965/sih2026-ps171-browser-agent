@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PrivacyLogEntry } from '../types';
+import type { AuditEvent } from '../lib/pii/types';
 import {
   fetchEntries,
   fetchDetections,
@@ -20,6 +21,9 @@ import {
   summariseDetections,
   toneOf,
   labelOf,
+  fetchAuditLog,
+  auditToneOf,
+  auditLabelOf,
   type Detection,
   type LedgerTone,
 } from '../lib/ledgerClient';
@@ -36,7 +40,7 @@ const TONE: Record<LedgerTone, { fg: string; bg: string; bar: string }> = {
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 const POLL_MS = 1000;
 
-type View = 'detections' | 'log' | 'heatmap';
+type View = 'detections' | 'log' | 'heatmap' | 'audit';
 type SortKey = 'type' | 'confidence' | 'selector';
 
 function clockTime(ms: number) {
@@ -51,6 +55,8 @@ export default function PrivacyLedger() {
   const [view, setView] = useState<View>('detections');
 
   const [entries, setEntries] = useState<PrivacyLogEntry[]>([]);
+  // #171: the PII audit trail. Distinct from `entries` above - see fetchAuditLog.
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,6 +85,14 @@ export default function PrivacyLedger() {
       setDetections(await fetchDetections());
     } catch {
       setDetections([]);
+    }
+
+    // The audit trail lives behind its own message. Absent/empty is a normal
+    // state (nothing has egressed yet), so it never raises a panel error.
+    try {
+      setAudit(await fetchAuditLog());
+    } catch {
+      setAudit([]);
     }
   }, []);
 
@@ -228,8 +242,14 @@ export default function PrivacyLedger() {
             Heatmap
           </button>
           <button onClick={() => setView('log')} style={tab('log')}>
-            Audit log{' '}
+            Activity{' '}
             <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>{stats.total}</span>
+          </button>
+          {/* #171: the PII audit trail. Renamed the existing tab to "Activity"
+              so the two ledgers are not both called "audit". */}
+          <button onClick={() => setView('audit')} style={tab('audit')}>
+            PII audit{' '}
+            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>{audit.length}</span>
           </button>
         </div>
       </header>
@@ -417,6 +437,129 @@ export default function PrivacyLedger() {
               )
             }
           />
+        </div>
+      ) : view === 'audit' ? (
+        /* ── #171: the PII audit trail ────────────────────────────────────── */
+        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto' }}>
+          {audit.length === 0 ? (
+            <p
+              style={{
+                padding: '20px 12px',
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: '#656d76',
+              }}
+            >
+              No PII events yet. Every detection, redaction, block and outbound payload is recorded
+              here as it happens — with the category and selector, never the value.
+            </p>
+          ) : (
+            <ol style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+              {audit.map((e, i) => {
+                const tone = TONE[auditToneOf(e.event)];
+                const seq = audit.length - i;
+                const when = e.timestamp ? new Date(e.timestamp) : null;
+
+                return (
+                  <li
+                    key={`${e.timestamp}-${i}`}
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      borderBottom: '1px solid #d0d7de',
+                      padding: '8px 12px',
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 2,
+                        flexShrink: 0,
+                        borderRadius: 2,
+                        background: tone.bar,
+                      }}
+                    />
+
+                    <span
+                      style={{
+                        width: 22,
+                        flexShrink: 0,
+                        textAlign: 'right',
+                        fontFamily: MONO,
+                        fontSize: 11,
+                        color: '#48505C',
+                      }}
+                    >
+                      {seq}
+                    </span>
+
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          gap: 6,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <span
+                          style={{
+                            borderRadius: 3,
+                            padding: '1px 6px',
+                            fontFamily: MONO,
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                            background: tone.bg,
+                            color: tone.fg,
+                          }}
+                        >
+                          {auditLabelOf(e.event)}
+                        </span>
+                        <span style={{ fontFamily: MONO, fontSize: 11, color: '#1f2328' }}>
+                          {e.category}
+                        </span>
+                        {when && !Number.isNaN(when.getTime()) ? (
+                          <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
+                            {when.toLocaleTimeString()}
+                          </span>
+                        ) : null}
+                        {e.count > 1 ? (
+                          <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
+                            ×{e.count}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* element and reason are structural metadata only - the
+                          ledger never stores a raw value, so neither can leak
+                          one. */}
+                      {e.element ? (
+                        <div
+                          style={{
+                            fontFamily: MONO,
+                            fontSize: 10,
+                            color: '#656d76',
+                            marginTop: 3,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {e.element}
+                        </div>
+                      ) : null}
+                      {e.reason ? (
+                        <div style={{ fontSize: 11, color: '#656d76', marginTop: 2 }}>
+                          {e.reason}
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
         </div>
       ) : (
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto' }}>
