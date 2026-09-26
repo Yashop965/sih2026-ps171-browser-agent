@@ -424,10 +424,10 @@ export interface AgentRunnerDeps {
    * service worker while the guard runs here, so the events are surfaced
    * through this callback rather than by importing a ledger into the runner.
    *
-   * Called with:
-   *   - once per /plan egress, with the redaction events and the verdict;
-   *   - and, when the firewall blocks, a second time so the BLOCKED outcome is
-   *     recorded even though no payload is transmitted.
+   * Called once per /plan egress, carrying both the redaction events and the
+   * verdict - so a blocked egress is reported through the SAME call with
+   * `blocked: true`, not as a second one. The call sits before the runner's
+   * `if (guard.blocked)` early return precisely so that case is not lost.
    *
    * Must never throw: a ledger fault must not fail the egress path. Omitting it
    * is supported and makes every call a no-op.

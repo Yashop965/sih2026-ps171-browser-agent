@@ -46,8 +46,12 @@ export const STORAGE_KEYS = {
   userProfile: 'sih_user_profile',
   outboundAllowlist: 'sih_outbound_allowlist',
   // context.ts session/profile/autofill records, keyed by bare sub-key.
+  // These must match context.ts's literals EXACTLY - `autoFillPatterns` has a
+  // capital F. It is verified by a test that greps the real call sites, because
+  // a registry that quietly disagrees with the code it documents is worse than
+  // no registry at all.
   contextProfile: 'profile',
-  contextAutofill: 'autofillPatterns',
+  contextAutofill: 'autoFillPatterns',
   contextSessions: 'activeSessions',
   contextLastSession: 'lastSessionId',
 } as const;

@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const store = new Map<string, unknown>();
 let failNext = false;
@@ -155,5 +156,41 @@ describe('STORAGE_KEYS', () => {
   it('has no duplicate key VALUES', () => {
     const vals = Object.values(STORAGE_KEYS);
     expect(new Set(vals).size).toBe(vals.length);
+  });
+});
+
+describe('STORAGE_KEYS matches the literals the code actually uses', () => {
+  // The registry is only useful if it is TRUE. A silently-wrong entry is worse
+  // than a missing one, because it is trusted. These read the real files.
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+  it('the context.ts sub-keys match, including the capital F in autoFillPatterns', () => {
+    const ctx = read('../src/lib/context.ts');
+    const used = new Set(
+      [
+        ...ctx.matchAll(/getStored(?:<[^>]*>)?\(\s*'([^']+)'/g),
+        ...ctx.matchAll(/setStored(?:<[^>]*>)?\(\s*'([^']+)'/g),
+      ].map((m) => m[1])
+    );
+
+    expect([...used].sort()).toEqual(
+      [
+        STORAGE_KEYS.contextProfile,
+        STORAGE_KEYS.contextAutofill,
+        STORAGE_KEYS.contextSessions,
+        STORAGE_KEYS.contextLastSession,
+      ].sort()
+    );
+  });
+
+  it('the two libraries keep their own exported key constants', () => {
+    const profile = read('../src/lib/userProfile.ts');
+    const allow = read('../src/lib/outboundAllowlist.ts');
+    expect(profile).toContain(`'${STORAGE_KEYS.userProfile}'`);
+    expect(allow).toContain(`'${STORAGE_KEYS.outboundAllowlist}'`);
+  });
+
+  it('the popup task-history key is the registry value', () => {
+    expect(read('../src/popup/Popup.tsx')).toContain('STORAGE_KEYS.recentTasks');
   });
 });

@@ -386,7 +386,7 @@ function Popup() {
                 onClick={async () => {
                   await storageSetMany({
                     [STORAGE_KEYS.providerKey]: selectedProvider,
-                    apiKey: providerKey,
+                    [STORAGE_KEYS.apiKey]: providerKey,
                   });
                   // Persist the outbound allowlist on-device (normalised).
                   await saveOutboundAllowlist(normalizeDomains(outboundDomains.split(/[\n,]/)));
