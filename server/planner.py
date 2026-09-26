@@ -18,6 +18,8 @@ import re
 import logging
 
 from server.llm_clients import create_llm_client, BaseLLMClient
+# #173: data/instruction separation for page-controlled prompt fields.
+from server.prompt_security import fence, build_trust_preamble
 
 logger = logging.getLogger("sih_agent_planner")
 
@@ -297,13 +299,21 @@ class ActionPlanner:
             '- To type a harvested value by token: {{"type": "TYPE", "targetId": 4, "value": "<FIELD_1>", "reasoning": "fill name with the value read on the other tab"}}\n'
         ) if cross_tab_memory else ""
 
-        prompt = f"""URL: {url}
-PAGE TITLE: {title}
+        # Bound before the f-string. Same-quote nesting inside an f-string is
+        # only legal on 3.12+, and this project runs 3.11.
+        url_block = fence("URL", url)
+        title_block = fence("PAGE TITLE", title)
+        task_block = fence("TASK", task_str)
+
+        prompt = f"""{url_block}
+
+{title_block}
+
 PAGE GEOMETRY: {context_str}
 {open_tabs_block}
 {handoff_block}
 
-TASK: {task_str}
+{task_block}
 
 KEY-VALUE PAIRS FROM TASK:
 {kv_str}
@@ -937,7 +947,8 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
         """
         system_prompt = (
             "You are a browser automation assistant. Given sanitized webpage metadata, "
-            "determine the single next action to execute in JSON format."
+            "determine the single next action to execute in JSON format.\n\n"
+            + build_trust_preamble()
         )
         # #141 PII mask: cross-tab memory crosses as (token, label) pairs ONLY.
         # The runner already strips values on-device (handoffForPlanner), and
