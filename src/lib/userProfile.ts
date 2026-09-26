@@ -125,9 +125,8 @@ export function isProfileToken(value: unknown): value is string {
  */
 export async function loadProfile(): Promise<UserProfile> {
   try {
-    const { browser } = await import('wxt/browser');
-    const snap = await browser.storage.local.get(PROFILE_STORAGE_KEY);
-    const v = snap[PROFILE_STORAGE_KEY];
+    const { storageGet } = await import('./storage');
+    const v = await storageGet<unknown>(PROFILE_STORAGE_KEY, null);
     if (v && typeof v === 'object') {
       // Keep only known keys, coerce to string.
       const clean: UserProfile = {};
@@ -145,6 +144,6 @@ export async function loadProfile(): Promise<UserProfile> {
 
 /** Persist the profile to `browser.storage.local` (on-device only). */
 export async function saveProfile(profile: UserProfile): Promise<void> {
-  const { browser } = await import('wxt/browser');
-  await browser.storage.local.set({ [PROFILE_STORAGE_KEY]: profile });
+  const { storageSet } = await import('./storage');
+  await storageSet(PROFILE_STORAGE_KEY, profile);
 }

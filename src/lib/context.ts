@@ -14,6 +14,7 @@
  */
 
 import { browser } from 'wxt/browser';
+import { storageGet, storageSet, storageRemove } from './storage';
 
 // ─── Public Types ────────────────────────────────────────────────────────────
 
@@ -78,15 +79,14 @@ interface StoredContext {
 // service worker. The popup must use `chrome.storage` directly because it
 // runs in an extension iframe (see WXT skill pitfall #5).
 async function getStored<T extends keyof StoredContext>(key: T): Promise<StoredContext[T]> {
-  const result = await browser.storage.local.get(key);
-  return (result as Record<string, unknown>)[key] as StoredContext[T];
+  return storageGet<StoredContext[T]>(key, null as StoredContext[T]);
 }
 
 async function setStored<T extends keyof StoredContext>(
   key: T,
   value: StoredContext[T]
 ): Promise<void> {
-  await browser.storage.local.set({ [key]: value });
+  await storageSet(key, value);
 }
 
 // ─── 1. User Profile Storage ────────────────────────────────────────────────
@@ -172,7 +172,7 @@ export class ProfileManager {
    * cleared. Callers should treat this as the privacy guarantee boundary.
    */
   async revokeConsent(): Promise<void> {
-    await browser.storage.local.remove(['profile']);
+    await storageRemove('profile');
   }
 }
 

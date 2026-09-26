@@ -38,9 +38,8 @@ export function normalizeDomains(raw: unknown): string[] {
  */
 export async function loadOutboundAllowlist(): Promise<string[]> {
   try {
-    const { browser } = await import('wxt/browser');
-    const snap = await browser.storage.local.get(OUTBOUND_STORAGE_KEY);
-    return normalizeDomains(snap[OUTBOUND_STORAGE_KEY]);
+    const { storageGet } = await import('./storage');
+    return normalizeDomains(await storageGet<unknown>(OUTBOUND_STORAGE_KEY, null));
   } catch {
     return [];
   }
@@ -48,6 +47,6 @@ export async function loadOutboundAllowlist(): Promise<string[]> {
 
 /** Persist the allowlist to `browser.storage.local` (on-device only). */
 export async function saveOutboundAllowlist(domains: string[]): Promise<void> {
-  const { browser } = await import('wxt/browser');
-  await browser.storage.local.set({ [OUTBOUND_STORAGE_KEY]: normalizeDomains(domains) });
+  const { storageSet } = await import('./storage');
+  await storageSet(OUTBOUND_STORAGE_KEY, normalizeDomains(domains));
 }
