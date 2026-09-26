@@ -160,6 +160,41 @@ export function mergeHandoff(base: TabHandoff, incoming: TabHandoff): TabHandoff
  *
  * The token is unaffected, so the planner can still reference the field by
  * name - it just cannot read whose name it was.
+ *
+ * ## Residual gap — measured, not assumed
+ *
+ * maskLabel's vocabulary is CARD / AADHAAR / PAN / IFSC / EMAIL / PHONE, and
+ * it catches every one of those inside a label. It has no NAME rule, and the
+ * codebase has no person-name detector anywhere — deliberately, because a
+ * person name is two capitalised words, which is indistinguishable from a
+ * product title or a company name, so any rule for it is a false-positive
+ * machine.
+ *
+ * So a label that is pure PROSE still crosses. Measured against the shipped
+ * path, before and after this change:
+ *
+ *   label                                    sent to /plan after masking
+ *   ---------------------------------------  --------------------------------
+ *   Contact ravi.sharma@example.com          Contact [EMAIL]        closed
+ *   Mobile +91 98765 43210                   Mobile [PHONE]         closed
+ *   PAN ABCDE1234F                           PAN [PAN]              closed
+ *   Aadhaar 100000000004                     Aadhaar [AADHAAR]      closed
+ *   Issued to Ravi Sharma on 12-03-2024       unchanged              OPEN
+ *   Aadhaar of Ravi Sharma                    unchanged              OPEN
+ *
+ * The root cause is upstream, in harvestFields: shapes 1 and 3 harvest <dt>
+ * and <th> ROW labels, so on a page that is a statement rather than a form
+ * (a compliance report, an account summary) its content rows become the
+ * "handoff" and its prose becomes labels. Shape 4 already constrains its label
+ * to 2-40 word characters; shapes 1 and 3 constrain nothing.
+ *
+ * The fix belongs there — harvest only genuine form fields, or bound the label
+ * the way shape 4 does. It is deliberately NOT done here, because a label-
+ * shape heuristic was tried and does not work: clause words false-positive on
+ * "Date of birth", and no punctuation/word-count rule catches a bare
+ * "Ravi Sharma" without also discarding legitimate labels like "Account
+ * holder". Until that upstream change lands, treat prose labels as a known,
+ * measured limitation rather than a closed issue.
  */
 export function handoffForPlanner(
   h: TabHandoff | null | undefined
