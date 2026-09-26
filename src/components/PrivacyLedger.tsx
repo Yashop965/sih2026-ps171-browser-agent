@@ -125,7 +125,7 @@ export default function PrivacyLedger() {
 
   async function onRowClick(d: Detection) {
     const result = await highlightElement(d.selector);
-    setNote(result.ok ? `Highlighted ${d.selector}` : result.error ?? 'Not found on page');
+    setNote(result.ok ? `Highlighted ${d.selector}` : (result.error ?? 'Not found on page'));
   }
 
   async function onCopy(e: React.MouseEvent, selector: string) {
@@ -222,18 +222,14 @@ export default function PrivacyLedger() {
         <div style={{ display: 'flex', alignItems: 'baseline' }}>
           <button onClick={() => setView('detections')} style={tab('detections')}>
             Detections{' '}
-            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
-              {dStats.total}
-            </span>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>{dStats.total}</span>
           </button>
           <button onClick={() => setView('heatmap')} style={tab('heatmap')}>
             Heatmap
           </button>
           <button onClick={() => setView('log')} style={tab('log')}>
             Audit log{' '}
-            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>
-              {stats.total}
-            </span>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: '#9A9A9A' }}>{stats.total}</span>
           </button>
         </div>
       </header>
@@ -276,14 +272,11 @@ export default function PrivacyLedger() {
                 {dStats.byType.map((t) => (
                   <button
                     key={t.type}
-                    onClick={() =>
-                      setTypeFilter(typeFilter === t.type ? null : t.type)
-                    }
+                    onClick={() => setTypeFilter(typeFilter === t.type ? null : t.type)}
                     title={`${t.percent}% of detections on this page`}
                     style={{
                       border: '1px solid #D0CDC6',
-                      background:
-                        typeFilter === t.type ? '#0D0D0D' : 'transparent',
+                      background: typeFilter === t.type ? '#0D0D0D' : 'transparent',
                       color: typeFilter === t.type ? '#FFFFFF' : '#6B6B6B',
                       borderRadius: 1,
                       padding: '4px 8px',
@@ -331,8 +324,8 @@ export default function PrivacyLedger() {
                   color: '#5B6673',
                 }}
               >
-                No PII found on this page. Anything the detector finds will
-                appear here, with the element it came from.
+                No PII found on this page. Anything the detector finds will appear here, with the
+                element it came from.
               </p>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -375,8 +368,7 @@ export default function PrivacyLedger() {
                         style={{
                           ...td,
                           textAlign: 'right',
-                          color:
-                            d.confidence >= 0.9 ? '#C3CBD6' : '#7C8695',
+                          color: d.confidence >= 0.9 ? '#C3CBD6' : '#7C8695',
                         }}
                       >
                         {Math.round(d.confidence * 100)}%
@@ -396,13 +388,13 @@ export default function PrivacyLedger() {
                           onClick={(e) => onCopy(e, d.selector)}
                           title="Copy selector"
                           style={{
-                              border: 'none',
-                              background: 'transparent',
-                              color: '#8A8A8A',
-                              cursor: 'pointer',
-                              fontSize: 10,
-                              padding: '0 0 0 6px',
-                            }}
+                            border: 'none',
+                            background: 'transparent',
+                            color: '#8A8A8A',
+                            cursor: 'pointer',
+                            fontSize: 10,
+                            padding: '0 0 0 6px',
+                          }}
                         >
                           copy
                         </button>
@@ -421,7 +413,7 @@ export default function PrivacyLedger() {
             detections={detections}
             onHighlight={(sel) =>
               highlightElement(sel).then((r) =>
-                setNote(r.ok ? `Highlighted ${sel}` : r.error ?? 'Not found on page')
+                setNote(r.ok ? `Highlighted ${sel}` : (r.error ?? 'Not found on page'))
               )
             }
           />
@@ -429,9 +421,7 @@ export default function PrivacyLedger() {
       ) : (
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto' }}>
           {error ? (
-            <p style={{ padding: '20px 12px', fontSize: 12, color: '#9a6700' }}>
-              {error}
-            </p>
+            <p style={{ padding: '20px 12px', fontSize: 12, color: '#9a6700' }}>{error}</p>
           ) : entries.length === 0 ? (
             <p
               style={{
@@ -439,10 +429,10 @@ export default function PrivacyLedger() {
                 fontSize: 12,
                 lineHeight: 1.6,
                 color: '#656d76',
-                }}
-                >
-                Nothing recorded yet. Every detection, redaction and outbound
-                payload will appear here as it happens.
+              }}
+            >
+              Nothing recorded yet. Every detection, redaction and outbound payload will appear here
+              as it happens.
             </p>
           ) : (
             <ol style={{ margin: 0, padding: 0, listStyle: 'none' }}>
@@ -585,9 +575,7 @@ export default function PrivacyLedger() {
                         }}
                       >
                         {e.payloadSize !== undefined && (
-                          <span>
-                            {(e.payloadSize / 1024).toFixed(1)} KB
-                          </span>
+                          <span>{(e.payloadSize / 1024).toFixed(1)} KB</span>
                         )}
                         {e.actionType && <span>{e.actionType}</span>}
                         {e.confidence < 1 && (

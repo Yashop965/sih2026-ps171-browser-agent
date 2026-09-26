@@ -42,14 +42,14 @@ const PATTERNS: PatternDef[] = [
   {
     type: 'AADHAAR',
     regex: /\b(\d{4}\s?\d{4}\s?\d{4})\b/g,
-    baseConfidence: 0.70,
+    baseConfidence: 0.7,
     validator: validateAadhaar,
   },
   // PAN: AAAAA9999A
   {
     type: 'PAN',
     regex: /\b([A-Z]{5}\d{4}[A-Z]{1})\b/g,
-    baseConfidence: 0.80,
+    baseConfidence: 0.8,
     validator: validatePAN,
   },
   // Credit/Debit card: 13–19 digits, optionally grouped with spaces/dashes
@@ -61,7 +61,7 @@ const PATTERNS: PatternDef[] = [
   {
     type: 'CREDIT_CARD',
     regex: /\b(\d(?:[\s-]?\d){12,18})\b/g,
-    baseConfidence: 0.70,
+    baseConfidence: 0.7,
     validator: validateCard,
   },
   // IFSC: XXXX0XXXXXX
@@ -82,7 +82,7 @@ const PATTERNS: PatternDef[] = [
   {
     type: 'PHONE',
     regex: /\b(\+?91[\s-]?[6-9]\d{9}|0[6-9]\d{9}|[6-9]\d{9})\b/g,
-    baseConfidence: 0.70,
+    baseConfidence: 0.7,
     validator: validatePhone,
   },
   // UPI VPA
@@ -96,7 +96,7 @@ const PATTERNS: PatternDef[] = [
   {
     type: 'API_KEY',
     regex: /\b(api[_-]?key|apikey|access[_-]?token|secret[_-]?key)\s*[:=]\s*([^\s,;'"]{8,})/gi,
-    baseConfidence: 0.80,
+    baseConfidence: 0.8,
   },
   // SSN (international)
   {
@@ -108,7 +108,7 @@ const PATTERNS: PatternDef[] = [
 
 // Confidence threshold — matches below this are low-confidence and still redacted
 // but not counted as "verified".
-const CONFIDENCE_THRESHOLD = 0.50;
+const CONFIDENCE_THRESHOLD = 0.5;
 
 // ─── String scanning ──────────────────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ export function scanString(text: string, selector: string): PIIMatch[] {
  */
 export function redactString(
   text: string,
-  selector: string,
+  selector: string
 ): { sanitized: string; matches: PIIMatch[] } {
   const matches = scanString(text, selector);
   if (matches.length === 0) return { sanitized: text, matches: [] };
@@ -205,9 +205,7 @@ export interface RawElement {
  * Sanitise a single interactive element.
  * Returns the sanitised element and any PII matches found.
  */
-function sanitizeElement(
-  raw: RawElement,
-): { element: SanitizedElement; matches: PIIMatch[] } {
+function sanitizeElement(raw: RawElement): { element: SanitizedElement; matches: PIIMatch[] } {
   const allMatches: PIIMatch[] = [];
   const selector = `element#${raw.id}`;
 

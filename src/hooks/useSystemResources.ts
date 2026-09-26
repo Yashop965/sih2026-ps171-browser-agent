@@ -5,14 +5,14 @@ export interface SystemResources {
   jsHeapUsedMB: number;
   jsHeapTotalMB: number;
   jsHeapPercent: number;
-  
+
   // CPU
   cpuCores: number;
-  
+
   // GPU
   gpuAdapter: string | null;
   gpuVendor: string | null;
-  
+
   // Overall health
   status: 'healthy' | 'warning' | 'critical';
   lastUpdated: number;
@@ -30,7 +30,10 @@ export function useSystemResources(): SystemResources {
     lastUpdated: Date.now(),
   });
 
-  const checkGPU = useCallback(async (): Promise<{ adapter: string | null, vendor: string | null }> => {
+  const checkGPU = useCallback(async (): Promise<{
+    adapter: string | null;
+    vendor: string | null;
+  }> => {
     try {
       if (!navigator.gpu) {
         // Fallback to WebGL
@@ -47,10 +50,20 @@ export function useSystemResources(): SystemResources {
         }
         return { adapter: 'WebGL', vendor: null };
       }
-      
+
       const adapter = await navigator.gpu.requestAdapter();
       if (adapter) {
-        const info = await adapter.requestAdapterInfo();
+        // `requestAdapterInfo` is the deprecated WebGPU shape; `adapter.info`
+        // is the current one. Declared locally so this compiles against the
+        // older typings without an `any` cast.
+        type AdapterInfo = {
+          vendor?: string;
+          architecture?: string;
+          device?: string;
+          description?: string;
+        };
+        const info: AdapterInfo =
+          'info' in adapter ? ((adapter as GPUAdapter & { info?: AdapterInfo }).info ?? {}) : {};
         return {
           adapter: info.device || info.description || 'GPU',
           vendor: info.vendor || null,
@@ -69,21 +82,21 @@ export function useSystemResources(): SystemResources {
       let jsHeapUsedMB = 0;
       let jsHeapTotalMB = 0;
       let jsHeapPercent = 0;
-      
+
       if (memory) {
         jsHeapUsedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
         jsHeapTotalMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);
         jsHeapPercent = Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100);
       }
-      
+
       // GPU info
       const { adapter, vendor } = await checkGPU();
-      
+
       // Determine status based on memory usage
       let status: 'healthy' | 'warning' | 'critical' = 'healthy';
       if (jsHeapPercent > 80) status = 'critical';
       else if (jsHeapPercent > 50) status = 'warning';
-      
+
       setResources({
         jsHeapUsedMB,
         jsHeapTotalMB,
@@ -98,12 +111,12 @@ export function useSystemResources(): SystemResources {
 
     // Initial check
     updateResources();
-    
+
     // Poll every 10s (issue #74: 2s was constant CPU in a tiny popup for the
     // whole session; the resource numbers move slowly enough that 10s is a
     // coarse, near-imperceptible timer. No leak - cleared on unmount.)
     const interval = setInterval(updateResources, 10000);
-    
+
     return () => clearInterval(interval);
   }, [checkGPU]);
 

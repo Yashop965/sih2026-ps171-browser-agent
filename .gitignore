@@ -1,6 +1,12 @@
 # Dependencies
 node_modules/
-package-lock.json
+# Lockfiles ARE committed (removed from this list on 2026-09-26).
+# package-lock.json was gitignored, so it was absent from every CI checkout
+# and `npm ci` could never run - setup-node with `cache: npm` fails outright
+# with "Dependencies lock file is not found". Committing the lock is what
+# makes installs reproducible for everyone but the developer.
+# yarn.lock / pnpm-lock.yaml / bun.lockb stay ignored: this project uses npm,
+# and committing several lockfiles at once is how dependency drift starts.
 yarn.lock
 pnpm-lock.yaml
 bun.lockb

@@ -152,11 +152,13 @@ class Florence2Pipeline {
     return 'gpu' in navigator && (navigator as any).gpu !== null;
   }
 
-  async initialize(config: VisionModelConfig = {
-    modelId: MODEL_ID,
-    backend: Florence2Pipeline.isWebGPUSupported() ? 'webgpu' : 'wasm',
-    dtype: 'q4',
-  }): Promise<void> {
+  async initialize(
+    config: VisionModelConfig = {
+      modelId: MODEL_ID,
+      backend: Florence2Pipeline.isWebGPUSupported() ? 'webgpu' : 'wasm',
+      dtype: 'q4',
+    }
+  ): Promise<void> {
     if (this.initialized) return;
     if (this.loadPromise) return this.loadPromise;
     // Fast-fail within the retry cooldown after a failed load: reject with
@@ -167,10 +169,10 @@ class Florence2Pipeline {
       Date.now() - this.loadFailedAt < Florence2Pipeline.LOAD_RETRY_COOLDOWN_MS
     ) {
       const waitS = Math.ceil(
-        (Florence2Pipeline.LOAD_RETRY_COOLDOWN_MS - (Date.now() - this.loadFailedAt)) / 1000,
+        (Florence2Pipeline.LOAD_RETRY_COOLDOWN_MS - (Date.now() - this.loadFailedAt)) / 1000
       );
       return Promise.reject(
-        new Error(`on-device model load failed (${this.lastLoadError}); retrying in ~${waitS}s`),
+        new Error(`on-device model load failed (${this.lastLoadError}); retrying in ~${waitS}s`)
       );
     }
 
@@ -198,7 +200,9 @@ class Florence2Pipeline {
         // Configure environment
         env.allowLocalModels = false;
         env.useBrowserCache = true;
-        env.logLevel = 'error';
+        // `logLevel` is not on TransformersEnvironment in transformers@3.5;
+        // the verbosity knob moved onto the pipeline options. Omit it here
+        // rather than casting - an unused env field is not worth an `any`.
 
         // #141: load the onnxruntime-web runtime from the EXTENSION's own
         // origin instead of the jsdelivr CDN. The content script's MV3 CSP is
@@ -215,9 +219,7 @@ class Florence2Pipeline {
         try {
           const g: any = globalThis;
           const extApi: any = g.browser ?? g.chrome;
-          const baseUrl = extApi?.runtime?.getURL
-            ? extApi.runtime.getURL('vlm/ort/')
-            : undefined;
+          const baseUrl = extApi?.runtime?.getURL ? extApi.runtime.getURL('vlm/ort/') : undefined;
           if (baseUrl) {
             const ortWasm: any = (env as any).backends?.onnx?.wasm;
             if (ortWasm) {
@@ -268,8 +270,7 @@ class Florence2Pipeline {
         // instead of silently resetting to idle, and so the UI + runner can
         // say WHY the model is unavailable. Narrow first: catch vars are
         // `unknown` here, so `.message` needs an instanceof guard.
-        this.lastLoadError =
-          error instanceof Error ? error.message : String(error);
+        this.lastLoadError = error instanceof Error ? error.message : String(error);
         this.loadFailedAt = Date.now();
         throw error;
       } finally {
@@ -319,7 +320,10 @@ class Florence2Pipeline {
           // phrase grounding finds NAMED UI widgets by their label. Runs in the
           // offscreen module worker (#142), where the image processor decodes the
           // blob/bitmap so boxes scale by the real pixel size.
-          result = await this.runGrounding(image, options.query || 'find: button, link, input box, text field, tab');
+          result = await this.runGrounding(
+            image,
+            options.query || 'find: button, link, input box, text field, tab'
+          );
           break;
         case 'ocr':
           result = await this.runOCR(image);
@@ -362,7 +366,7 @@ class Florence2Pipeline {
   private async runTask(
     image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string,
     task: string,
-    query?: string,
+    query?: string
   ): Promise<unknown> {
     if (!this.model || !this.processor) throw new Error('Pipeline not initialized');
     // Florence expects an image with a .size ([h, w]) for <OD> box scaling.
@@ -371,30 +375,45 @@ class Florence2Pipeline {
     const prompts = this.processor.construct_prompts(query ? `${task} ${query}` : task);
     const inputs = await this.processor(img, prompts);
     const generated_ids = await this.model.generate({ ...inputs, max_new_tokens: 128 });
-    const generated_text = this.processor.batch_decode(generated_ids, { skip_special_tokens: false })[0];
+    const generated_text = this.processor.batch_decode(generated_ids, {
+      skip_special_tokens: false,
+    })[0];
     return this.processor.post_process_generation(generated_text, task, img.size);
   }
 
-  private async runObjectDetection(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string, query?: string): Promise<unknown> {
+  private async runObjectDetection(
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string,
+    query?: string
+  ): Promise<unknown> {
     return this.runTask(image, '<OD>', query);
   }
 
   // #115: phrase grounding (<PG>) - the "find: button / search box / menu" task.
   // Output post-processes to {labels, bboxes} exactly like <OD>, so the same
   // extractBoxes path handles both.
-  private async runGrounding(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string, query?: string): Promise<unknown> {
+  private async runGrounding(
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string,
+    query?: string
+  ): Promise<unknown> {
     return this.runTask(image, '<PG>', query);
   }
 
-  private async runOCR(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string): Promise<unknown> {
+  private async runOCR(
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string
+  ): Promise<unknown> {
     return this.runTask(image, '<OCR>');
   }
 
-  private async runCaption(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string): Promise<unknown> {
+  private async runCaption(
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string
+  ): Promise<unknown> {
     return this.runTask(image, '<CAP>');
   }
 
-  private async runVQA(image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string, question: string): Promise<unknown> {
+  private async runVQA(
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string,
+    question: string
+  ): Promise<unknown> {
     return this.runTask(image, '<VQA>', question);
   }
 
@@ -456,20 +475,18 @@ class Florence2Pipeline {
       if (container) {
         const labels = container.labels as string[] | undefined;
         const scores = container.scores as number[] | undefined;
-        return (container.bboxes as Array<number[] | Record<string, number>>).map(
-          (bbox, i) => ({
-            x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
-            y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
-            width:
-              (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) -
-              (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
-            height:
-              (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) -
-              (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
-            label: labels?.[i] || `Item ${i + 1}`,
-            score: scores?.[i] || 0.5,
-          })
-        );
+        return (container.bboxes as Array<number[] | Record<string, number>>).map((bbox, i) => ({
+          x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
+          y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
+          width:
+            (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) -
+            (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
+          height:
+            (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) -
+            (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
+          label: labels?.[i] || `Item ${i + 1}`,
+          score: scores?.[i] || 0.5,
+        }));
       }
     }
 
@@ -538,7 +555,7 @@ export const visionPipeline = new Florence2Pipeline();
 export async function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
-      (blob) => blob ? resolve(blob) : reject(new Error('Failed to convert canvas')),
+      (blob) => (blob ? resolve(blob) : reject(new Error('Failed to convert canvas'))),
       'image/png'
     );
   });

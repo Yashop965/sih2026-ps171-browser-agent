@@ -60,7 +60,10 @@ const MEANINGFUL_ROLES = new Set([
  * at dpr scale, so one CSS px = dpr screenshot px. Returns the box's CSS
  * center (what elementFromPoint wants) + CSS rect.
  */
-export function scaleBoxToCss(box: GroundBox, dpr: number): { cx: number; cy: number; rect: GroundBox } {
+export function scaleBoxToCss(
+  box: GroundBox,
+  dpr: number
+): { cx: number; cy: number; rect: GroundBox } {
   const s = dpr > 0 ? dpr : 1;
   return {
     cx: (box.x + box.width / 2) / s,
@@ -102,7 +105,7 @@ function isMeaningful(el: Element | null): boolean {
 export function resolveGroundNode(
   document: { elementFromPoint: (x: number, y: number) => Element | null },
   cx: number,
-  cy: number,
+  cy: number
 ): Element | null {
   const el = document.elementFromPoint(cx, cy) as Element | null;
   if (!el) return null;
@@ -135,7 +138,7 @@ export function bridgeGroundBoxes(
   document: { elementFromPoint: (x: number, y: number) => Element | null },
   boxes: GroundBox[],
   dpr: number,
-  existingNodes: Iterable<Element>,
+  existingNodes: Iterable<Element>
 ): BridgedNode[] {
   const seen = new Set<Element | null>(Array.from(existingNodes));
   const out: BridgedNode[] = [];
@@ -157,7 +160,8 @@ export function bridgeGroundBoxes(
  * specialize it; a sensible default covers common form/search surfaces.
  */
 export function groundQueryForContext(task?: string): string {
-  const base = 'search box, input field, text field, button, submit button, link, tab, menu, select dropdown, checkbox, radio button';
+  const base =
+    'search box, input field, text field, button, submit button, link, tab, menu, select dropdown, checkbox, radio button';
   const hint = task ? task.toLowerCase() : '';
   // Pull task-relevant widgets to the front when they are named.
   const extra = [...base.split(', ')]

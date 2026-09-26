@@ -1,12 +1,27 @@
 import { defineBackground } from 'wxt/sandbox';
+import { browser } from 'wxt/browser';
+import type { Runtime } from 'wxt/browser';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
 import { sessionManager } from '../lib/sessionManager';
 import { PrivacyLedger, type PrivacyLogEntry } from '../lib/pii/privacyLedger';
-import { AgentRunner, emptyTaskState, type AgentTaskState, type ChecklistItem } from '../lib/agentRunner';
+import {
+  AgentRunner,
+  emptyTaskState,
+  type AgentTaskState,
+  type ChecklistItem,
+} from '../lib/agentRunner';
 import { withPortRetry } from '../lib/portRetry';
 import { visionConfirm, type VisionConfirmItem } from '../lib/visionConfirm';
 import { loadProfile } from '../lib/userProfile';
-import { emptyHandoff, harvestToHandoff, mergeHandoff, rePerceiveHandoff, rePerceptionChanged, type TabHandoff, type OpenTabInfo } from '../lib/tabHandoff';
+import {
+  emptyHandoff,
+  harvestToHandoff,
+  mergeHandoff,
+  rePerceiveHandoff,
+  rePerceptionChanged,
+  type TabHandoff,
+  type OpenTabInfo,
+} from '../lib/tabHandoff';
 import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS, hostOfUrl } from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
 import { vlmHostOcr, vlmHostStatus, closeVlmHost, vlmHostGround } from '../lib/vlmHost';
@@ -83,7 +98,6 @@ export default defineBackground({
       console.log('[keepalive] SW keepalive tick -', longOpsInFlight, 'long op(s) in flight');
     });
 
-
     // ─── Issue #71: SW-owned task runner ─────────────────────────────────────
     // The agent loop now lives here, not in the popup. The popup is a thin
     // view that subscribes to TASK_PROGRESS broadcasts. Closing the popup no
@@ -99,8 +113,8 @@ export default defineBackground({
     // CONFIRM / DISMISS / STOP reaches the SW. At most one gate pause is in
     // flight at a time (the loop is serial), so a single resolver is enough.
     let outboundConfirmResolver:
-      | ((d: { confirmed: boolean; dismissed?: boolean; stopRequested?: boolean }) => void)
-      | null = null;
+      ((d: { confirmed: boolean; dismissed?: boolean; stopRequested?: boolean }) => void) | null =
+      null;
     const resetOutboundGate = (): void => {
       outboundConfirmResolver = null;
     };
@@ -204,7 +218,7 @@ export default defineBackground({
       if (currentTargetTab?.tabId === tabId) return;
       const { ok, value } = await withPortRetry(
         async () => await browser.tabs.sendMessage(tabId, { type: 'HARVEST_FIELDS' }),
-        (v: any) => v === undefined,
+        (v: any) => v === undefined
       );
       if (gen !== watcherGeneration) return; // task boundary crossed mid-harvest
       let url = '';
@@ -213,7 +227,9 @@ export default defineBackground({
         const t = await browser.tabs.get(tabId);
         url = t?.url || '';
         title = t?.title || '';
-      } catch { /* tab gone - snapshot update below is a no-op */ }
+      } catch {
+        /* tab gone - snapshot update below is a no-op */
+      }
       if (!ok || !value?.fields?.length) return;
       const watch = watchedSourceTabs.get(tabId);
       if (!watch) return; // unwatched since the harvest (task reset, or the
@@ -288,7 +304,10 @@ export default defineBackground({
       }, MIN_WATCH_POLL_MS);
     };
     const stopWatcherPoll = (): void => {
-      if (watcherPollTimer !== null) { clearInterval(watcherPollTimer); watcherPollTimer = null; }
+      if (watcherPollTimer !== null) {
+        clearInterval(watcherPollTimer);
+        watcherPollTimer = null;
+      }
     };
     // Event path into the serialised re-perception: a URL change on a
     // watched SOURCE tab (tabs.onUpdated) queues a DOM-only re-perception.
@@ -304,7 +323,10 @@ export default defineBackground({
      * source hop after the first is watched too. Records the origin host for
      * the cross-site guard. Cost cap: the first MAX_WATCHED_TABS win.
      */
-    const registerWatchedSource = async (tabId: number, nextTargetTabId?: number): Promise<void> => {
+    const registerWatchedSource = async (
+      tabId: number,
+      nextTargetTabId?: number
+    ): Promise<void> => {
       if (nextTargetTabId !== undefined && tabId === nextTargetTabId) return; // will be the focus tab
       if (watchedSourceTabs.size >= MAX_WATCHED_TABS && !watchedSourceTabs.has(tabId)) return; // cost cap
       let url = '';
@@ -313,7 +335,9 @@ export default defineBackground({
         const t = await browser.tabs.get(tabId);
         url = t?.url || '';
         title = t?.title || '';
-      } catch { /* already closed - nothing to watch */ }
+      } catch {
+        /* already closed - nothing to watch */
+      }
       watchedSourceTabs.set(tabId, { originHost: hostOfUrl(url), snapshot: { url, title } });
       startWatcherPoll();
     };
@@ -358,7 +382,7 @@ export default defineBackground({
     const harvestTabIntoHandoff = async (tabId: number): Promise<void> => {
       const { ok, value } = await withPortRetry(
         async () => await browser.tabs.sendMessage(tabId, { type: 'HARVEST_FIELDS' }),
-        (v: any) => v === undefined,
+        (v: any) => v === undefined
       );
       if (!ok || !value?.fields?.length) return;
       let sourceUrl = '';
@@ -384,9 +408,10 @@ export default defineBackground({
           : undefined) ??
         (await browser.tabs.query({ active: true, currentWindow: true }))?.[0]?.windowId ??
         undefined;
-      const tabs = windowId !== undefined
-        ? await browser.tabs.query({ windowId })
-        : await browser.tabs.query({ currentWindow: true });
+      const tabs =
+        windowId !== undefined
+          ? await browser.tabs.query({ windowId })
+          : await browser.tabs.query({ currentWindow: true });
       return tabs
         .filter((t) => t.id !== undefined && t.url?.startsWith('http'))
         .slice(0, 10)
@@ -405,15 +430,20 @@ export default defineBackground({
       // success). See src/lib/portRetry.ts.
       const { ok, value, error } = await withPortRetry(
         async () => await browser.tabs.sendMessage(tabId, { type: 'capturePage' }),
-        (v: any) => v === undefined,
+        (v: any) => v === undefined
       );
       if (!ok || !value) return { ok: false, error: error };
       const snapshot: any = value;
       for (const pii of snapshot.detectedPII || []) {
         privacyLedger.log({
-          timestamp: Date.now(), tabId, url: snapshot.url || '', type: pii.type || 'PII',
-          selector: pii.selector || '', confidence: pii.confidence ?? 1,
-          verified: Boolean(pii.isVerified), action: 'DETECTED',
+          timestamp: Date.now(),
+          tabId,
+          url: snapshot.url || '',
+          type: pii.type || 'PII',
+          selector: pii.selector || '',
+          confidence: pii.confidence ?? 1,
+          verified: Boolean(pii.isVerified),
+          action: 'DETECTED',
         });
       }
       let elements: any[] = snapshot.interactiveElements || [];
@@ -464,7 +494,7 @@ export default defineBackground({
             type: 'VISION_GROUND',
             boxes: lastGroundedBoxes,
           }),
-        (v: any) => v === undefined,
+        (v: any) => v === undefined
       );
       const bridged: any[] = (gRes as any)?.elements ?? [];
       if (!gOk || !bridged.length) return domElements;
@@ -474,7 +504,7 @@ export default defineBackground({
     const vlmGroundingFallback = async (
       tabId: number,
       url: string,
-      domElements: any[],
+      domElements: any[]
     ): Promise<any[]> => {
       // Memo: a freshly-grounded page (same URL) is bridged from the CACHED
       // boxes (cheap, no model re-pay) instead of re-running grounding - the
@@ -513,7 +543,7 @@ export default defineBackground({
               type: 'VISION_GROUND',
               boxes: ground.boxes,
             }),
-          (v: any) => v === undefined,
+          (v: any) => v === undefined
         );
         const bridged: any[] = (gRes as any)?.elements ?? [];
         if (!gOk || !bridged.length) return domElements;
@@ -522,7 +552,9 @@ export default defineBackground({
         // runner, which feeds it to the planner - no extra progress
         // broadcast needed here.
         const merged = [...domElements, ...bridged];
-        console.log(`[#115] grounded ${bridged.length} element(s) onto a ${domElements.length}-element page`);
+        console.log(
+          `[#115] grounded ${bridged.length} element(s) onto a ${domElements.length}-element page`
+        );
         return merged;
       } catch (e) {
         console.warn('[#115] grounding fallback failed, using DOM-only:', e);
@@ -542,7 +574,8 @@ export default defineBackground({
         if (typeof action.tabId === 'number') {
           try {
             const t = await browser.tabs.get(action.tabId);
-            if (t?.url && (t.url.startsWith('http://') || t.url.startsWith('https://'))) next = t.id;
+            if (t?.url && (t.url.startsWith('http://') || t.url.startsWith('https://')))
+              next = t.id;
           } catch {
             next = undefined;
           }
@@ -588,7 +621,7 @@ export default defineBackground({
                 next,
                 target?.windowId ?? 0,
                 target?.url || '',
-                `cross-tab hop in task: ${'(' + (target?.title || 'untitled') + ')'}`,
+                `cross-tab hop in task: ${'(' + (target?.title || 'untitled') + ')'}`
               );
             }
           } catch {
@@ -598,8 +631,14 @@ export default defineBackground({
           // script a beat so the next EXTRACT finds the port attached.
           await waitForTabLoad(next, 3_000);
           privacyLedger.log({
-            timestamp: Date.now(), tabId: next, url: target?.url || '', type: 'EXECUTION',
-            selector: 'SWITCH_TAB', confidence: 1, verified: true, action: 'SUCCESS',
+            timestamp: Date.now(),
+            tabId: next,
+            url: target?.url || '',
+            type: 'EXECUTION',
+            selector: 'SWITCH_TAB',
+            confidence: 1,
+            verified: true,
+            action: 'SUCCESS',
           });
           return { ok: true, note: 'tab switched - will re-extract the new tab' };
         } catch (e) {
@@ -612,8 +651,12 @@ export default defineBackground({
       try {
         const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
         privacyLedger.log({
-          timestamp: Date.now(), tabId, url: '', type: 'EXECUTION',
-          selector: action?.targetId?.toString() || '', confidence: 1,
+          timestamp: Date.now(),
+          tabId,
+          url: '',
+          type: 'EXECUTION',
+          selector: action?.targetId?.toString() || '',
+          confidence: 1,
           verified: result?.ok === true,
           action: result?.ok ? 'SUCCESS' : 'FAILURE',
           error: result?.error,
@@ -625,12 +668,19 @@ export default defineBackground({
         // before it can reply (#86). The action likely worked - the next
         // EXTRACT re-plans on the new page. Do NOT report it as a failure.
         const navigated =
-          /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(msg);
+          /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(
+            msg
+          );
         if (navigated) {
           privacyLedger.log({
-            timestamp: Date.now(), tabId, url: '', type: 'EXECUTION',
-            selector: action?.targetId?.toString() || '', confidence: 1,
-            verified: true, action: 'SUCCESS',
+            timestamp: Date.now(),
+            tabId,
+            url: '',
+            type: 'EXECUTION',
+            selector: action?.targetId?.toString() || '',
+            confidence: 1,
+            verified: true,
+            action: 'SUCCESS',
           });
           return { ok: true, note: 'page navigated - will re-extract the new page' };
         }
@@ -659,8 +709,14 @@ export default defineBackground({
         const moved = await browser.tabs.get(tabId).catch(() => null);
         currentTargetTab = { tabId, windowId: moved?.windowId ?? 0 };
         privacyLedger.log({
-          timestamp: Date.now(), tabId, url: target, type: 'EXECUTION',
-          selector: 'NAVIGATE', confidence: 1, verified: true, action: 'SUCCESS',
+          timestamp: Date.now(),
+          tabId,
+          url: target,
+          type: 'EXECUTION',
+          selector: 'NAVIGATE',
+          confidence: 1,
+          verified: true,
+          action: 'SUCCESS',
         });
         return { ok: true };
       } catch (e) {
@@ -674,7 +730,9 @@ export default defineBackground({
     // targets the active web tab's content script and never blocks the plan.
     const setCursorThinking = (on: boolean) => {
       void driveTab()
-        .then((id) => (id === undefined ? null : browser.tabs.sendMessage(id, { type: 'CURSOR_THINKING', on })))
+        .then((id) =>
+          id === undefined ? null : browser.tabs.sendMessage(id, { type: 'CURSOR_THINKING', on })
+        )
         .catch(() => {});
     };
 
@@ -742,7 +800,11 @@ export default defineBackground({
             // failure (matches the pre-#142 content-script semantics).
             return { confirmed: false, detail: 'OCR returned no text' };
           }
-          return { confirmed: false, detail: 'unavailable', unavailableReason: res.error || 'vlm host failed' };
+          return {
+            confirmed: false,
+            detail: 'unavailable',
+            unavailableReason: res.error || 'vlm host failed',
+          };
         }
         const ocrText: string = res.text ?? '';
         if (!ocrText) {
@@ -762,7 +824,7 @@ export default defineBackground({
     };
 
     // Start (or restart) the SW-owned runner for a task.
-    const startTask = async (message: any, sender: browser.runtime.MessageSender) => {
+    const startTask = async (message: any, sender: Runtime.MessageSender) => {
       // A popup-originated message has no sender.tab, so resolve the active
       // web tab to target. The runner's channels re-resolve the active tab per
       // call, so it always acts on the page the user is looking at.
@@ -846,7 +908,8 @@ export default defineBackground({
           },
         },
       });
-      runner.run()
+      runner
+        .run()
         .then(() => {
           // #144 P3: the run ended (complete / stopped / failed) - tear down
           // the passive watchers. While a run PAUSES at the #143 outbound
@@ -870,7 +933,9 @@ export default defineBackground({
           broadcastProgress({
             ...emptyTaskState(),
             status: 'failed',
-            logs: [`${new Date().toLocaleTimeString()}: Run error: ${e instanceof Error ? e.message : String(e)}`],
+            logs: [
+              `${new Date().toLocaleTimeString()}: Run error: ${e instanceof Error ? e.message : String(e)}`,
+            ],
             lastUpdate: Date.now(),
           });
         });
@@ -893,8 +958,36 @@ export default defineBackground({
       auditLedger.hydrate(auditInitial);
     })();
 
+    /**
+     * Every message the service worker accepts. Typed as a discriminated union so
+     * `message` narrows correctly inside the switch - the listener signature from
+     * `onMessage` types the payload as `unknown`, which made every
+     * `message.type` / `message.action` access a type error.
+     */
+    type BackgroundRequest =
+      | { type: 'VISION_EXTRACT' }
+      | { type: 'VLM_STATUS' }
+      | { type: 'VLM_OCR' }
+      | { type: 'EXTRACT' }
+      | { type: 'EXECUTE'; action?: { targetId?: number | string } }
+      | { type: 'NAVIGATE_TAB'; url: string; tabId?: number }
+      | { type: 'GET_PRIVACY_LEDGER' }
+      | { type: 'GET_AUDIT_LOG' }
+      | { type: 'CLEAR_LEDGER' }
+      | ScreenshotMessage
+      | { type: 'START_SESSION' }
+      | { type: 'UPDATE_SESSION'; sessionId: string; [k: string]: unknown }
+      | { type: 'COMPLETE_SESSION'; sessionId: string }
+      | { type: 'GET_SESSION'; sessionId: string }
+      | { type: 'START_TASK'; task: string; [k: string]: unknown }
+      | { type: 'STOP_TASK' }
+      | { type: 'GET_TASK_STATE' }
+      | { type: 'CONFIRM_OUTBOUND'; confirmed: boolean }
+      | { type: 'DISMISS_OUTBOUND' };
+
     // Listen for messages from content scripts
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    browser.runtime.onMessage.addListener((raw: unknown, sender, sendResponse): true => {
+      const message = raw as BackgroundRequest;
       console.log('[PII-Agent] Received message:', message.type);
 
       switch (message.type) {
@@ -907,7 +1000,10 @@ export default defineBackground({
             beginLongOp();
             try {
               const tabId = sender.tab?.id;
-              if (!tabId) { sendResponse({ ok: false, error: 'No tab ID' }); return; }
+              if (!tabId) {
+                sendResponse({ ok: false, error: 'No tab ID' });
+                return;
+              }
               const result: any = await browser.tabs.sendMessage(tabId, { type: 'VISION_EXTRACT' });
               sendResponse(result);
             } catch (e) {
@@ -938,11 +1034,18 @@ export default defineBackground({
               }
               // VLM_OCR
               const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-              if (activeTab?.id === undefined) { sendResponse({ ok: false, error: 'No active tab' }); return; }
+              if (activeTab?.id === undefined) {
+                sendResponse({ ok: false, error: 'No active tab' });
+                return;
+              }
               const dataUrl = await browser.tabs.captureVisibleTab(activeTab.windowId);
               beginLongOp();
               let res;
-              try { res = await vlmHostOcr(dataUrl, 300_000); } finally { endLongOp(); }
+              try {
+                res = await vlmHostOcr(dataUrl, 300_000);
+              } finally {
+                endLongOp();
+              }
               sendResponse(res);
             } catch (e) {
               sendResponse({ ok: false, error: String(e) });
@@ -958,9 +1061,15 @@ export default defineBackground({
               // pages (the popup can be driven as a tab via CDP). See
               // resolveWebTab.
               const tabId = await resolveWebTab(sender);
-              if (!tabId) { sendResponse({ error: 'No web tab found', ok: false }); return; }
+              if (!tabId) {
+                sendResponse({ error: 'No web tab found', ok: false });
+                return;
+              }
               const snapshot: any = await browser.tabs.sendMessage(tabId, { type: 'capturePage' });
-              if (!snapshot) { sendResponse({ ok: false, error: 'No snapshot' }); return; }
+              if (!snapshot) {
+                sendResponse({ ok: false, error: 'No snapshot' });
+                return;
+              }
               // Log PII detections
               for (const pii of snapshot.detectedPII || []) {
                 privacyLedger.log({
@@ -1002,10 +1111,16 @@ export default defineBackground({
             // resolveWebTab always targets a real http(s) tab - never the
             // extension's own pages.
             const tabId = await resolveWebTab(sender);
-            if (!tabId) { sendResponse({ error: 'No web tab found', ok: false }); return; }
+            if (!tabId) {
+              sendResponse({ error: 'No web tab found', ok: false });
+              return;
+            }
             try {
               const action = message.action;
-              const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
+              const result: any = await browser.tabs.sendMessage(tabId, {
+                type: 'EXECUTE',
+                action,
+              });
               // Log execution to ledger
               privacyLedger.log({
                 timestamp: Date.now(),
@@ -1027,7 +1142,9 @@ export default defineBackground({
               // planner will think the click failed and retry-loop. The next
               // EXTRACT will see the new page and re-plan correctly.
               const navigated =
-                /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(msg);
+                /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(
+                  msg
+                );
               if (navigated) {
                 privacyLedger.log({
                   timestamp: Date.now(),
@@ -1059,7 +1176,10 @@ export default defineBackground({
             try {
               // Target a real web tab, never the extension's own pages.
               const tabId = await resolveWebTab(sender);
-              if (!tabId) { sendResponse({ ok: false, error: 'No web tab found' }); return; }
+              if (!tabId) {
+                sendResponse({ ok: false, error: 'No web tab found' });
+                return;
+              }
               const target = message.url;
               // Only http(s) - refuse javascript: and other dangerous schemes.
               let url = target;
@@ -1109,20 +1229,47 @@ export default defineBackground({
           sendResponse({ success: true });
           return true;
 
+        // These five handlers are async-style (they return a value rather than
+        // calling sendResponse). Bridge them into the callback style used by
+        // every other case so the whole switch has ONE return contract - which
+        // is also what the onMessage type requires.
+        //
+        // The `.catch` is NOT optional. Once we return `true` the message
+        // channel is held open, so a rejected handler with no catch would
+        // leave the caller waiting forever. On `main` these returned their
+        // promise to Chrome, which resolved the caller with undefined and set
+        // runtime.lastError. Four of the five have no internal try/catch and
+        // can reject (handleStartSession awaits browser.tabs.query), so they
+        // would hang rather than report. Same failure shape as #174.
         case 'CAPTURE_SCREENSHOT':
-          return captureScreenshot(message, sender);
+          captureScreenshot(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
+          return true;
 
         case 'START_SESSION':
-          return handleStartSession(message, sender);
+          handleStartSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
+          return true;
 
         case 'UPDATE_SESSION':
-          return handleUpdateSession(message, sender);
+          handleUpdateSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
+          return true;
 
         case 'COMPLETE_SESSION':
-          return handleCompleteSession(message, sender);
+          handleCompleteSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
+          return true;
 
         case 'GET_SESSION':
-          return handleGetSession(message, sender);
+          handleGetSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
+          return true;
 
         case 'START_TASK':
           // Issue #71/#69: spawn the SW-owned runner. Fire-and-forget; the
@@ -1184,7 +1331,7 @@ export default defineBackground({
           return true;
 
         default:
-          sendResponse({ error: `Unknown message type: ${message.type}` });
+          sendResponse({ error: `Unknown message type: ${(message as { type: string }).type}` });
           return true;
       }
     });
@@ -1216,7 +1363,8 @@ export default defineBackground({
     });
 
     // Handle actions returned from server
-    browser.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
+    browser.runtime.onMessage.addListener((raw: unknown, _sender: Runtime.MessageSender) => {
+      const message = raw as { type: string; result?: unknown };
       if (message.type === 'ACTION_RESULT') {
         agentState.lastActionResult = message.result;
       }
@@ -1225,8 +1373,8 @@ export default defineBackground({
 });
 
 async function captureScreenshot(
-  message: ScreenshotMessage,
-  sender: browser.runtime.MessageSender
+  _message: ScreenshotMessage,
+  sender: Runtime.MessageSender
 ): Promise<{ dataUrl?: string; error?: string }> {
   try {
     const dataUrl = await browser.tabs.captureVisibleTab(sender.tab?.windowId);
@@ -1247,7 +1395,7 @@ async function captureScreenshot(
  * We therefore only accept a sender tab that is a real web URL; otherwise we
  * scan the sender's window (or the current window) for an active web tab.
  */
-async function resolveWebTab(sender: browser.runtime.MessageSender): Promise<number | undefined> {
+async function resolveWebTab(sender: Runtime.MessageSender): Promise<number | undefined> {
   const isWeb = (u?: string) => !!u && (u.startsWith('http://') || u.startsWith('https://'));
 
   // 1) Sender tab, if it is a real web page (typical content-script sender).
@@ -1301,10 +1449,13 @@ async function waitForTabLoad(tabId: number, timeoutMs: number): Promise<boolean
         resolve(true);
       }
     };
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve(false);
-    }, Math.max(0, deadline - Date.now()));
+    const timer = setTimeout(
+      () => {
+        cleanup();
+        resolve(false);
+      },
+      Math.max(0, deadline - Date.now())
+    );
 
     function cleanup() {
       clearTimeout(timer);
@@ -1324,7 +1475,6 @@ interface ScreenshotMessage {
   type: 'CAPTURE_SCREENSHOT';
 }
 
-
 class AgentState {
   currentTask: string | null = null;
   lastActionResult: any = null;
@@ -1333,10 +1483,7 @@ class AgentState {
 
 // ─── Session Handlers ────────────────────────────────────────────────────────
 
-async function handleStartSession(
-  message: any,
-  sender: browser.runtime.MessageSender
-): Promise<any> {
+async function handleStartSession(message: any, sender: Runtime.MessageSender): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
 
@@ -1354,10 +1501,7 @@ async function handleStartSession(
   return { success: true, sessionId };
 }
 
-async function handleUpdateSession(
-  message: any,
-  sender: browser.runtime.MessageSender
-): Promise<any> {
+async function handleUpdateSession(message: any, sender: Runtime.MessageSender): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
 
@@ -1369,10 +1513,7 @@ async function handleUpdateSession(
   return { success: true };
 }
 
-async function handleCompleteSession(
-  message: any,
-  sender: browser.runtime.MessageSender
-): Promise<any> {
+async function handleCompleteSession(message: any, sender: Runtime.MessageSender): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
 
@@ -1384,10 +1525,7 @@ async function handleCompleteSession(
   return { success: true };
 }
 
-async function handleGetSession(
-  message: any,
-  sender: browser.runtime.MessageSender
-): Promise<any> {
+async function handleGetSession(_message: any, sender: Runtime.MessageSender): Promise<any> {
   const tabId = sender.tab?.id;
   if (!tabId) return { error: 'No tab ID' };
 

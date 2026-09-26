@@ -258,8 +258,9 @@ export class SessionManager {
    * Get all active sessions
    */
   getActiveSessions(): SessionState[] {
-    return Array.from(this.sessions.values())
-      .filter(s => s.status === 'active' || s.status === 'paused');
+    return Array.from(this.sessions.values()).filter(
+      (s) => s.status === 'active' || s.status === 'paused'
+    );
   }
 
   /**
@@ -309,9 +310,14 @@ export class SessionManager {
     }
 
     for (const id of stale) {
+      // tabListeners is keyed by TAB id, not session id (see :111). Passing
+      // the session id here meant the delete was always a no-op, so every
+      // pruned session leaked its tabs.onUpdated listener for the lifetime
+      // of the service worker. Read the session BEFORE dropping it.
+      const staleSession = this.sessions.get(id);
       this.sessions.delete(id);
       this.contextMap.delete(id);
-      this.tabListeners.delete(id);
+      if (staleSession) this.tabListeners.delete(staleSession.tabId);
       console.log(`[SessionManager] Pruned stale session ${id}`);
     }
   }

@@ -22,13 +22,72 @@
 
 // Common English stop words for checklist descriptions.
 const STOPWORDS = new Set([
-  'a', 'an', 'the', 'to', 'of', 'in', 'on', 'for', 'and', 'or', 'but',
-  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'by', 'with', 'from',
-  'that', 'this', 'it', 'its', 'at', 'as', 'when', 'after', 'then', 'so',
-  'we', 'you', 'i', 'he', 'she', 'they', 'them', 'his', 'her', 'our', 'your',
-  'open', 'opened', 'click', 'clicked', 'search', 'searched', 'look', 'lookup',
-  'up', 'looked', 'navigate', 'navigated', 'visit', 'visited', 'find', 'found',
-  'go', 'went', 'article', 'page', 'link', 'result', 'results', 'tab',
+  'a',
+  'an',
+  'the',
+  'to',
+  'of',
+  'in',
+  'on',
+  'for',
+  'and',
+  'or',
+  'but',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'by',
+  'with',
+  'from',
+  'that',
+  'this',
+  'it',
+  'its',
+  'at',
+  'as',
+  'when',
+  'after',
+  'then',
+  'so',
+  'we',
+  'you',
+  'i',
+  'he',
+  'she',
+  'they',
+  'them',
+  'his',
+  'her',
+  'our',
+  'your',
+  'open',
+  'opened',
+  'click',
+  'clicked',
+  'search',
+  'searched',
+  'look',
+  'lookup',
+  'up',
+  'looked',
+  'navigate',
+  'navigated',
+  'visit',
+  'visited',
+  'find',
+  'found',
+  'go',
+  'went',
+  'article',
+  'page',
+  'link',
+  'result',
+  'results',
+  'tab',
 ]);
 
 /** Normalize a string for matching: lowercase, drop punctuation + url-slug
@@ -96,7 +155,13 @@ export interface GoalBackstopVerdict {
   /** true when the page satisfies the item. */
   done: boolean;
   /** How we decided (for logging / transparency). */
-  reason: 'quoted-in-title' | 'quoted-in-url' | 'tokens-in-title' | 'tokens-in-url' | 'no-signal' | 'insufficient';
+  reason:
+    | 'quoted-in-title'
+    | 'quoted-in-url'
+    | 'tokens-in-title'
+    | 'tokens-in-url'
+    | 'no-signal'
+    | 'insufficient';
   /** The signal text (phrase or token list) that fired. */
   signal?: string;
   /** Score in [0,1] for the strongest candidate rule (0 when none). */

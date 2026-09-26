@@ -38,7 +38,7 @@ export class PrivacyLedger {
 
   constructor(
     initialEntries: PrivacyLogEntry[] = [],
-    onChange?: (entries: PrivacyLogEntry[]) => void,
+    onChange?: (entries: PrivacyLogEntry[]) => void
   ) {
     this.entries = [...initialEntries].slice(0, MAX_ENTRIES);
     this.onChange = onChange;
@@ -74,7 +74,11 @@ export class PrivacyLedger {
     }
   }
 
-  getSummary(): { total: number; byType: Record<string, number>; byAction: Record<string, number> } {
+  getSummary(): {
+    total: number;
+    byType: Record<string, number>;
+    byAction: Record<string, number>;
+  } {
     const byType: Record<string, number> = {};
     const byAction: Record<string, number> = {};
 

@@ -5,14 +5,18 @@ import { loadProfile, saveProfile, type UserProfile, PROFILE_TOKENS } from '../l
 const PROFILE_KEYS = Object.keys(PROFILE_TOKENS) as Array<keyof typeof PROFILE_TOKENS>;
 
 function Options() {
-  const [plannerUrl, setPlannerUrl] = useState(import.meta.env.VITE_SERVER_URL || 'http://localhost:8000');
+  const [plannerUrl, setPlannerUrl] = useState(
+    import.meta.env.VITE_SERVER_URL || 'http://localhost:8000'
+  );
   const [modelId, setModelId] = useState('onnx-community/Florence-2-base-ft');
   const [backend, setBackend] = useState('webgpu');
   const [profile, setProfile] = useState<UserProfile>({});
   const [profileSaved, setProfileSaved] = useState(false);
 
   useEffect(() => {
-    loadProfile().then(setProfile).catch(() => setProfile({}));
+    loadProfile()
+      .then(setProfile)
+      .catch(() => setProfile({}));
   }, []);
 
   const handleSave = async () => {
@@ -33,7 +37,7 @@ function Options() {
   return (
     <div style={{ padding: '20px', maxWidth: '500px' }}>
       <h1>SIH2026 PS171 Browser Agent Settings</h1>
-      
+
       <div style={{ marginTop: '20px' }}>
         <label>Planner Server URL:</label>
         <input
@@ -67,20 +71,38 @@ function Options() {
       </div>
 
       {/* ── #102: local user profile (on-device constants) ── */}
-      <div style={{ marginTop: '30px', padding: '16px', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#f9fafb' }}>
+      <div
+        style={{
+          marginTop: '30px',
+          padding: '16px',
+          border: '1px solid #e5e7eb',
+          borderRadius: '8px',
+          background: '#f9fafb',
+        }}
+      >
         <h2 style={{ fontSize: '16px', margin: '0 0 4px' }}>Local User Profile</h2>
         <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 14px', lineHeight: 1.5 }}>
-          Personal constants the agent can fill when a task references them
-          ("fill my email", "use my address"). Stored <strong>locally only</strong>
-          on this device — never synced and never sent to the planner in the
-          clear (the planner sees a token like <code>&lt;EMAIL&gt;</code>; the real
-          value is filled in on-device at execution time).
+          Personal constants the agent can fill when a task references them ("fill my email", "use
+          my address"). Stored <strong>locally only</strong>
+          on this device — never synced and never sent to the planner in the clear (the planner sees
+          a token like <code>&lt;EMAIL&gt;</code>; the real value is filled in on-device at
+          execution time).
         </p>
         {PROFILE_KEYS.map((k) => (
           <div key={k} style={{ marginBottom: '10px' }}>
-            <label style={{ fontSize: '13px', fontWeight: 600, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <label
+              style={{
+                fontSize: '13px',
+                fontWeight: 600,
+                display: 'flex',
+                gap: 6,
+                alignItems: 'center',
+              }}
+            >
               <span style={{ textTransform: 'capitalize', minWidth: '80px' }}>{k}</span>
-              <code style={{ fontSize: '11px', color: '#9ca3af', fontWeight: 400 }}>{PROFILE_TOKENS[k]}</code>
+              <code style={{ fontSize: '11px', color: '#9ca3af', fontWeight: 400 }}>
+                {PROFILE_TOKENS[k]}
+              </code>
             </label>
             <input
               type="text"
@@ -94,9 +116,15 @@ function Options() {
         <button
           onClick={handleSaveProfile}
           style={{
-            marginTop: '6px', padding: '8px 16px',
-            background: profileSaved ? '#059669' : '#111827', color: '#fff',
-            border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px',
+            marginTop: '6px',
+            padding: '8px 16px',
+            background: profileSaved ? '#059669' : '#111827',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: '13px',
           }}
         >
           {profileSaved ? '✓ Saved locally' : 'Save Profile (local only)'}
@@ -113,7 +141,7 @@ function Options() {
           border: 'none',
           borderRadius: '6px',
           cursor: 'pointer',
-          fontWeight: '600'
+          fontWeight: '600',
         }}
       >
         Save Settings

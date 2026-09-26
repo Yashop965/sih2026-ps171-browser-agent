@@ -50,7 +50,7 @@ export interface PortRetryResult<T> {
 export async function withPortRetry<T>(
   fetch: () => Promise<T | undefined>,
   isNoSnapshot: (v: T | undefined) => boolean,
-  opts: PortRetryOptions = {},
+  opts: PortRetryOptions = {}
 ): Promise<PortRetryResult<T>> {
   const attempts = opts.attempts ?? 4;
   const delayMs = opts.delayMs ?? 400;

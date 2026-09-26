@@ -138,7 +138,10 @@ export class ProfileManager {
    * @param explicitConsent - Must be true; the caller is responsible for
    *                          having obtained user permission via a UI dialog.
    */
-  async saveProfile(profile: Omit<UserProfile, 'consentedAt'>, explicitConsent: boolean): Promise<void> {
+  async saveProfile(
+    profile: Omit<UserProfile, 'consentedAt'>,
+    explicitConsent: boolean
+  ): Promise<void> {
     if (!explicitConsent) {
       throw new Error('Cannot save profile without explicit user consent');
     }
@@ -185,17 +188,53 @@ export class AutofillManager {
     return AutofillManager.instance;
   }
 
-  private static readonly KNOWN_KEYS: Array<{ key: string; label: string; sampleSelector: string }> = [
-    { key: 'full_name', label: 'Full Name', sampleSelector: 'input[name="name"], input[placeholder*="name"], input[name="full_name"]' },
-    { key: 'first_name', label: 'First Name', sampleSelector: 'input[name="first_name"], input[placeholder*="first name"]' },
-    { key: 'last_name', label: 'Last Name', sampleSelector: 'input[name="last_name"], input[placeholder*="last name"]' },
+  private static readonly KNOWN_KEYS: Array<{
+    key: string;
+    label: string;
+    sampleSelector: string;
+  }> = [
+    {
+      key: 'full_name',
+      label: 'Full Name',
+      sampleSelector: 'input[name="name"], input[placeholder*="name"], input[name="full_name"]',
+    },
+    {
+      key: 'first_name',
+      label: 'First Name',
+      sampleSelector: 'input[name="first_name"], input[placeholder*="first name"]',
+    },
+    {
+      key: 'last_name',
+      label: 'Last Name',
+      sampleSelector: 'input[name="last_name"], input[placeholder*="last name"]',
+    },
     { key: 'email', label: 'Email', sampleSelector: 'input[type="email"], input[name="email"]' },
     { key: 'phone', label: 'Phone', sampleSelector: 'input[type="tel"], input[name="phone"]' },
-    { key: 'address_line_1', label: 'Address Line 1', sampleSelector: 'input[name="address"], input[placeholder*="address"]' },
-    { key: 'city', label: 'City', sampleSelector: 'input[name="city"], input[placeholder*="city"]' },
-    { key: 'pincode', label: 'Pincode / Zip', sampleSelector: 'input[name="pincode"], input[name="zip"], input[placeholder*="pin"]' },
-    { key: 'aadhaar', label: 'Aadhaar No.', sampleSelector: 'input[name="aadhaar"], input[placeholder*="aadhaar"]' },
-    { key: 'pan', label: 'PAN No.', sampleSelector: 'input[name="pan"], input[placeholder*="pan"]' },
+    {
+      key: 'address_line_1',
+      label: 'Address Line 1',
+      sampleSelector: 'input[name="address"], input[placeholder*="address"]',
+    },
+    {
+      key: 'city',
+      label: 'City',
+      sampleSelector: 'input[name="city"], input[placeholder*="city"]',
+    },
+    {
+      key: 'pincode',
+      label: 'Pincode / Zip',
+      sampleSelector: 'input[name="pincode"], input[name="zip"], input[placeholder*="pin"]',
+    },
+    {
+      key: 'aadhaar',
+      label: 'Aadhaar No.',
+      sampleSelector: 'input[name="aadhaar"], input[placeholder*="aadhaar"]',
+    },
+    {
+      key: 'pan',
+      label: 'PAN No.',
+      sampleSelector: 'input[name="pan"], input[placeholder*="pan"]',
+    },
   ];
 
   /** Return all known pattern definitions (used to populate the pattern picker). */
@@ -216,9 +255,11 @@ export class AutofillManager {
    * Save a pattern. The `value` is what the user wants pre-filled; it is stored
    * locally only and never transmitted to the planner server.
    */
-  async savePattern(pattern: Omit<AutoFillPattern, 'usageCount' | 'lastUsedAt' | 'createdAt'>): Promise<void> {
+  async savePattern(
+    pattern: Omit<AutoFillPattern, 'usageCount' | 'lastUsedAt' | 'createdAt'>
+  ): Promise<void> {
     const patterns = await this.getPatterns();
-    const existing = patterns.find(p => p.key === pattern.key);
+    const existing = patterns.find((p) => p.key === pattern.key);
     if (existing) {
       existing.value = pattern.value;
       existing.selector = pattern.selector;
@@ -238,7 +279,7 @@ export class AutofillManager {
    */
   async removePattern(key: string): Promise<void> {
     const patterns = await this.getPatterns();
-    const filtered = patterns.filter(p => p.key !== key);
+    const filtered = patterns.filter((p) => p.key !== key);
     await setStored('autoFillPatterns', filtered);
   }
 
@@ -248,7 +289,7 @@ export class AutofillManager {
    */
   async recordUsage(key: string, selector: string): Promise<void> {
     const patterns = await this.getPatterns();
-    const entry = patterns.find(p => p.key === key);
+    const entry = patterns.find((p) => p.key === key);
     if (entry) {
       entry.usageCount += 1;
       entry.lastUsedAt = Date.now();
@@ -261,12 +302,21 @@ export class AutofillManager {
    * Suggest patterns for a given DOM snapshot. Returns patterns whose selector
    * matches any element in the snapshot, sorted by usage count.
    */
-  async suggestForSnapshot(snapshot: { url: string; elements: Array<{ id: number | string; tag: string; role: string; label: string; selector?: string }> }): Promise<AutoFillPattern[]> {
+  async suggestForSnapshot(snapshot: {
+    url: string;
+    elements: Array<{
+      id: number | string;
+      tag: string;
+      role: string;
+      label: string;
+      selector?: string;
+    }>;
+  }): Promise<AutoFillPattern[]> {
     const patterns = await this.getPatterns();
-    const matched = patterns.filter(p => {
+    const matched = patterns.filter((p) => {
       // Heuristic: if the pattern's selector appears in any element's selector,
       // or the element's label contains the pattern keyword.
-      return snapshot.elements.some(el => {
+      return snapshot.elements.some((el) => {
         if (el.selector && el.selector.includes(p.key)) return true;
         if (el.label.toLowerCase().includes(p.key.split('_').join(' '))) return true;
         return false;
@@ -280,20 +330,34 @@ export class AutofillManager {
    * Returns an array of { targetId, value } pairs ready for the executor.
    */
   async buildFillActions(
-    snapshot: { url: string; elements: Array<{ id: number | string; tag: string; role: string; label: string; selector?: string }> },
+    snapshot: {
+      url: string;
+      elements: Array<{
+        id: number | string;
+        tag: string;
+        role: string;
+        label: string;
+        selector?: string;
+      }>;
+    },
     limit: number = 5
   ): Promise<Array<{ targetId: number | string; value: string; patternKey: string }>> {
     const suggestions = await this.suggestForSnapshot(snapshot);
-    return suggestions.slice(0, limit).map(p => {
-      const el = snapshot.elements.find(e =>
-        e.selector?.includes(p.key) || e.label.toLowerCase().includes(p.key.split('_').join(' '))
-      );
-      return {
-        targetId: el?.id ?? p.key,
-        value: p.value,
-        patternKey: p.key,
-      };
-    }).filter(a => a.targetId !== a.patternKey); // only include if we found a matching element
+    return suggestions
+      .slice(0, limit)
+      .map((p) => {
+        const el = snapshot.elements.find(
+          (e) =>
+            e.selector?.includes(p.key) ||
+            e.label.toLowerCase().includes(p.key.split('_').join(' '))
+        );
+        return {
+          targetId: el?.id ?? p.key,
+          value: p.value,
+          patternKey: p.key,
+        };
+      })
+      .filter((a) => a.targetId !== a.patternKey); // only include if we found a matching element
   }
 }
 
@@ -382,7 +446,7 @@ export class SessionTracker {
    */
   async getActiveSessions(): Promise<SessionRecord[]> {
     const sessions = await this.getSessions();
-    return Object.values(sessions).filter(s => s.status === 'active');
+    return Object.values(sessions).filter((s) => s.status === 'active');
   }
 
   /**
@@ -391,7 +455,7 @@ export class SessionTracker {
   async getRecentSessions(limit: number = 10): Promise<SessionRecord[]> {
     const sessions = await this.getSessions();
     return Object.values(sessions)
-      .filter(s => s.status !== 'active')
+      .filter((s) => s.status !== 'active')
       .sort((a, b) => b.startTime - a.startTime)
       .slice(0, limit);
   }
@@ -414,7 +478,7 @@ export class SessionTracker {
     const now = Date.now();
     let removed = 0;
     for (const [id, record] of Object.entries(sessions)) {
-      if (record.status !== 'active' && (now - record.startTime) > maxAgeMs) {
+      if (record.status !== 'active' && now - record.startTime > maxAgeMs) {
         delete sessions[id];
         removed++;
       }

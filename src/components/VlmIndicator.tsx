@@ -121,7 +121,8 @@ export default function VlmIndicator() {
             <span>{st.backend ?? ''}</span>
             {st.lastOcrAt ? (
               <span style={{ opacity: 0.7 }}>
-                · last OCR {st.lastOcrOk ? 'ok' : `failed (${st.lastOcrDetail ?? '?'})`} {fmtAgo(st.lastOcrAt)}
+                · last OCR {st.lastOcrOk ? 'ok' : `failed (${st.lastOcrDetail ?? '?'})`}{' '}
+                {fmtAgo(st.lastOcrAt)}
               </span>
             ) : (
               <span style={{ opacity: 0.7 }}>· no OCR run yet</span>
@@ -169,7 +170,9 @@ export default function VlmIndicator() {
           <>
             <span style={dot('var(--text-muted)')}></span>
             <span>VLM idle</span>
-            <span style={{ opacity: 0.7 }}>loads on first vision check ({st.backend ?? 'auto'})</span>
+            <span style={{ opacity: 0.7 }}>
+              loads on first vision check ({st.backend ?? 'auto'})
+            </span>
           </>
         );
     }

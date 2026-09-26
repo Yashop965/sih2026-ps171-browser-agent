@@ -37,9 +37,7 @@ export class VisionMemoryPool {
     }
 
     // Allocate new buffer
-    const array = dtype === 'fp32'
-      ? new Float32Array(requiredSize)
-      : new Uint8Array(requiredSize);
+    const array = dtype === 'fp32' ? new Float32Array(requiredSize) : new Uint8Array(requiredSize);
 
     this.buffers.set(id, {
       data: array,

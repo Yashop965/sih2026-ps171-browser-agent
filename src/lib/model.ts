@@ -40,7 +40,8 @@ export function detectHardware(): HardwareProfile {
   let hasFP16Support = false;
   if (hasWebGPU && gpu) {
     // Check for float16 feature
-    hasFP16Support = (gpu.features && gpu.features.has('float32-filterable-texture')) || maxTextureSize >= 8192;
+    hasFP16Support =
+      (gpu.features && gpu.features.has('float32-filterable-texture')) || maxTextureSize >= 8192;
   }
 
   return {
@@ -86,9 +87,9 @@ export function selectModelConfig(hardware: HardwareProfile = detectHardware()):
 /** Get estimated model size in MB */
 export function getModelSizeEstimate(quantization: QuantizationMode): number {
   const sizes = {
-    'fp32': 720, // Full precision
-    'fp16': 360, // Half precision
-    'q4': 180,   // 4-bit quantized
+    fp32: 720, // Full precision
+    fp16: 360, // Half precision
+    q4: 180, // 4-bit quantized
   };
   return sizes[quantization];
 }
@@ -109,11 +110,13 @@ export function getQuantizationInfo(
   const withinBudget = sizeMB < 500;
   const backend = hardware.backend || (hardware.hasWebGPU ? 'webgpu' : 'wasm');
 
-  return `Quantization: ${quantization.toUpperCase()} | ` +
-         `Model: ~${sizeMB}MB | ` +
-         `Backend: ${backend} | ` +
-         `GPU: ${hardware.hasWebGPU ? 'Yes' : 'No'} | ` +
-         `${withinBudget ? '✓ Within 500MB budget' : '✗ Over budget'}`;
+  return (
+    `Quantization: ${quantization.toUpperCase()} | ` +
+    `Model: ~${sizeMB}MB | ` +
+    `Backend: ${backend} | ` +
+    `GPU: ${hardware.hasWebGPU ? 'Yes' : 'No'} | ` +
+    `${withinBudget ? '✓ Within 500MB budget' : '✗ Over budget'}`
+  );
 }
 
 // Export singleton for runtime config

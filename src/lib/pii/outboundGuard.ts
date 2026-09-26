@@ -24,7 +24,7 @@
 import { redactString } from './sanitizer';
 import { checkOutboundPayload } from './firewall';
 import { maskProfileValues, profileHintsForPayload, type UserProfile } from '../userProfile';
-import type { PIIType } from '../types';
+import type { PIIType } from '../../types';
 
 /**
  * PII-bearing string fields on a live interactive element. We redact exactly
@@ -32,7 +32,12 @@ import type { PIIType } from '../types';
  * don't touch geometry (rect, numeric ids) which carry no PII.
  */
 const PII_FIELDS: readonly string[] = [
-  'label', 'name', 'placeholder', 'value', 'text', 'ariaLabel',
+  'label',
+  'name',
+  'placeholder',
+  'value',
+  'text',
+  'ariaLabel',
 ];
 
 export interface LiveElement {
