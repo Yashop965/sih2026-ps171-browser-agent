@@ -122,7 +122,7 @@ export function cursorLabel(kind: CursorActionKind, targetTag: string): string {
  */
 export function cursorStyles(
   rect: CursorPosition,
-  kind: CursorActionKind,
+  kind: CursorActionKind
 ): { transform: string; width: string; height: string; border: string; background: string } {
   const clean = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
   const w = clean(rect.width);
@@ -214,11 +214,12 @@ export function quadBezierLUT(
   a: { x: number; y: number },
   c: { x: number; y: number },
   b: { x: number; y: number },
-  n = 32,
+  n = 32
 ): { pts: Array<{ x: number; y: number }>; cum: number[]; total: number } {
   const pts: Array<{ x: number; y: number }> = [];
   for (let i = 0; i <= n; i++) {
-    const t = i / n, mt = 1 - t;
+    const t = i / n,
+      mt = 1 - t;
     pts.push({
       x: mt * mt * a.x + 2 * mt * t * c.x + t * t * b.x,
       y: mt * mt * a.y + 2 * mt * t * c.y + t * t * b.y,
@@ -236,20 +237,23 @@ export function quadBezierLUT(
 /** Constant-speed position along a quadratic bezier at progress u in [0,1]. */
 export function quadBezierPoint(
   lut: { pts: Array<{ x: number; y: number }>; cum: number[]; total: number },
-  u: number,
+  u: number
 ): { x: number; y: number } {
   const { pts, cum, total } = lut;
   if (total <= 0) return pts[0];
   const target = Math.max(0, Math.min(1, u)) * total;
-  let lo = 0, hi = cum.length - 1;
+  let lo = 0,
+    hi = cum.length - 1;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (cum[mid] < target) lo = mid + 1; else hi = mid;
+    if (cum[mid] < target) lo = mid + 1;
+    else hi = mid;
   }
   const i = Math.max(1, lo);
   const seg = cum[i] - cum[i - 1];
   const f = seg > 0 ? (target - cum[i - 1]) / seg : 0;
-  const p0 = pts[i - 1], p1 = pts[i];
+  const p0 = pts[i - 1],
+    p1 = pts[i];
   return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
 }
 
@@ -282,7 +286,7 @@ export function loopGeometry(
   from: { x: number; y: number },
   to: { x: number; y: number },
   jitter = 0,
-  viewport?: { width: number; height: number },
+  viewport?: { width: number; height: number }
 ): LoopGeometry {
   const fx = Number.isFinite(from.x) ? from.x : 0;
   const fy = Number.isFinite(from.y) ? from.y : 0;
@@ -293,17 +297,17 @@ export function loopGeometry(
   const len = Math.hypot(dx, dy);
   const jj = Number.isFinite(jitter) ? Math.max(-1, Math.min(1, jitter)) : 0;
   const w = dx >= 0 ? 1 : -1; // deterministic rotation side
-  const ux = len > 0 ? dx / len : 1, uy = len > 0 ? dy / len : 0;
-  const px = -uy, py = ux; // perpendicular (90° rotated, y-down screen)
+  const ux = len > 0 ? dx / len : 1,
+    uy = len > 0 ? dy / len : 0;
+  const px = -uy,
+    py = ux; // perpendicular (90° rotated, y-down screen)
 
   // ── gentle quadratic-bow fallback (used by the curve band AND when a
   //    loop can't fit the viewport). The bow scales with distance, stays
   //    organic with jitter, and is capped by the viewport when given.
   const curveFallback = (): LoopGeometry => {
-    let bow = Math.max(
-      CURVE_BOW.min,
-      Math.min(CURVE_BOW.max, CURVE_BOW.factor * len),
-    ) * (1 + 0.35 * jj);
+    let bow =
+      Math.max(CURVE_BOW.min, Math.min(CURVE_BOW.max, CURVE_BOW.factor * len)) * (1 + 0.35 * jj);
     bow = Math.max(12, bow);
     if (viewport && viewport.width > 0 && viewport.height > 0) {
       bow = Math.min(bow, Math.min(viewport.width, viewport.height) / 4);
@@ -313,13 +317,22 @@ export function loopGeometry(
     const ctrl = { x: cx, y: cy };
     const total = quadBezierLUT({ x: fx, y: fy }, ctrl, { x: tx, y: ty }, 24).total;
     return {
-      mode: 'curve', loops: 0, loop: false,
-      cx, cy, r: 0,
-      entry: { x: fx, y: fy }, exit: { x: tx, y: ty },
-      alpha0: 0, sweep: 0,
-      approachLen: 0, finalLen: 0,
-      arcLen: total, pathLen: total,
-      approachShare: 0, arcShare: 1,
+      mode: 'curve',
+      loops: 0,
+      loop: false,
+      cx,
+      cy,
+      r: 0,
+      entry: { x: fx, y: fy },
+      exit: { x: tx, y: ty },
+      alpha0: 0,
+      sweep: 0,
+      approachLen: 0,
+      finalLen: 0,
+      arcLen: total,
+      pathLen: total,
+      approachShare: 0,
+      arcShare: 1,
       curveCtrl: ctrl,
     };
   };
@@ -327,12 +340,22 @@ export function loopGeometry(
   // ── very close / garbage: no visible swing (engine places instantly).
   if (!Number.isFinite(len) || len <= SNAP_MAX) {
     return {
-      mode: 'snap', loops: 0, loop: false,
-      cx: tx, cy: ty, r: 0,
-      entry: { x: fx, y: fy }, exit: { x: tx, y: ty },
-      alpha0: 0, sweep: 0,
-      approachLen: len, finalLen: 0, arcLen: 0, pathLen: len,
-      approachShare: 1, arcShare: 0,
+      mode: 'snap',
+      loops: 0,
+      loop: false,
+      cx: tx,
+      cy: ty,
+      r: 0,
+      entry: { x: fx, y: fy },
+      exit: { x: tx, y: ty },
+      alpha0: 0,
+      sweep: 0,
+      approachLen: len,
+      finalLen: 0,
+      arcLen: 0,
+      pathLen: len,
+      approachShare: 1,
+      arcShare: 0,
     };
   }
 
@@ -343,31 +366,19 @@ export function loopGeometry(
   const loops = len >= LOOP_FAR_2 ? 2 : 1;
   // Loop center: mid-way along the hop, pushed sideways by the jitter so no
   // two hops swing the loop in exactly the same place.
-  let cxF = fx + ux * len / 2 + px * jj * 0.2 * len;
-  let cyF = fy + uy * len / 2 + py * jj * 0.2 * len;
+  let cxF = fx + (ux * len) / 2 + px * jj * 0.2 * len;
+  let cyF = fy + (uy * len) / 2 + py * jj * 0.2 * len;
   // Radius: scaled with the A→B distance, clamped to the [min, max] band
   // (loops stay small), jittered organically.
-  let r = Math.max(
-    LOOP_R.min,
-    Math.min(LOOP_R.max, LOOP_R.factor * len * (1 + 0.1 * jj)),
-  );
+  let r = Math.max(LOOP_R.min, Math.min(LOOP_R.max, LOOP_R.factor * len * (1 + 0.1 * jj)));
   // Viewport containment: pull the center inside the margin box, cap r so
   // the whole circle stays visible; if even the min radius no longer fits,
   // degrade to the curve (the user's "becomes a simple curve" rule).
-  if (
-    viewport &&
-    viewport.width > 2 * VIEWPORT_MARGIN &&
-    viewport.height > 2 * VIEWPORT_MARGIN
-  ) {
+  if (viewport && viewport.width > 2 * VIEWPORT_MARGIN && viewport.height > 2 * VIEWPORT_MARGIN) {
     const M = VIEWPORT_MARGIN;
     cxF = Math.max(M, Math.min(viewport.width - M, cxF));
     cyF = Math.max(M, Math.min(viewport.height - M, cyF));
-    const fit = Math.min(
-      cxF - M,
-      viewport.width - M - cxF,
-      cyF - M,
-      viewport.height - M - cyF,
-    );
+    const fit = Math.min(cxF - M, viewport.width - M - cxF, cyF - M, viewport.height - M - cyF);
     r = Math.min(r, fit);
     if (r < LOOP_R.min) return curveFallback();
   }
@@ -382,7 +393,8 @@ export function loopGeometry(
     if (D <= r) return []; // P inside/on the circle - no real tangents
     const k = (r * r) / (D * D);
     const s = (r * Math.sqrt(D * D - r * r)) / D;
-    const pnx = -ddy / D, pny = ddx / D; // unit perpendicular of (P-C)
+    const pnx = -ddy / D,
+      pny = ddx / D; // unit perpendicular of (P-C)
     return [
       { x: cxF + k * ddx + s * pnx, y: cyF + k * ddy + s * pny },
       { x: cxF + k * ddx - s * pnx, y: cyF + k * ddy - s * pny },
@@ -413,9 +425,20 @@ export function loopGeometry(
   const finalLen = Math.hypot(tx - exit.x, ty - exit.y);
   const pathLen = approachLen + arcLen + finalLen;
   return {
-    mode: 'loop', loops, loop: true, cx: cxF, cy: cyF, r,
-    entry, exit, alpha0: phiA, sweep,
-    approachLen, finalLen, arcLen, pathLen,
+    mode: 'loop',
+    loops,
+    loop: true,
+    cx: cxF,
+    cy: cyF,
+    r,
+    entry,
+    exit,
+    alpha0: phiA,
+    sweep,
+    approachLen,
+    finalLen,
+    arcLen,
+    pathLen,
     approachShare: pathLen > 0 ? approachLen / pathLen : 0,
     arcShare: pathLen > 0 ? arcLen / pathLen : 0,
   };
@@ -441,11 +464,7 @@ export function loopGeometry(
  * theme (black arrow), the safe default. Never throws: theme detection
  * is presentation-only.
  */
-export function samplePageDark(
-  x: number,
-  y: number,
-  doc: Document = document,
-): boolean | null {
+export function samplePageDark(x: number, y: number, doc: Document = document): boolean | null {
   try {
     const win = doc?.defaultView;
     if (!win || typeof win.getComputedStyle !== 'function') return null;
@@ -476,15 +495,22 @@ export function samplePageDark(
 function bgLuminance(color: string): number | null {
   const t = color.trim().toLowerCase();
   if (!t || t === 'transparent') return null;
-  let r = 0, g = 0, b = 0, a = 1;
+  let r = 0,
+    g = 0,
+    b = 0,
+    a = 1;
   if (t.startsWith('#') && t.length >= 7) {
     const n = parseInt(t.slice(1, 7), 16);
     if (Number.isNaN(n)) return null;
-    r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255;
+    r = (n >> 16) & 255;
+    g = (n >> 8) & 255;
+    b = n & 255;
   } else {
     const m = t.match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?\s*\)/);
     if (!m) return null;
-    r = parseInt(m[1], 10); g = parseInt(m[2], 10); b = parseInt(m[3], 10);
+    r = parseInt(m[1], 10);
+    g = parseInt(m[2], 10);
+    b = parseInt(m[3], 10);
     if (m[4]) a = m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
   }
   if (a < 0.25) return null; // near-transparent: no real coverage
@@ -677,8 +703,9 @@ const GLOW_PERIOD_HALF = 0.55; // half-cycle of the working-aura breath
 /** Host-page reduced-motion preference, checked per call. */
 function prefersReducedMotion(): boolean {
   try {
-    return typeof matchMedia !== 'undefined'
-      && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return (
+      typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
   } catch {
     return false;
   }
@@ -759,7 +786,7 @@ function travelCurve(
   nodes: OverlayNodes,
   target: { x: number; y: number },
   cx: number,
-  cy: number,
+  cy: number
 ): void {
   // Re-steer from the arrow's CURRENT on-screen position (transform
   // state), so a mid-glide retarget loops from where the cursor
@@ -778,7 +805,8 @@ function travelCurve(
   const jitter = prefersReducedMotion() ? 0 : Math.random() * 2 - 1;
   const geo = loopGeometry(from, target, jitter, currentViewport());
   const t = { x: target.x, y: target.y };
-  const lx = cx + 14, ly = cy + 14; // label target
+  const lx = cx + 14,
+    ly = cy + 14; // label target
 
   const dist = geo.pathLen;
   const dur = travelDuration(dist);
@@ -796,7 +824,12 @@ function travelCurve(
   // (still themed + glowed) — a 60px-or-less hop has no room to swing.
   if (geo.mode === 'snap' || prefersReducedMotion() || dur <= 0) {
     gsap.set(nodes.arrow, { x: arrowTo.x, y: arrowTo.y, scale: 1, opacity: 1 });
-    gsap.set(nodes.aura, { x: arrowTo.x, y: arrowTo.y, scale: GLOW.restScale, opacity: GLOW.restOpacity });
+    gsap.set(nodes.aura, {
+      x: arrowTo.x,
+      y: arrowTo.y,
+      scale: GLOW.restScale,
+      opacity: GLOW.restOpacity,
+    });
     gsap.set(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, scale: 1 });
     gsap.set(nodes.label, { x: lx, y: ly, opacity: 1 });
     restAura(nodes.aura);
@@ -837,7 +870,12 @@ function travelCurve(
     };
   } else {
     // curve: a gentle quadratic bow, sampled at constant ARC-LENGTH speed.
-    const lut = quadBezierLUT(from, geo.curveCtrl ?? { x: (from.x + t.x) / 2, y: (from.y + t.y) / 2 }, t, 32);
+    const lut = quadBezierLUT(
+      from,
+      geo.curveCtrl ?? { x: (from.x + t.x) / 2, y: (from.y + t.y) / 2 },
+      t,
+      32
+    );
     pathPos = (u: number): { x: number; y: number } => quadBezierPoint(lut, u);
   }
 
@@ -856,8 +894,24 @@ function travelCurve(
   // Constant speed along the loop path (`none`): the smoothest circular
   // motion — no easing lumps inside the loop itself.
   tl.to(prog, { t: 1, duration: dur, ease: 'none', immediateRender: true, onUpdate: frame }, 0);
-  tl.to(nodes.halo, { x: cx, y: cy, xPercent: -50, yPercent: -50, duration: dur, ease: 'sine.inOut', immediateRender: true }, 0);
-  tl.to(nodes.label, { x: lx, y: ly, duration: dur * 0.9, ease: 'power1.inOut', opacity: 1 }, dur * 0.1);
+  tl.to(
+    nodes.halo,
+    {
+      x: cx,
+      y: cy,
+      xPercent: -50,
+      yPercent: -50,
+      duration: dur,
+      ease: 'sine.inOut',
+      immediateRender: true,
+    },
+    0
+  );
+  tl.to(
+    nodes.label,
+    { x: lx, y: ly, duration: dur * 0.9, ease: 'power1.inOut', opacity: 1 },
+    dur * 0.1
+  );
   // At the loop's apex (~half the travel), re-sample the theme so the
   // pointer inverts if it swung over a dark area.
   tl.call(() => applyTheme(nodes, cx, cy), undefined, dur * 0.5);
@@ -894,7 +948,9 @@ export function stopThinkingPulse(): void {
     restAura(
       (typeof document === 'undefined'
         ? null
-        : document.getElementById(CURSOR_ID)?.shadowRoot?.querySelector('.ac-aura')) as HTMLElement | null,
+        : document
+            .getElementById(CURSOR_ID)
+            ?.shadowRoot?.querySelector('.ac-aura')) as HTMLElement | null
     );
     const host = typeof document === 'undefined' ? null : document.getElementById(CURSOR_ID);
     const shadow = host?.shadowRoot;
@@ -917,7 +973,7 @@ function moveOverlay(
   cx: number,
   cy: number,
   s: { width: string; height: string; border: string; background: string },
-  kind: CursorActionKind,
+  kind: CursorActionKind
 ): void {
   const color = KIND_COLORS[kind];
 
@@ -929,9 +985,7 @@ function moveOverlay(
   nodes.halo.style.height = s.height;
   nodes.halo.style.border = ringed ? `1.5px solid ${color}55` : 'none';
   nodes.halo.style.background = s.background;
-  nodes.halo.style.boxShadow = ringed
-    ? `0 0 0 4px ${color}1a, 0 0 22px 4px ${color}40`
-    : 'none';
+  nodes.halo.style.boxShadow = ringed ? `0 0 0 4px ${color}1a, 0 0 22px 4px ${color}40` : 'none';
 
   // Moving = acting: stop the idle breathing first.
   stopThinkingPulse();
@@ -959,8 +1013,12 @@ export function showCursor(el: Element, kind: CursorActionKind): boolean {
       ? el.getBoundingClientRect()
       : { x: 0, y: 0, width: 0, height: 0 };
     const s = cursorStyles(rect, kind);
-    const cx = Number.isFinite(rect.x) ? rect.x + (Number.isFinite(rect.width) ? rect.width : 0) / 2 : 0;
-    const cy = Number.isFinite(rect.y) ? rect.y + (Number.isFinite(rect.height) ? rect.height : 0) / 2 : 0;
+    const cx = Number.isFinite(rect.x)
+      ? rect.x + (Number.isFinite(rect.width) ? rect.width : 0) / 2
+      : 0;
+    const cy = Number.isFinite(rect.y)
+      ? rect.y + (Number.isFinite(rect.height) ? rect.height : 0) / 2
+      : 0;
 
     moveOverlay(nodes, cx, cy, s, kind);
 
@@ -990,19 +1048,26 @@ export function pulseCursor(): void {
     gsap.fromTo(
       nodes.ripple,
       { scale: 0.25, opacity: 0.5, x: lastPos.x, y: lastPos.y, backgroundColor: KIND_COLORS.CLICK },
-      { scale: 2.6, opacity: 0, duration: 0.6, ease: 'power2.out', overwrite: 'auto' },
+      { scale: 2.6, opacity: 0, duration: 0.6, ease: 'power2.out', overwrite: 'auto' }
     );
     // The landing beat is a quick scale-pop on the target halo (the
     // "action landed" feedback), plus a brightening border-glow blip.
     gsap.fromTo(
       nodes.halo,
       { scale: 1 },
-      { scale: 1.06, duration: 0.14, yoyo: true, repeat: 1, ease: 'power1.inOut', overwrite: 'auto' },
+      {
+        scale: 1.06,
+        duration: 0.14,
+        yoyo: true,
+        repeat: 1,
+        ease: 'power1.inOut',
+        overwrite: 'auto',
+      }
     );
     gsap.fromTo(
       nodes.aura,
       { opacity: GLOW.restOpacity },
-      { opacity: 1, duration: 0.12, yoyo: true, repeat: 1, ease: 'power1.inOut', overwrite: 'auto' },
+      { opacity: 1, duration: 0.12, yoyo: true, repeat: 1, ease: 'power1.inOut', overwrite: 'auto' }
     );
   } catch {
     /* presentation layer - never fatal */

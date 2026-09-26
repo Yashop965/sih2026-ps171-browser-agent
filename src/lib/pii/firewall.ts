@@ -166,11 +166,7 @@ const MAX_STRING_LENGTH = 10_000;
  * @param path   JSON-path label for audit purposes (no values in this string)
  * @param depth  Current recursion depth (guards against deeply-nested objects)
  */
-export function inspectPayload(
-  value: unknown,
-  path = 'root',
-  depth = 0,
-): FirewallResult {
+export function inspectPayload(value: unknown, path = 'root', depth = 0): FirewallResult {
   if (depth > MAX_DEPTH) return { passed: true }; // treat excessively nested as safe
 
   if (typeof value === 'string') {

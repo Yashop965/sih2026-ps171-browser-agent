@@ -23,11 +23,7 @@ import { ScrollGuard, calculateMaxSteps, isRepeatedAction } from './loopDetectio
 import { goalBackstop, quotedSpans, contentTokens, normalize } from './goalBackstop';
 import type { TabHandoff, OpenTabInfo } from './tabHandoff';
 import { handoffForPlanner, resolveHandoffValue } from './tabHandoff';
-import {
-  classifyOutboundSend,
-  stageOutbound,
-  type ElementLike,
-} from './outboundGate';
+import { classifyOutboundSend, stageOutbound, type ElementLike } from './outboundGate';
 
 // ── Per-event timeout (stall guard) ─────────────────────────────────────────
 //
@@ -56,11 +52,7 @@ export class EventTimeoutError extends Error {
  * settles first, rejects with EventTimeoutError(label, ms) otherwise. The
  * timer is cleared on settle, so a fast event leaves no dangling handle.
  */
-export function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  label: string,
-): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new EventTimeoutError(label, ms)), ms);
     promise.then(
@@ -71,7 +63,7 @@ export function withTimeout<T>(
       (err) => {
         clearTimeout(timer);
         reject(err);
-      },
+      }
     );
   });
 }
@@ -100,7 +92,8 @@ export interface AgentTaskState {
   running: boolean;
   step: number;
   maxSteps: number;
-  status: 'idle' | 'running' | 'stopped' | 'complete' | 'failed' | 'degraded' | 'awaiting-confirmation';
+  status:
+    'idle' | 'running' | 'stopped' | 'complete' | 'failed' | 'degraded' | 'awaiting-confirmation';
   logs: string[];
   degraded: boolean;
   sessionId: string | null;
@@ -128,7 +121,7 @@ export function emptyTaskState(): AgentTaskState {
 export function buildPlanHistory(
   filledIds: Iterable<string>,
   failedIds: Iterable<string>,
-  failedErrors: Map<string, string>,
+  failedErrors: Map<string, string>
 ): PlanHistoryEntry[] {
   const filled = new Set(filledIds);
   const history: PlanHistoryEntry[] = [];
@@ -155,7 +148,7 @@ export function buildPlanHistory(
  */
 export function mergeChecklist(
   existing: ChecklistItem[],
-  incoming: Array<Partial<ChecklistItem> | string | null | undefined>,
+  incoming: Array<Partial<ChecklistItem> | string | null | undefined>
 ): ChecklistItem[] {
   const byId = new Map<string, ChecklistItem>();
   for (const item of existing) byId.set(item.id, { ...item });
@@ -224,7 +217,8 @@ export interface TerminalGateVerdict {
   /** true = keep going (terminal goal not provably on this page); false = let the task complete. */
   block: boolean;
   /** How we decided. */
-  reason: 'destination-not-on-page' | 'action-goal-passed' | 'no-checkable-target' | 'terminal-on-page';
+  reason:
+    'destination-not-on-page' | 'action-goal-passed' | 'no-checkable-target' | 'terminal-on-page';
   score: number;
 }
 
@@ -235,9 +229,25 @@ export function terminalTargetSpans(description: string): string[] {
 
 /** Destination phrasings: the item names a PAGE/ARTICLE it should land on. */
 const DESTINATION_SIGNALS = [
-  'open', 'opened', 'navigate', 'navigated', 'visit', 'visited',
-  'find', 'found', 'look up', 'lookup', 'looked', 'land', 'reached',
-  'reach', 'arrive', 'arrived', 'view', 'read', 'go to',
+  'open',
+  'opened',
+  'navigate',
+  'navigated',
+  'visit',
+  'visited',
+  'find',
+  'found',
+  'look up',
+  'lookup',
+  'looked',
+  'land',
+  'reached',
+  'reach',
+  'arrive',
+  'arrived',
+  'view',
+  'read',
+  'go to',
 ];
 
 /** Does the description read like "get to destination X" (vs an action)? */
@@ -345,7 +355,7 @@ export {
  * by verifyElementFreshness instead.
  */
 export function pageContentSignature(
-  context: { scrollHeight?: number; omitted?: number } | null | undefined,
+  context: { scrollHeight?: number; omitted?: number } | null | undefined
 ): string {
   return `${context?.scrollHeight ?? 0}/${context?.omitted ?? 0}`;
 }
@@ -605,12 +615,14 @@ export class AgentRunner {
         d.windowId,
         d.startUrl?.trim() || d.task,
         d.task,
-        100, // generous hard cap; the dynamic calc refines it below
+        100 // generous hard cap; the dynamic calc refines it below
       );
       this.state.sessionId = sessionId;
       this.log(`Session ${sessionId} started`);
     } catch (e) {
-      this.log(`Session start failed: ${e instanceof Error ? e.message : String(e)} - continuing locally`);
+      this.log(
+        `Session start failed: ${e instanceof Error ? e.message : String(e)} - continuing locally`
+      );
     }
 
     // Navigate to the start URL first, if one was given.
@@ -621,7 +633,9 @@ export class AgentRunner {
         this.log('✅ Navigated to start URL');
         await d.delay(600);
       } else {
-        this.log(`⚠️ Could not navigate to start URL (${nav.error ?? 'unknown'}) - running on current tab`);
+        this.log(
+          `⚠️ Could not navigate to start URL (${nav.error ?? 'unknown'}) - running on current tab`
+        );
       }
     }
 
@@ -690,10 +704,14 @@ export class AgentRunner {
       let pageTitle: string = snapshot.title ?? '';
       let pageContext = snapshot.context ?? null;
       if (pageContext?.moreContentBelow) {
-        this.log(`Page has more content below the fold (scrollY=${pageContext.scrollY}/${pageContext.scrollHeight})`);
+        this.log(
+          `Page has more content below the fold (scrollY=${pageContext.scrollY}/${pageContext.scrollHeight})`
+        );
       }
       if (pageContext?.omitted > 0) {
-        this.log(`Element table capped: ${pageContext.omitted} more control(s) on this page were omitted from the planner table - scroll / re-extract to see them`);
+        this.log(
+          `Element table capped: ${pageContext.omitted} more control(s) on this page were omitted from the planner table - scroll / re-extract to see them`
+        );
       }
 
       if (elements.length === 0) {
@@ -707,44 +725,48 @@ export class AgentRunner {
         // mark wrong.
         let recovered = false;
         for (let attempt = 0; attempt < 3 && !recovered; attempt++) {
-            if (attempt > 0) {
-                this.log(`No interactive elements found - re-extracting after ${attempt * 500}ms (${attempt + 1}/3)`);
-                await d.delay(attempt * 500);
-                if (d.isStopped()) break;
-            }
-            const retry = await d.extract();
-            if (!retry?.ok) break; // snapshot error - handled at top next iteration
-            const retryEls = retry.elements ?? [];
-            if (retryEls.length > 0) {
-                elements.length = 0;
-                for (const e of retryEls) elements.push(e);
-                pageUrl = retry.url ?? pageUrl;
-                pageTitle = retry.title ?? pageTitle;
-                pageContext = retry.context ?? null;
-                this.log(`Found ${elements.length} interactive elements (after re-extract)`);
-                recovered = true;
-            }
+          if (attempt > 0) {
+            this.log(
+              `No interactive elements found - re-extracting after ${attempt * 500}ms (${attempt + 1}/3)`
+            );
+            await d.delay(attempt * 500);
+            if (d.isStopped()) break;
+          }
+          const retry = await d.extract();
+          if (!retry?.ok) break; // snapshot error - handled at top next iteration
+          const retryEls = retry.elements ?? [];
+          if (retryEls.length > 0) {
+            elements.length = 0;
+            for (const e of retryEls) elements.push(e);
+            pageUrl = retry.url ?? pageUrl;
+            pageTitle = retry.title ?? pageTitle;
+            pageContext = retry.context ?? null;
+            this.log(`Found ${elements.length} interactive elements (after re-extract)`);
+            recovered = true;
+          }
         }
         if (!recovered) {
-            this.log('No interactive elements found');
-            const open = this.checklist.filter((c) => !c.done);
-            // A 0-element exit is NEVER a success: the only complete paths are
-            // an explicit planner DONE, the backstop proving all items, or a
-            // VLM confirmation. Nothing was left to act on, so no completion
-            // evidence exists.
-            this.log(open.length > 0
-                ? `⚠️ Page has no interactive elements with ${open.length} goal(s) still open - task NOT complete (stalled)`
-                : '⚠️ Page has no interactive elements and no completed goals to verify - task NOT complete (stalled)');
-            this.state.status = 'failed';
-            this.state.running = false;
-            this.finishSession(
-                sessionId,
-                open.length > 0
-                    ? 'stalled: no interactive elements, task incomplete'
-                    : 'stalled: no interactive elements, no completion evidence',
-            );
-            this.notify();
-            return;
+          this.log('No interactive elements found');
+          const open = this.checklist.filter((c) => !c.done);
+          // A 0-element exit is NEVER a success: the only complete paths are
+          // an explicit planner DONE, the backstop proving all items, or a
+          // VLM confirmation. Nothing was left to act on, so no completion
+          // evidence exists.
+          this.log(
+            open.length > 0
+              ? `⚠️ Page has no interactive elements with ${open.length} goal(s) still open - task NOT complete (stalled)`
+              : '⚠️ Page has no interactive elements and no completed goals to verify - task NOT complete (stalled)'
+          );
+          this.state.status = 'failed';
+          this.state.running = false;
+          this.finishSession(
+            sessionId,
+            open.length > 0
+              ? 'stalled: no interactive elements, task incomplete'
+              : 'stalled: no interactive elements, no completion evidence'
+          );
+          this.notify();
+          return;
         }
       }
 
@@ -769,11 +791,12 @@ export class AgentRunner {
       const contentChanged =
         this.lastExtractSignature !== null && signature !== this.lastExtractSignature;
       if (urlChanged || contentChanged) {
-        const why = urlChanged && contentChanged
-          ? `url ${this.lastExtractUrl?.split('/').pop()} -> ${pageUrl.split('/').pop()} + content`
-          : urlChanged
-            ? `url ${this.lastExtractUrl?.split('/').pop()} -> ${pageUrl.split('/').pop()}`
-            : `content re-rendered (height ${this.lastExtractSignature} -> ${signature})`;
+        const why =
+          urlChanged && contentChanged
+            ? `url ${this.lastExtractUrl?.split('/').pop()} -> ${pageUrl.split('/').pop()} + content`
+            : urlChanged
+              ? `url ${this.lastExtractUrl?.split('/').pop()} -> ${pageUrl.split('/').pop()}`
+              : `content re-rendered (height ${this.lastExtractSignature} -> ${signature})`;
         this.log(`🧭 Page changed (${why}) - clearing per-page interaction memory`);
         this.clearPageScopedElementMemory();
       }
@@ -783,15 +806,21 @@ export class AgentRunner {
       const inputFields = elements.filter((e) => e.role === 'textbox' || e.tag === 'input');
       const buttons = elements.filter((e) => e.role === 'button' || e.tag === 'button');
       const selects = elements.filter((e) => e.tag === 'select' || e.type === 'select-one');
-      this.log(`Elements: ${elements.length} total (${inputFields.length} inputs, ${selects.length} selects, ${buttons.length} buttons)`);
+      this.log(
+        `Elements: ${elements.length} total (${inputFields.length} inputs, ${selects.length} selects, ${buttons.length} buttons)`
+      );
 
       // Dynamic step budget, clamped to the session's shared budget.
       if (currentStep === 1 || maxSteps === 15) {
         const calculated = calculateMaxSteps(inputFields.length, selects.length, buttons.length);
-        const sessionMax = sessionId ? d.sessionManager.getContext(sessionId)?.maxSteps ?? calculated : calculated;
+        const sessionMax = sessionId
+          ? (d.sessionManager.getContext(sessionId)?.maxSteps ?? calculated)
+          : calculated;
         maxSteps = Math.min(sessionMax, calculated, 100);
         this.state.maxSteps = maxSteps;
-        this.log(`Calculated max steps: ${maxSteps} (need to fill ${inputFields.length + selects.length} fields)`);
+        this.log(
+          `Calculated max steps: ${maxSteps} (need to fill ${inputFields.length + selects.length} fields)`
+        );
       }
 
       const history = buildPlanHistory(this.filledIds, this.failedIds, this.failedErrors);
@@ -811,7 +840,11 @@ export class AgentRunner {
           // what's left" memory. Feeding it back stops the thrashing bug where
           // it re-did already-completed sub-goals after every navigation.
           checklist: this.checklist.length
-            ? this.checklist.map((c) => ({ id: c.id, description: c.description ?? '', done: c.done }))
+            ? this.checklist.map((c) => ({
+                id: c.id,
+                description: c.description ?? '',
+                done: c.done,
+              }))
             : undefined,
           // NPTEL "post-verify" signal: the runner has detected the planner
           // re-issuing the same no-op action with no page change. A PII-safe
@@ -829,37 +862,36 @@ export class AgentRunner {
           // harvested data never crosses to the LLM). Both are omitted when
           // the task is single-tab (no openTabs provider / empty handoff),
           // keeping the /plan payload byte-identical for existing runs.
-          ...(d.openTabs
-            ? { openTabs: await d.openTabs() }
-            : {}),
-          ...(d.crossTabMemory
-            ? { crossTabMemory: handoffForPlanner(d.crossTabMemory()) }
-            : {}),
+          ...(d.openTabs ? { openTabs: await d.openTabs() } : {}),
+          ...(d.crossTabMemory ? { crossTabMemory: handoffForPlanner(d.crossTabMemory()) } : {}),
         },
       });
       if (guard.blocked) {
-        this.log(`⛔ Outbound firewall blocked /plan egress: ${guard.category ?? 'PII'} at ${guard.reason ?? '?'}`);
+        this.log(
+          `⛔ Outbound firewall blocked /plan egress: ${guard.category ?? 'PII'} at ${guard.reason ?? '?'}`
+        );
         this.state.status = 'failed';
         this.state.running = false;
         this.finishSession(sessionId, 'outbound firewall blocked');
         this.notify();
         return;
       }
-      if (guard.redactedCount > 0) this.log(`Masked ${guard.redactedCount} PII field(s) before /plan egress`);
+      if (guard.redactedCount > 0)
+        this.log(`Masked ${guard.redactedCount} PII field(s) before /plan egress`);
 
       let plan: any;
       try {
         plan = await withTimeout(
           d.fetchPlan(guard.payload, d.abortSignal),
           this.eventTimeoutMs(),
-          'planner event',
+          'planner event'
         );
       } catch (e) {
         if (e instanceof EventTimeoutError) {
           this.consecutiveEventTimeouts += 1;
           this.log(
             `⏱ ${e.message} - treating step as no-op ` +
-              `(consecutive timeouts ${this.consecutiveEventTimeouts}/3)`,
+              `(consecutive timeouts ${this.consecutiveEventTimeouts}/3)`
           );
           if (this.consecutiveEventTimeouts >= 3) {
             this.log('⚠️ Stalled: 3 consecutive planner events timed out - stopping');
@@ -912,13 +944,16 @@ export class AgentRunner {
         this.log(`Checklist: ${doneCount}/${this.checklist.length} done`);
       }
 
-      if (plan.degraded) this.log(`⚠️ Planner degraded: ${plan.degraded_reason ?? 'no LLM reachable'}`);
+      if (plan.degraded)
+        this.log(`⚠️ Planner degraded: ${plan.degraded_reason ?? 'no LLM reachable'}`);
       this.log(`Planner returned: ${action?.type ?? 'NONE'}`);
 
       if (!action || action.type === 'DONE') {
         const undone = this.checklist.filter((c) => !c.done);
         if (plan.degraded) {
-          this.log('⚠️ Stopping: planner signaled DONE while DEGRADED (no LLM / heuristic) — task NOT genuinely complete');
+          this.log(
+            '⚠️ Stopping: planner signaled DONE while DEGRADED (no LLM / heuristic) — task NOT genuinely complete'
+          );
           this.plannerDegraded = true;
           this.state.degraded = true;
           break;
@@ -933,7 +968,9 @@ export class AgentRunner {
           this.doneWithOpenStreak += 1;
           if (this.doneWithOpenStreak >= 3) {
             const open = undone.map((c) => c.description || c.id).join('; ');
-            this.log(`⚠️ Planner stuck at DONE with ${undone.length} open item(s) (${open}) - completing best-effort`);
+            this.log(
+              `⚠️ Planner stuck at DONE with ${undone.length} open item(s) (${open}) - completing best-effort`
+            );
             this.plannerDegraded = true;
             this.state.degraded = true;
             break;
@@ -949,7 +986,7 @@ export class AgentRunner {
               const verdict = await withTimeout(
                 d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: undone }),
                 this.eventTimeoutMs(),
-                'VLM confirm event',
+                'VLM confirm event'
               );
               if (verdict?.confirmed) {
                 // The on-device proof says the goal content IS on screen -
@@ -963,15 +1000,21 @@ export class AgentRunner {
               } else if (verdict?.unavailableReason) {
                 this.logVlmUnavailableOnce(verdict.unavailableReason);
               } else if (verdict) {
-                this.log(`🔎 Vision: goal not yet confirmed (${verdict.detail ?? 'inconclusive'}) - continuing`);
+                this.log(
+                  `🔎 Vision: goal not yet confirmed (${verdict.detail ?? 'inconclusive'}) - continuing`
+                );
               } else {
                 this.logVlmUnavailableOnce('model unavailable');
               }
             } catch (e) {
-              this.log(`⚠️ Vision confirm failed (${e instanceof Error ? e.message : String(e)}) - continuing`);
+              this.log(
+                `⚠️ Vision confirm failed (${e instanceof Error ? e.message : String(e)}) - continuing`
+              );
             }
           }
-          this.log(`⚠️ Planner said DONE but ${undone.length} checklist item(s) still open (${open}) - continuing (strike ${this.doneWithOpenStreak}/3)`);
+          this.log(
+            `⚠️ Planner said DONE but ${undone.length} checklist item(s) still open (${open}) - continuing (strike ${this.doneWithOpenStreak}/3)`
+          );
           this.state.step = currentStep;
           this.notify();
           continue;
@@ -995,7 +1038,7 @@ export class AgentRunner {
           if (gate.block) {
             if (this.terminalGateStreak >= AgentRunner.TERMINAL_GATE_MAX) {
               this.log(
-                `⚠️ Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page after ${this.terminalGateStreak} rejections - completing best-effort (degraded)`,
+                `⚠️ Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page after ${this.terminalGateStreak} rejections - completing best-effort (degraded)`
               );
               this.plannerDegraded = true;
               this.state.degraded = true;
@@ -1004,7 +1047,7 @@ export class AgentRunner {
             this.terminalGateStreak += 1;
             terminalItem.done = false;
             this.log(
-              `🚫 Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page (${gate.reason}) - reopened, keeping the loop alive`,
+              `🚫 Terminal goal "${terminalItem.description ?? terminalItem.id}" not provably on this page (${gate.reason}) - reopened, keeping the loop alive`
             );
             this.state.step = currentStep;
             this.notify();
@@ -1023,9 +1066,15 @@ export class AgentRunner {
       // for value-bearing types) is skipped + marked done.
       if (isRepeatedAction(this.recentActionHistory, action)) {
         this.repeatedStreak += 1;
-        this.log(`⚠️ Skipping repeated action on element #${action.targetId} (${this.repeatedStreak} in a row)`);
+        this.log(
+          `⚠️ Skipping repeated action on element #${action.targetId} (${this.repeatedStreak} in a row)`
+        );
         this.filledIds.add(String(action.targetId));
-        this.recentActionHistory.push({ targetId: String(action.targetId), type: action.type, value: action.value });
+        this.recentActionHistory.push({
+          targetId: String(action.targetId),
+          type: action.type,
+          value: action.value,
+        });
         this.state.step = currentStep;
         this.notify();
         continue;
@@ -1079,12 +1128,14 @@ export class AgentRunner {
             const v = await withTimeout(
               d.confirmGoal({ url: pageUrl, title: pageTitle, openItems: [goalItem] }),
               this.eventTimeoutMs(),
-              'VLM confirm event',
+              'VLM confirm event'
             );
             if (v?.confirmed) {
               const g = this.checklist.find((c) => c.id === goalItem.id);
               if (g) g.done = true;
-              this.log(`✅ VLM confirmed final goal on screen after ${action.type} - stopping early (${v.detail ?? 'on-device'})`);
+              this.log(
+                `✅ VLM confirmed final goal on screen after ${action.type} - stopping early (${v.detail ?? 'on-device'})`
+              );
               break;
             } else if (v?.unavailableReason) {
               // Model was unavailable - carry on on the deterministic
@@ -1094,7 +1145,9 @@ export class AgentRunner {
               // Model ran and looked at the screen, but the goal is NOT there
               // yet - keep going. Logged so a human can see the VLM actively
               // checking (and saying no) rather than the loop just guessing.
-              this.log(`🔎 VLM checked screen after ${action.type}: goal not on screen yet (${v.detail ?? 'not visible'}) - continuing`);
+              this.log(
+                `🔎 VLM checked screen after ${action.type}: goal not on screen yet (${v.detail ?? 'not visible'}) - continuing`
+              );
             } else {
               // null = the on-device model was unavailable. The loop carries
               // on on the deterministic backstop - say so once per run.
@@ -1102,7 +1155,9 @@ export class AgentRunner {
             }
           } catch (e) {
             if (e instanceof EventTimeoutError) {
-              this.log(`🔎 VLM confirm after ${action.type} timed out (${e.ms}ms) - continuing on backstop`);
+              this.log(
+                `🔎 VLM confirm after ${action.type} timed out (${e.ms}ms) - continuing on backstop`
+              );
             } else {
               this.log(`🔎 VLM check after ${action.type} threw - continuing on backstop`);
             }
@@ -1151,7 +1206,7 @@ export class AgentRunner {
     sessionId: string | null,
     elements?: ElementLike[],
     pageUrl?: string,
-    _pageTitle?: string,
+    _pageTitle?: string
   ): Promise<void> {
     // #102: profile-token resolution, ON-DEVICE and at execution time. The
     // planner saw only the token (the outbound guard masks raw values before
@@ -1169,7 +1224,9 @@ export class AgentRunner {
     if (d.profile && action.value !== undefined) {
       const resolved = resolveProfileValue(action.value, d.profile);
       if (resolved !== undefined && resolved !== '') {
-        this.log(`🔑 Resolving profile token ${emittedValue?.trim() ?? ''} on-device for element #${action.targetId ?? '?'}`);
+        this.log(
+          `🔑 Resolving profile token ${emittedValue?.trim() ?? ''} on-device for element #${action.targetId ?? '?'}`
+        );
         action.value = resolved;
       }
     }
@@ -1182,7 +1239,9 @@ export class AgentRunner {
     if (d.crossTabMemory && action.value !== undefined) {
       const resolved = resolveHandoffValue(action.value, d.crossTabMemory());
       if (resolved !== undefined) {
-        this.log(`🔗 Resolving cross-tab token ${emittedValue?.trim() ?? ''} on-device for element #${action.targetId ?? '?'}`);
+        this.log(
+          `🔗 Resolving cross-tab token ${emittedValue?.trim() ?? ''} on-device for element #${action.targetId ?? '?'}`
+        );
         action.value = resolved;
       }
     }
@@ -1207,7 +1266,9 @@ export class AgentRunner {
         if (hit.gated) {
           const dest = await gate.destination();
           const staged = stageOutbound(hit, action, dest.url, dest.title, action.value);
-          this.log(`⏸ Awaiting your confirmation to send to ${staged.destinationTitle || staged.destinationUrl} (${hit.reason})`);
+          this.log(
+            `⏸ Awaiting your confirmation to send to ${staged.destinationTitle || staged.destinationUrl} (${hit.reason})`
+          );
           this.state.status = 'awaiting-confirmation';
           this.state.awaiting = staged;
           this.notify();
@@ -1272,7 +1333,11 @@ export class AgentRunner {
         this.log(`❌ Type failed: ${r?.error ?? 'unknown'}`);
         recordFailure(String(action.targetId), r?.error);
       }
-      this.recentActionHistory.push({ targetId: String(action.targetId), type: 'TYPE', value: action.value });
+      this.recentActionHistory.push({
+        targetId: String(action.targetId),
+        type: 'TYPE',
+        value: action.value,
+      });
       return;
     }
 
@@ -1316,14 +1381,20 @@ export class AgentRunner {
         this.log(`❌ Select failed: ${r?.error ?? 'unknown'}`);
         recordFailure(String(action.targetId), r?.error);
       }
-      this.recentActionHistory.push({ targetId: String(action.targetId), type: 'SELECT', value: action.value });
+      this.recentActionHistory.push({
+        targetId: String(action.targetId),
+        type: 'SELECT',
+        value: action.value,
+      });
       return;
     }
 
     if (action.type === 'KEY') {
       this.scrollGuard.noteOtherAction();
       const key = action.key || 'Enter';
-      this.log(`⌨️ Pressing key "${key}"${action.targetId !== undefined ? ` on element #${action.targetId}` : ''}`);
+      this.log(
+        `⌨️ Pressing key "${key}"${action.targetId !== undefined ? ` on element #${action.targetId}` : ''}`
+      );
       const r = await d.execute(action);
       if (r?.ok) {
         this.log('✅ Key pressed successfully');
@@ -1336,10 +1407,16 @@ export class AgentRunner {
           this.clearPageScopedElementMemory();
           await d.delay(600);
         }
-        this.recentActionHistory.push({ targetId: String(action.targetId ?? 'focus'), type: 'KEY' });
+        this.recentActionHistory.push({
+          targetId: String(action.targetId ?? 'focus'),
+          type: 'KEY',
+        });
       } else {
         this.log(`❌ Key press failed: ${r?.error ?? 'unknown'}`);
-        this.recentActionHistory.push({ targetId: String(action.targetId ?? 'focus'), type: 'KEY' });
+        this.recentActionHistory.push({
+          targetId: String(action.targetId ?? 'focus'),
+          type: 'KEY',
+        });
       }
       return;
     }
@@ -1373,7 +1450,8 @@ export class AgentRunner {
       // for it to be usable, and re-perceives it next loop. A switch is a
       // page-change: clear every per-page element memory (the new tab issues
       // fresh ids) exactly like NAVIGATE does.
-      const where = action.tabId !== undefined ? `tab ${action.tabId}` : (action.urlHint ?? 'active web tab');
+      const where =
+        action.tabId !== undefined ? `tab ${action.tabId}` : (action.urlHint ?? 'active web tab');
       this.log(`⇄ Switching to ${where}`);
       const r = await d.execute({
         type: 'SWITCH_TAB',
@@ -1396,7 +1474,9 @@ export class AgentRunner {
     // M2 (C1-adjacent): never dump the whole action JSON - it can carry the
     // (post-resolution) value and the target URL, both PII-bearing. Log only
     // the safe structural fields the operator needs to debug an unknown type.
-    this.log(`Unknown action type "${String(action.type)}" (target #${action.targetId ?? '?'}) - ignoring`);
+    this.log(
+      `Unknown action type "${String(action.type)}" (target #${action.targetId ?? '?'}) - ignoring`
+    );
   }
 
   /**

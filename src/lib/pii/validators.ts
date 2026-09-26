@@ -140,11 +140,12 @@ export function validatePhone(phone: string): boolean {
   // Must be 10–15 digits after stripping formatting
   if (!/^\d{10,15}$/.test(stripped)) return false;
   // Indian: must start with 6, 7, 8, or 9 (after optional country code)
-  const local = stripped.startsWith('91') && stripped.length === 12
-    ? stripped.slice(2)
-    : stripped.startsWith('0') && stripped.length === 11
-      ? stripped.slice(1)
-      : stripped;
+  const local =
+    stripped.startsWith('91') && stripped.length === 12
+      ? stripped.slice(2)
+      : stripped.startsWith('0') && stripped.length === 11
+        ? stripped.slice(1)
+        : stripped;
   return /^[6-9]\d{9}$/.test(local) || stripped.length >= 10;
 }
 

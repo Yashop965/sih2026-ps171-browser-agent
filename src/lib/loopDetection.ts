@@ -37,7 +37,7 @@ export interface RecentAction {
  */
 export function isRepeatedAction(
   recentHistory: RecentAction[],
-  action: { targetId?: number | string; type: string; value?: string },
+  action: { targetId?: number | string; type: string; value?: string }
 ): boolean {
   if (action.targetId === undefined) return false;
   const last = recentHistory[recentHistory.length - 1];
@@ -61,7 +61,7 @@ export function isRepeatedAction(
 export function calculateMaxSteps(
   inputCount: number,
   selectCount: number,
-  buttonCount: number,
+  buttonCount: number
 ): number {
   const totalFields = inputCount + selectCount;
   const calculated = Math.max(20, totalFields * 3 + buttonCount + 10);
@@ -77,9 +77,7 @@ export function calculateMaxSteps(
 export class ScrollGuard {
   private scrolls = 0;
 
-  constructor(
-    private readonly maxConsecutive: number = 3,
-  ) {}
+  constructor(private readonly maxConsecutive: number = 3) {}
 
   /**
    * Call before issuing a SCROLL. Returns the incremented count and whether

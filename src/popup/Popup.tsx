@@ -5,7 +5,11 @@ import PrivacyLedger from '../components/PrivacyLedger';
 import ResourceMonitor from '../components/ResourceMonitor';
 import VlmIndicator from '../components/VlmIndicator';
 import { PROVIDERS, ProviderKey } from '../lib/providerConfig';
-import { OUTBOUND_STORAGE_KEY, normalizeDomains, saveOutboundAllowlist } from '../lib/outboundAllowlist';
+import {
+  OUTBOUND_STORAGE_KEY,
+  normalizeDomains,
+  saveOutboundAllowlist,
+} from '../lib/outboundAllowlist';
 
 // #134: task-history shape (persisted under this key in browser.storage.local).
 const RECENT_TASKS_KEY = 'sih_recent_tasks';
@@ -31,7 +35,9 @@ function Popup() {
   // the settings field; normalised + persisted on-device via outboundAllowlist.
   const [outboundDomains, setOutboundDomains] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
+  const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>(
+    'checking'
+  );
   const [serverLatency, setServerLatency] = useState<number>(0);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [copyFlash, setCopyFlash] = useState(false);
@@ -90,7 +96,7 @@ function Popup() {
     try {
       const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
       const response = await fetch(`${serverUrl}/health`, {
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.timeout(3000),
       });
       const latency = Math.round(performance.now() - start);
       setServerLatency(latency);
@@ -181,7 +187,12 @@ function Popup() {
     setRecentTasks((prev) => {
       const rest = prev.filter((t) => t.task !== taskId);
       return [
-        { task: taskId, startUrl: startUrl.trim(), startedAt: Date.now(), status: 'running' as const },
+        {
+          task: taskId,
+          startUrl: startUrl.trim(),
+          startedAt: Date.now(),
+          status: 'running' as const,
+        },
         ...rest,
       ].slice(0, RECENT_TASKS_CAP);
     });
@@ -216,7 +227,7 @@ function Popup() {
     if (mirror && terminal[mirror.status] && !mirror.running) {
       setRecentTasks((prev) => {
         const next = prev.map((t) =>
-          t.task === active ? { ...t, status: terminal[mirror.status] } : t,
+          t.task === active ? { ...t, status: terminal[mirror.status] } : t
         );
         browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
         return next;
@@ -234,39 +245,36 @@ function Popup() {
   // #134: one-click reuse of a cached prompt - fill the input + start-URL and
   // kick off the run. Reuses handleStart's logic so the new entry is recorded
   // into the history consistently.
-  const runRecentTask = useCallback(
-    async (entry: RecentTask) => {
-      setTask(entry.task);
-      setStartUrl(entry.startUrl || '');
-      // The state is set before this tick; start explicitly with the
-      // entry's values so we don't race on the re-render.
-      setLogs([]);
-      setStep(0);
-      setIsRunning(true);
-      setLatency(null);
-      activeTaskRef.current = entry.task;
-      setRecentTasks((prev) => {
-        const rest = prev.filter((t) => t.task !== entry.task);
-        const next = [
-          { ...entry, startedAt: Date.now(), status: 'running' as const },
-          ...rest,
-        ].slice(0, RECENT_TASKS_CAP);
-        browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
-        return next;
-      });
-      const res: any = await browser.runtime.sendMessage({
-        type: 'START_TASK',
-        task: entry.task,
-        startUrl: entry.startUrl || '',
-      });
-      if (!res?.ok) {
-        setLogs([`⚠️ Could not start task (${res?.error ?? 'unknown'})`]);
-        setIsRunning(false);
-        activeTaskRef.current = null;
-      }
-    },
-    []
-  );
+  const runRecentTask = useCallback(async (entry: RecentTask) => {
+    setTask(entry.task);
+    setStartUrl(entry.startUrl || '');
+    // The state is set before this tick; start explicitly with the
+    // entry's values so we don't race on the re-render.
+    setLogs([]);
+    setStep(0);
+    setIsRunning(true);
+    setLatency(null);
+    activeTaskRef.current = entry.task;
+    setRecentTasks((prev) => {
+      const rest = prev.filter((t) => t.task !== entry.task);
+      const next = [{ ...entry, startedAt: Date.now(), status: 'running' as const }, ...rest].slice(
+        0,
+        RECENT_TASKS_CAP
+      );
+      browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
+      return next;
+    });
+    const res: any = await browser.runtime.sendMessage({
+      type: 'START_TASK',
+      task: entry.task,
+      startUrl: entry.startUrl || '',
+    });
+    if (!res?.ok) {
+      setLogs([`⚠️ Could not start task (${res?.error ?? 'unknown'})`]);
+      setIsRunning(false);
+      activeTaskRef.current = null;
+    }
+  }, []);
 
   const clearTaskHistory = useCallback(() => {
     setRecentTasks([]);
@@ -283,16 +291,32 @@ function Popup() {
     return `${Math.floor(h / 24)}d ago`;
   };
 
-
   return (
     <div className="popup">
       <header className="popup-header">
         <h1 className="popup-title">SIH2026 PS171</h1>
         <p className="popup-subtitle">Browser Agent</p>
         {/* Status Indicator */}
-        <div className="status-indicator" title={healthStatus === 'healthy' ? `Server OK (${serverLatency}ms)` : healthStatus === 'checking' ? 'Checking...' : 'Server Offline'}>
-          <span className={`status-dot ${healthStatus === 'healthy' ? 'healthy' : healthStatus === 'checking' ? 'checking' : 'unhealthy'}`}></span>
-          <span className="status-text">{healthStatus === 'healthy' ? 'Live' : healthStatus === 'checking' ? 'Check...' : 'Dead'}</span>
+        <div
+          className="status-indicator"
+          title={
+            healthStatus === 'healthy'
+              ? `Server OK (${serverLatency}ms)`
+              : healthStatus === 'checking'
+                ? 'Checking...'
+                : 'Server Offline'
+          }
+        >
+          <span
+            className={`status-dot ${healthStatus === 'healthy' ? 'healthy' : healthStatus === 'checking' ? 'checking' : 'unhealthy'}`}
+          ></span>
+          <span className="status-text">
+            {healthStatus === 'healthy'
+              ? 'Live'
+              : healthStatus === 'checking'
+                ? 'Check...'
+                : 'Dead'}
+          </span>
           {serverLatency > 0 && <span className="status-latency">{serverLatency}ms</span>}
         </div>
       </header>
@@ -320,7 +344,14 @@ function Popup() {
               ))}
             </select>
             <button className="settings-button" onClick={() => setShowSettings(!showSettings)}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
@@ -347,12 +378,17 @@ function Popup() {
               <button
                 className="save-key-button"
                 onClick={async () => {
-                  await browser.storage.local.set({ providerKey: selectedProvider, apiKey: providerKey });
+                  await browser.storage.local.set({
+                    providerKey: selectedProvider,
+                    apiKey: providerKey,
+                  });
                   // Persist the outbound allowlist on-device (normalised).
                   await saveOutboundAllowlist(normalizeDomains(outboundDomains.split(/[\n,]/)));
                   setShowSettings(false);
                 }}
-              >Save</button>
+              >
+                Save
+              </button>
             </div>
           )}
         </div>
@@ -401,7 +437,15 @@ function Popup() {
                   >
                     <span className="recent-task-text">{t.task}</span>
                     <span className="recent-task-meta">
-                      {t.status === 'complete' ? '✓' : t.status === 'stalled' ? '⏸' : t.status === 'failed' ? '✕' : t.status === 'stopped' ? '⏹' : '…'}{' '}
+                      {t.status === 'complete'
+                        ? '✓'
+                        : t.status === 'stalled'
+                          ? '⏸'
+                          : t.status === 'failed'
+                            ? '✕'
+                            : t.status === 'stopped'
+                              ? '⏹'
+                              : '…'}{' '}
                       {timeAgo(t.startedAt)}
                     </span>
                   </button>
@@ -420,8 +464,8 @@ function Popup() {
           <div className="outbound-gate" role="alertdialog" aria-label="Outbound send confirmation">
             <div className="outbound-gate-title">📤 Sending off-device</div>
             <p className="outbound-gate-sub">
-              The agent wants to send a message. Review the exact payload below — only your
-              Confirm sends it.
+              The agent wants to send a message. Review the exact payload below — only your Confirm
+              sends it.
             </p>
             <div className="outbound-gate-detail">
               <div className="og-row">
@@ -469,20 +513,12 @@ function Popup() {
               ⏹ Stop Agent
             </button>
           ) : (
-            <button
-              className={`start-button`}
-              onClick={handleStart}
-              disabled={!task}
-            >
+            <button className={`start-button`} onClick={handleStart} disabled={!task}>
               Start Agent
             </button>
           )}
-          {step > 0 && (
-            <div className="step-indicator">Step {step} of task execution</div>
-          )}
-          {latency !== null && (
-            <div className="latency-display">Latency: {latency}ms</div>
-          )}
+          {step > 0 && <div className="step-indicator">Step {step} of task execution</div>}
+          {latency !== null && <div className="latency-display">Latency: {latency}ms</div>}
         </div>
 
         {/* Activity Log - Collapsible */}
@@ -500,8 +536,16 @@ function Popup() {
                 {copyFlash ? 'Copied ✓' : 'Copy'}
               </button>
             </span>
-            <svg className="log-toggle" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points={logsCollapsed ? "9 18 15 12 9 6" : "15 18 9 12 9 6"} />
+            <svg
+              className="log-toggle"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polyline points={logsCollapsed ? '9 18 15 12 9 6' : '15 18 9 12 9 6'} />
             </svg>
           </div>
           {!logsCollapsed && (
@@ -512,7 +556,9 @@ function Popup() {
                 // Display the most recent ~60 so the panel stays scrollable;
                 // the Copy button always has the FULL log.
                 [...logs].slice(0, 60).map((log, i) => (
-                  <div key={i} className="log-entry">{log}</div>
+                  <div key={i} className="log-entry">
+                    {log}
+                  </div>
                 ))
               )}
             </div>

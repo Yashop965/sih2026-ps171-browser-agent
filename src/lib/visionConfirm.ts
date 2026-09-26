@@ -63,7 +63,10 @@ export function targetInOcr(target: string, ocrText: string): boolean {
  * present in the OCR. If any item has no target, or any target is missing,
  * we return confirmed:false so the deterministic loop carries on (safe).
  */
-export function visionConfirm(ocrText: string, openItems: VisionConfirmItem[]): VisionConfirmVerdict {
+export function visionConfirm(
+  ocrText: string,
+  openItems: VisionConfirmItem[]
+): VisionConfirmVerdict {
   const matched: string[] = [];
   const missing: string[] = [];
 

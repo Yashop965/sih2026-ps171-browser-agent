@@ -64,10 +64,7 @@ export function fieldToken(index: number): string {
  * de-duplicated by value (a page that repeats "Acme Ltd" in three cells
  * yields one token, not three). Labels are dedup-keyed too — first wins.
  */
-export function harvestToHandoff(
-  fields: HarvestedField[],
-  sourceUrl: string,
-): TabHandoff {
+export function harvestToHandoff(fields: HarvestedField[], sourceUrl: string): TabHandoff {
   const values: Record<string, string> = {};
   const labels: Record<string, string> = {};
   const byValue = new Map<string, string>(); // value -> token
@@ -102,10 +99,7 @@ export function harvestToHandoff(
  * `harvestToHandoff` alone is last-tab-wins; use this one on the switch
  * path so a bare re-ground never clobbers a prior harvest.
  */
-export function mergeHandoff(
-  base: TabHandoff,
-  incoming: TabHandoff,
-): TabHandoff {
+export function mergeHandoff(base: TabHandoff, incoming: TabHandoff): TabHandoff {
   if (Object.keys(incoming.values).length === 0) return base;
   const values: Record<string, string> = { ...base.values };
   const labels: Record<string, string> = { ...base.labels };
@@ -146,7 +140,7 @@ export function mergeHandoff(
  * undefined (the payload key is omitted, so single-tab tasks see no change).
  */
 export function handoffForPlanner(
-  h: TabHandoff | null | undefined,
+  h: TabHandoff | null | undefined
 ): Array<{ token: string; label: string }> | undefined {
   if (!h || Object.keys(h.values).length === 0) return undefined;
   return Object.keys(h.values).map((token) => ({
@@ -163,7 +157,7 @@ export function handoffForPlanner(
  */
 export function resolveHandoffValue(
   value: string | undefined,
-  h: TabHandoff | null | undefined,
+  h: TabHandoff | null | undefined
 ): string | undefined {
   if (value === undefined || !isHandoffToken(value) || !h) return undefined;
   return h.values[value.trim()];
@@ -195,7 +189,7 @@ export function labelKey(label: string | undefined | null): string {
 export function rePerceiveHandoff(
   base: TabHandoff,
   fields: HarvestedField[],
-  sourceUrl: string,
+  sourceUrl: string
 ): TabHandoff {
   const values: Record<string, string> = { ...base.values };
   const labels: Record<string, string> = { ...base.labels };
@@ -232,7 +226,11 @@ export function rePerceiveHandoff(
     values,
     labels,
     extractedAt: changed ? Date.now() : base.extractedAt,
-    sourceUrl: changed ? (base.sourceUrl ? `${base.sourceUrl} \u2192 ${sourceUrl}` : sourceUrl) : base.sourceUrl,
+    sourceUrl: changed
+      ? base.sourceUrl
+        ? `${base.sourceUrl} \u2192 ${sourceUrl}`
+        : sourceUrl
+      : base.sourceUrl,
   };
 }
 
@@ -243,7 +241,8 @@ export function rePerceiveHandoff(
  */
 export function rePerceptionChanged(before: TabHandoff, after: TabHandoff): boolean {
   if (before.extractedAt !== after.extractedAt) return true;
-  const bv = before.values, av = after.values;
+  const bv = before.values,
+    av = after.values;
   for (const token of Object.keys(av)) {
     if (bv[token] !== av[token]) return true;
   }

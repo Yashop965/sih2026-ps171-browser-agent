@@ -85,7 +85,12 @@ export default defineUnlistedScript(() => {
     const reply = (r: Omit<VlmResponse, 'id'>): void => {
       selfRef.postMessage({ id: req.id, ...r });
     };
-    const isWork = req.type === 'OCR' || req.type === 'DETECT' || req.type === 'GROUND' || req.type === 'CAPTION' || req.type === 'VQA';
+    const isWork =
+      req.type === 'OCR' ||
+      req.type === 'DETECT' ||
+      req.type === 'GROUND' ||
+      req.type === 'CAPTION' ||
+      req.type === 'VQA';
     if (isWork && busy) {
       reply({ ok: false, error: 'busy', status: visionPipeline.status() });
       return;

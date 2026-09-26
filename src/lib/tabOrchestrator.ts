@@ -97,7 +97,7 @@ export interface TabOrchestratorDeps {
    */
   runSubTask: (
     sub: SubTask,
-    shared: { handoff: TabHandoff },
+    shared: { handoff: TabHandoff }
   ) => Promise<Pick<SubTaskReport, 'ok' | 'produced' | 'error'>>;
   /** Switch the focus tab (the P1 Tier-1 path). */
   switchTo: (tab: TabRef) => Promise<void>;
@@ -116,7 +116,7 @@ export interface TabOrchestratorDeps {
   watch: (
     tab: TabRef,
     trigger: WatchTrigger,
-    onFields: (fields: HarvestedField[], url: string) => void,
+    onFields: (fields: HarvestedField[], url: string) => void
   ) => WatchHandle;
   /** Optional stop signal (user hit Stop / task ended). */
   isStopped?: () => boolean;
@@ -163,7 +163,7 @@ export interface TabSnapshot {
 export function watchTickFires(
   trigger: WatchTrigger,
   prev: TabSnapshot,
-  next: TabSnapshot,
+  next: TabSnapshot
 ): boolean {
   if (trigger.urlChange && (next.url ?? '') !== (prev.url ?? '')) return true;
   if (trigger.pollMs !== undefined && (next.title ?? '') !== (prev.title ?? '')) return true;
@@ -212,13 +212,9 @@ export class TabOrchestrator {
       .filter((s) => s.trigger && s.tab.role === 'source')
       .slice(0, MAX_WATCHED_TABS)
       .map((s) =>
-        this.deps.watch(
-          s.tab,
-          clampWatchTrigger(s.trigger as WatchTrigger),
-          (fields, url) => {
-            refreshHandoffInPlace(graph.handoff, rePerceiveHandoff(graph.handoff, fields, url));
-          },
-        ),
+        this.deps.watch(s.tab, clampWatchTrigger(s.trigger as WatchTrigger), (fields, url) => {
+          refreshHandoffInPlace(graph.handoff, rePerceiveHandoff(graph.handoff, fields, url));
+        })
       );
 
     try {

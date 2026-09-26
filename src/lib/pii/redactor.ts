@@ -1,6 +1,6 @@
 /**
  * Redaction Engine (src/lib/pii/redactor.ts)
- * 
+ *
  * Applies visual redaction to detected PII:
  * - Password fields: blackout overlay
  * - Faces: backdrop blur effect
@@ -25,7 +25,7 @@ export class RedactionEngine {
 
     for (const detection of detections) {
       if (!detection.redacted) continue;
-      
+
       try {
         const element = document.querySelector(detection.selector);
         if (!element) continue;
@@ -71,7 +71,7 @@ export class RedactionEngine {
 
   private blackoutElement(element: Element, detection: any): void {
     const rect = element.getBoundingClientRect();
-    
+
     const overlay = document.createElement('div');
     overlay.style.cssText = `
       position: fixed;
@@ -85,14 +85,14 @@ export class RedactionEngine {
     `;
     overlay.dataset.piiRedaction = 'true';
     overlay.dataset.type = 'PASSWORD';
-    
+
     document.body.appendChild(overlay);
     this.overlays.set(detection.selector, overlay);
   }
 
   private blurFace(element: Element, _detection: any): void {
     const rect = element.getBoundingClientRect();
-    
+
     const blurDiv = document.createElement('div');
     blurDiv.style.cssText = `
       position: fixed;
@@ -108,14 +108,14 @@ export class RedactionEngine {
     `;
     blurDiv.dataset.piiRedaction = 'true';
     blurDiv.dataset.type = 'FACE';
-    
+
     document.body.appendChild(blurDiv);
     this.overlays.set(`face_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, blurDiv);
   }
 
   private overlayElement(element: Element, detection: any): void {
     const rect = element.getBoundingClientRect();
-    
+
     const badge = document.createElement('div');
     badge.style.cssText = `
       position: fixed;
@@ -132,7 +132,7 @@ export class RedactionEngine {
     `;
     badge.textContent = `🔒 REDACTED PII`;
     badge.dataset.piiRedaction = 'true';
-    
+
     document.body.appendChild(badge);
     this.overlays.set(detection.selector, badge);
   }

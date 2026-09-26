@@ -23,17 +23,20 @@ export interface ARIAElement {
   depth: number;
 }
 
-export type PIIType = 
+export type PIIType =
   | 'AADHAAR'
   | 'PAN'
   | 'CREDIT_CARD'
+  | 'DEBIT_CARD'
   | 'IFSC'
   | 'PHONE'
   | 'EMAIL'
   | 'PASSWORD_FIELD'
   | 'API_KEY'
   | 'FACE_DETECTED'
-  | 'TEXT_PASSWORD';
+  | 'TEXT_PASSWORD'
+  | 'UPI'
+  | 'SSN';
 
 export interface DetectedPII {
   type: PIIType;
@@ -90,6 +93,7 @@ export interface VisionResult {
 }
 
 export interface BoundingBox {
+  id: number;
   x: number;
   y: number;
   width: number;
@@ -128,11 +132,7 @@ export interface PerfMark {
   durationMs: number;
 }
 
-export type Stage =
-  | 'dom_extract'
-  | 'vision_inference'
-  | 'plan_response'
-  | 'action_execution';
+export type Stage = 'dom_extract' | 'vision_inference' | 'plan_response' | 'action_execution';
 
 /**
  * A privacy event surfaced in the UI.
@@ -149,4 +149,6 @@ export interface PrivacyEvent {
   category: PIIType;
   detail: string;
   confidence: number;
-}  
+  /** CSS selector of the element the PII was found on, when known. */
+  selector?: string;
+}

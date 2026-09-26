@@ -88,7 +88,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
       (e) => {
         clearTimeout(t);
         reject(e);
-      },
+      }
     );
   });
 }
@@ -117,7 +117,7 @@ export interface VlmHostReply {
 export async function vlmHostSend(
   msg: Record<string, unknown>,
   timeoutMs: number,
-  opts: { create?: boolean } = {},
+  opts: { create?: boolean } = {}
 ): Promise<VlmHostReply> {
   const create = opts.create ?? true;
   if (create) await ensureVlmHost();
@@ -132,7 +132,10 @@ export async function vlmHostSend(
       // The offscreen relay answers every VLM_HOST_* message with {ok,...};
       // anything else means a different context answered first (single
       // listener invariant: only the offscreen doc should handle VLM_HOST_*).
-      console.warn('[vlm-host] unexpected reply shadowing the relay - single-listener invariant broken?', res);
+      console.warn(
+        '[vlm-host] unexpected reply shadowing the relay - single-listener invariant broken?',
+        res
+      );
       lastErr = new Error('vlm host: unexpected reply (no listener?)');
       break; // retrying a SHADOWED reply won't fix it
     } catch (e) {
@@ -155,7 +158,11 @@ export function vlmHostOcr(dataUrl: string, timeoutMs = 300_000): Promise<VlmHos
 }
 
 /** Object-detection grounding of a captured screenshot (optional query). */
-export function vlmHostDetect(dataUrl: string, query?: string, timeoutMs = 300_000): Promise<VlmHostReply> {
+export function vlmHostDetect(
+  dataUrl: string,
+  query?: string,
+  timeoutMs = 300_000
+): Promise<VlmHostReply> {
   return vlmHostSend({ type: 'VLM_HOST_DETECT', dataUrl, query }, timeoutMs, { create: true });
 }
 
@@ -167,7 +174,11 @@ export function vlmHostDetect(dataUrl: string, query?: string, timeoutMs = 300_0
  * document.elementFromPoint - so only box coords + label text cross the
  * boundary, never the pixels.
  */
-export function vlmHostGround(dataUrl: string, query?: string, timeoutMs = 300_000): Promise<VlmHostReply> {
+export function vlmHostGround(
+  dataUrl: string,
+  query?: string,
+  timeoutMs = 300_000
+): Promise<VlmHostReply> {
   return vlmHostSend({ type: 'VLM_HOST_GROUND', dataUrl, query }, timeoutMs, { create: true });
 }
 
@@ -191,7 +202,12 @@ export async function vlmHostStatus(timeoutMs = 15_000): Promise<VisionStatus> {
   }
   try {
     const res = await vlmHostSend({ type: 'VLM_HOST_STATUS' }, timeoutMs, { create: false });
-    return res.status ?? (res.ok ? { state: 'idle' } : { state: 'failed', lastLoadError: res.error ?? 'vlm host error' });
+    return (
+      res.status ??
+      (res.ok
+        ? { state: 'idle' }
+        : { state: 'failed', lastLoadError: res.error ?? 'vlm host error' })
+    );
   } catch {
     // Doc open but the relay is dead/unreachable - report honestly.
     return { state: 'failed', lastLoadError: 'vlm host unreachable' };

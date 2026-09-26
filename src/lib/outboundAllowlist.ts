@@ -18,7 +18,10 @@ export function normalizeDomains(raw: unknown): string[] {
   const out: string[] = [];
   for (const item of raw) {
     if (typeof item !== 'string') continue;
-    const d = item.trim().toLowerCase().replace(/^https?:\/\//, '');
+    const d = item
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '');
     if (!d) continue;
     const host = d.split('/')[0];
     if (host && !seen.has(host)) {

@@ -1,81 +1,104 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+
+# Cancel superseded runs on the same ref. Without this, every push to a PR
+# branch queues another full build and the queue is worked through in order.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: Build + tests
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 20
-    
+        cache: npm
+
     - name: Install dependencies
-      run: npm install
-    
+      run: npm ci
+
     - name: Build extension
       run: npm run build
-    
-    - name: Run tests
+
+    - name: Vitest (TypeScript)
       run: npm run test
-    
-    - name: Run Python tests (optional)
+
+    - name: Python tests
+      # NOTE: run from the REPOSITORY ROOT. The old step used
+      # `working-directory: server` with paths like `tests/test_main.py`,
+      # which resolved to server/tests/ - a directory that does not exist.
+      # pytest errored "file or directory not found", ran 0 tests, and the
+      # `|| true` made the step pass anyway, so the Python suite had never
+      # actually run in CI. See issue #177.
       run: |
-        pip install -r server/requirements.txt
-        python -m pytest tests/test_main.py tests/test_fastapi_planner.py -v || true
-      working-directory: server
-      continue-on-error: true
+        python -m pip install -q -r server/requirements.txt
+        python -m pytest tests/ -q
 
   lint:
+    name: Lint + types
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 20
-    
+        cache: npm
+
     - name: Install dependencies
-      run: npm install
-    
-    - name: Run TypeScript check (non-blocking)
-      run: npx tsc --noEmit || true
-    
-    - name: Run Python linting (non-blocking)
-      run: |
-        pip install flake8
-        flake8 server/ --max-line-length=120 || true
-      continue-on-error: true
+      run: npm ci
+
+    # All three now gate. They previously ran with `|| true`, so a red result
+    # was printed and then discarded - a green checkmark on a step that
+    # cannot fail.
+    - name: TypeScript
+      run: npx tsc --noEmit
+
+    - name: ESLint
+      run: npm run lint
+
+    - name: Prettier
+      run: npm run format:check
 
   security:
+    name: Dependency audit (advisory)
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 10
+    # Advisory only. `npm audit` is noisy on dev dependencies, and the current
+    # 2 high-severity findings are tracked in issue #178 rather than fixed
+    # here - `npm audit fix --force` wants major-version bumps that can break
+    # the WXT build. Make this job required once those are resolved.
+    continue-on-error: true
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 20
-    
+        cache: npm
+
     - name: Install dependencies
-      run: npm install
-    
-    - name: Run npm audit (informational)
-      run: npm audit --production || true
-    
-    - name: Run Python security check (informational)
+      run: npm ci
+
+    - name: npm audit (production)
+      run: npm audit --production
+
+    - name: Python safety
       run: |
-        pip install safety
-        safety check -r server/requirements.txt || true
-      continue-on-error: true
+        python -m pip install -q safety
+        safety check -r server/requirements.txt

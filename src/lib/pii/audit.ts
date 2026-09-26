@@ -54,7 +54,7 @@ export class PrivacyAuditLedger {
     element: string,
     confidence: number,
     verified: boolean,
-    count = 1,
+    count = 1
   ): void {
     this.push({
       event: 'DETECTED',
@@ -71,12 +71,7 @@ export class PrivacyAuditLedger {
   /**
    * Record a REDACTED event.
    */
-  redacted(
-    category: string,
-    element: string,
-    confidence: number,
-    count = 1,
-  ): void {
+  redacted(category: string, element: string, confidence: number, count = 1): void {
     this.push({
       event: 'REDACTED',
       category,
@@ -137,7 +132,10 @@ export class PrivacyAuditLedger {
     byCategory: Record<string, number>;
   } {
     const byCategory: Record<string, number> = {};
-    let detected = 0, redacted = 0, blocked = 0, sent = 0;
+    let detected = 0,
+      redacted = 0,
+      blocked = 0,
+      sent = 0;
 
     for (const entry of this.entries) {
       byCategory[entry.category] = (byCategory[entry.category] ?? 0) + entry.count;

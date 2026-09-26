@@ -1,6 +1,6 @@
 /**
  * PII Detection Module
- * 
+ *
  * Implements multi-layered detection for Indian and international PII:
  * - Aadhaar (12-digit with Verhoeff checksum)
  * - PAN (Permanent Account Number)
@@ -89,7 +89,7 @@ export class PIIManager {
 
   private scanDOM(): void {
     // 1. Password fields
-    document.querySelectorAll('input').forEach(input => {
+    document.querySelectorAll('input').forEach((input) => {
       const type = input.getAttribute('type')?.toLowerCase() || 'text';
 
       if (type === 'password') {
@@ -102,7 +102,7 @@ export class PIIManager {
           metadata: { tagName: input.tagName, hasValue: !!input.value },
         });
       }
-      
+
       // Check for password-like values even in non-password fields
       if (input.value && this.isLikelyPassword(input.value)) {
         this.detections.push({
@@ -118,16 +118,21 @@ export class PIIManager {
 
     // 2. Text content scanning - ONLY in specific contexts
     // Scan labels, headings, paragraphs, spans, and divs but NOT table cells by default
-    document.querySelectorAll('label, h1, h2, h3, h4, h5, h6, p, strong, b, em, span, div').forEach(el => {
-      const text = el.textContent || '';
-      if (text.length >= 5 && text.length < 500) { // Only scan reasonable length text
-        this.scanTextContent(el, text);
-      }
-    });
+    document
+      .querySelectorAll('label, h1, h2, h3, h4, h5, h6, p, strong, b, em, span, div')
+      .forEach((el) => {
+        const text = el.textContent || '';
+        if (text.length >= 5 && text.length < 500) {
+          // Only scan reasonable length text
+          this.scanTextContent(el, text);
+        }
+      });
 
     // Only scan actual input/select/textarea elements, not text content
-    const interactiveElements = document.querySelectorAll('input:not([type="hidden"]), select, textarea');
-    interactiveElements.forEach(el => {
+    const interactiveElements = document.querySelectorAll(
+      'input:not([type="hidden"]), select, textarea'
+    );
+    interactiveElements.forEach((el) => {
       const input = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
       if (input.value) {
         this.scanValue(input, input.value);
@@ -135,7 +140,7 @@ export class PIIManager {
     });
 
     // 4. Select elements
-    document.querySelectorAll('select').forEach(select => {
+    document.querySelectorAll('select').forEach((select) => {
       const selected = select.options[select.selectedIndex];
       if (selected?.value) {
         this.scanValue(select, selected.value);
@@ -158,14 +163,17 @@ export class PIIManager {
   private dedupeAncestorDuplicates(): void {
     const elOf = (d: PIIDetection): Element | undefined => {
       const el = d.metadata?.el;
-      return el && el.nodeType === 1 && typeof el.contains === 'function' ? (el as Element) : undefined;
+      return el && el.nodeType === 1 && typeof el.contains === 'function'
+        ? (el as Element)
+        : undefined;
     };
 
     const byKey = new Map<string, PIIDetection[]>();
     for (const d of this.detections) {
       const key = `${d.type}::${d.value ?? ''}`;
       const arr = byKey.get(key);
-      if (arr) arr.push(d); else byKey.set(key, [d]);
+      if (arr) arr.push(d);
+      else byKey.set(key, [d]);
     }
 
     const drop = new Set<PIIDetection>();
@@ -251,8 +259,22 @@ export class PIIManager {
     const parentLabels = this.getParentLabels(element).toLowerCase();
 
     // Don't flag if field name suggests it's not PII
-    const nonPIIPatterns = ['price', 'cost', 'amount', 'fee', 'charge', 'rate', 'discount', 'coupon', 'pincode', 'zipcode', 'postal'];
-    if (nonPIIPatterns.some(pattern => selector.includes(pattern) || parentLabels.includes(pattern))) {
+    const nonPIIPatterns = [
+      'price',
+      'cost',
+      'amount',
+      'fee',
+      'charge',
+      'rate',
+      'discount',
+      'coupon',
+      'pincode',
+      'zipcode',
+      'postal',
+    ];
+    if (
+      nonPIIPatterns.some((pattern) => selector.includes(pattern) || parentLabels.includes(pattern))
+    ) {
       return;
     }
 
@@ -276,7 +298,7 @@ export class PIIManager {
           isVerified: false,
           redacted: false,
         };
-        
+
         this.detections.push(detection);
         // Pass full value for verification (regex doesn't use capture groups)
         this.verifyPII(detection, value);
@@ -286,7 +308,7 @@ export class PIIManager {
 
   private verifyPII(detection: PIIDetection, rawValue: string): void {
     let isVerified = false;
-    
+
     switch (detection.type) {
       case 'AADHAAR':
         isVerified = validateAadhaar(rawValue);
@@ -299,7 +321,7 @@ export class PIIManager {
         isVerified = validateCard(rawValue);
         break;
     }
-    
+
     detection.isVerified = isVerified;
     if (isVerified) {
       detection.confidence = Math.min(detection.confidence + 0.15, 0.99);
@@ -346,8 +368,8 @@ export class PIIManager {
       const className = (img.getAttribute('class') || '').toLowerCase();
 
       const faceKeywords = ['avatar', 'profile', 'user-photo', 'face', 'portrait', 'headshot'];
-      const isLikelyFace = faceKeywords.some(kw =>
-        alt.includes(kw) || title.includes(kw) || className.includes(kw)
+      const isLikelyFace = faceKeywords.some(
+        (kw) => alt.includes(kw) || title.includes(kw) || className.includes(kw)
       );
 
       if (isLikelyFace) {
@@ -395,9 +417,19 @@ export class PIIManager {
 
   private isLikelyPassword(value: string): boolean {
     // Don't flag if field name/id suggests it's not a password
-    const nonPasswordPatterns = ['phone', 'pin', 'code', 'otp', 'uuid', 'number', 'id', 'zip', 'postal'];
+    const nonPasswordPatterns = [
+      'phone',
+      'pin',
+      'code',
+      'otp',
+      'uuid',
+      'number',
+      'id',
+      'zip',
+      'postal',
+    ];
     const lowerValue = value.toLowerCase();
-    if (nonPasswordPatterns.some(pattern => lowerValue.includes(pattern))) {
+    if (nonPasswordPatterns.some((pattern) => lowerValue.includes(pattern))) {
       return false;
     }
 
@@ -482,12 +514,12 @@ export class PIIManager {
   getSummary(): { total: number; byType: Record<string, number>; verified: number } {
     const byType: Record<string, number> = {};
     let verified = 0;
-    
+
     for (const det of this.detections) {
       byType[det.type] = (byType[det.type] || 0) + 1;
       if (det.isVerified) verified++;
     }
-    
+
     return {
       total: this.detections.length,
       byType,

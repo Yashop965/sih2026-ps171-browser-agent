@@ -68,7 +68,10 @@ export interface OutboundHit {
   elementLabel?: string;
 }
 
-export function isOutboundDomain(url: string | undefined, allowlist: string[] | null | undefined): boolean {
+export function isOutboundDomain(
+  url: string | undefined,
+  allowlist: string[] | null | undefined
+): boolean {
   if (!url || !allowlist || allowlist.length === 0) return false;
   let host = '';
   try {
@@ -89,7 +92,10 @@ export function elementLabel(el: ElementLike | undefined): string {
   return String(el.label ?? el.text ?? el.ariaLabel ?? el.role ?? '').trim();
 }
 
-function findElement(elements: ElementLike[] | undefined, targetId: number | string | undefined): ElementLike | undefined {
+function findElement(
+  elements: ElementLike[] | undefined,
+  targetId: number | string | undefined
+): ElementLike | undefined {
   if (elements && targetId !== undefined) {
     return elements.find((el) => String(el.id) === String(targetId));
   }
@@ -102,7 +108,10 @@ function findElement(elements: ElementLike[] | undefined, targetId: number | str
  * control. Non-click/key actions and value-typed fields are NOT send verbs by
  * themselves.
  */
-export function classifySendVerb(action: OutboundActionLike, elements?: ElementLike[]): string | null {
+export function classifySendVerb(
+  action: OutboundActionLike,
+  elements?: ElementLike[]
+): string | null {
   const t = String(action.type ?? '').toUpperCase();
   const el = findElement(elements, action.targetId);
   const label = elementLabel(el).toLowerCase();
@@ -130,7 +139,7 @@ export function classifyOutboundSend(
   action: OutboundActionLike,
   url: string | undefined,
   elements: ElementLike[] | undefined,
-  allowlist: string[] | null | undefined,
+  allowlist: string[] | null | undefined
 ): OutboundHit {
   if (!isOutboundDomain(url, allowlist)) {
     return { gated: false, reason: 'not-an-outbound-domain' };
@@ -149,9 +158,16 @@ export function classifyOutboundSend(
     // A clearly navigational link ("Profile", "Statuses", a named group) is not
     // a send - only an unlabelled / ambiguous target fails closed.
     const looksNavigational =
-      el && (el.role === 'link' || el.tag === 'a') && label.length > 0 && label.toLowerCase() !== 'send';
+      el &&
+      (el.role === 'link' || el.tag === 'a') &&
+      label.length > 0 &&
+      label.toLowerCase() !== 'send';
     if (!looksNavigational) {
-      return { gated: true, reason: 'fail-closed:unproven-send-on-outbound', elementLabel: label || undefined };
+      return {
+        gated: true,
+        reason: 'fail-closed:unproven-send-on-outbound',
+        elementLabel: label || undefined,
+      };
     }
   }
   return { gated: false, reason: 'safe-action-on-outbound-domain' };
@@ -178,7 +194,7 @@ export function stageOutbound(
   url: string,
   title: string,
   resolvedValue: string | undefined,
-  note?: string,
+  note?: string
 ): StagedOutbound {
   return {
     action: String(action.type ?? ''),

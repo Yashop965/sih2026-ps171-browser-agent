@@ -52,7 +52,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
       await detect(
         payload?.image as HTMLImageElement | HTMLCanvasElement,
         payload?.task as string | undefined,
-        payload?.query as string | undefined,
+        payload?.query as string | undefined
       );
       break;
 
@@ -76,7 +76,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
           heapSize: (performance as any).memory?.usedJSHeapSize || 0,
           limit: (performance as any).memory?.jsHeapSizeLimit || 0,
           isReady: isModelReady,
-        }
+        },
       } as WorkerResponse);
       break;
   }
@@ -89,13 +89,13 @@ async function loadModel(id: string) {
     if (cached) {
       self.postMessage({
         type: 'MODEL_PROGRESS',
-        payload: { progress: 100, status: 'loaded-from-cache' }
+        payload: { progress: 100, status: 'loaded-from-cache' },
       } as WorkerResponse);
     }
 
     self.postMessage({
       type: 'MODEL_PROGRESS',
-      payload: { progress: 10, status: 'loading' }
+      payload: { progress: 10, status: 'loading' },
     } as WorkerResponse);
 
     const { env, Florence2ForConditionalGeneration, AutoProcessor } =
@@ -107,11 +107,12 @@ async function loadModel(id: string) {
 
     self.postMessage({
       type: 'MODEL_PROGRESS',
-      payload: { progress: 50, status: 'initializing' }
+      payload: { progress: 50, status: 'initializing' },
     } as WorkerResponse);
 
     // Detect WebGPU support
-    const webgpuSupported = typeof self !== 'undefined' &&
+    const webgpuSupported =
+      typeof self !== 'undefined' &&
       'gpu' in (self as unknown as { gpu?: GPUAdapter }) &&
       (self as unknown as { gpu?: GPUAdapter }).gpu !== null;
 
@@ -134,23 +135,19 @@ async function loadModel(id: string) {
 
     self.postMessage({
       type: 'MODEL_READY',
-      payload: { modelId: id, device, dtype }
+      payload: { modelId: id, device, dtype },
     } as WorkerResponse);
 
     console.log(`[Vision Worker] Model loaded: ${id} on ${device}`);
   } catch (err) {
     self.postMessage({
       type: 'ERROR',
-      payload: { message: err instanceof Error ? err.message : String(err) }
+      payload: { message: err instanceof Error ? err.message : String(err) },
     } as WorkerResponse);
   }
 }
 
-async function detect(
-  image: HTMLImageElement | HTMLCanvasElement,
-  task?: string,
-  query?: string,
-) {
+async function detect(image: HTMLImageElement | HTMLCanvasElement, task?: string, query?: string) {
   try {
     if (!model || !processor) {
       postMessage({ type: 'ERROR', payload: { message: 'Model not loaded' } } as WorkerResponse);

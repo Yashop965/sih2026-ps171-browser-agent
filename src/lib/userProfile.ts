@@ -18,14 +18,7 @@
  * guarded so importing this file in a non-browser context is safe.
  */
 
-export type ProfileKey =
-  | 'name'
-  | 'email'
-  | 'phone'
-  | 'address'
-  | 'company'
-  | 'city'
-  | 'notes';
+export type ProfileKey = 'name' | 'email' | 'phone' | 'address' | 'company' | 'city' | 'notes';
 
 export type UserProfile = Partial<Record<ProfileKey, string>>;
 
@@ -48,7 +41,7 @@ export const PROFILE_TOKENS: Record<ProfileKey, string> = {
 };
 
 const TOKEN_TO_KEY: Record<string, ProfileKey> = Object.fromEntries(
-  (Object.keys(PROFILE_TOKENS) as ProfileKey[]).map((k) => [PROFILE_TOKENS[k], k]),
+  (Object.keys(PROFILE_TOKENS) as ProfileKey[]).map((k) => [PROFILE_TOKENS[k], k])
 ) as Record<string, ProfileKey>;
 
 export function profileToken(key: ProfileKey): string {
@@ -111,7 +104,7 @@ export function profileHintsForPayload(profile: UserProfile): Record<string, str
  */
 export function resolveProfileValue(
   actionValue: string | undefined,
-  profile: UserProfile,
+  profile: UserProfile
 ): string | undefined {
   if (typeof actionValue !== 'string') return undefined;
   const key = keyForToken(actionValue.trim());
@@ -139,7 +132,8 @@ export async function loadProfile(): Promise<UserProfile> {
       // Keep only known keys, coerce to string.
       const clean: UserProfile = {};
       for (const k of Object.keys(PROFILE_TOKENS) as ProfileKey[]) {
-        if (typeof (v as Record<string, unknown>)[k] === 'string') clean[k] = (v as Record<string, string>)[k];
+        if (typeof (v as Record<string, unknown>)[k] === 'string')
+          clean[k] = (v as Record<string, string>)[k];
       }
       return clean;
     }
