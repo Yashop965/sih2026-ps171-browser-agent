@@ -415,6 +415,31 @@ export interface AgentRunnerDeps {
   startUrl?: string;
   /** Notify the view (popup) of a fresh state snapshot. */
   onProgress: (state: AgentTaskState) => void;
+  /**
+   * #171: receive the privacy events the outbound guard already produces.
+   *
+   * `guardOutboundPlan` returns an `events` array ({ type, selector } per
+   * redaction - never a value) and a `blocked`/`redactedCount` verdict, and the
+   * runner was discarding all of it. The richer audit ledger lives in the
+   * service worker while the guard runs here, so the events are surfaced
+   * through this callback rather than by importing a ledger into the runner.
+   *
+   * Called once per /plan egress, carrying both the redaction events and the
+   * verdict - so a blocked egress is reported through the SAME call with
+   * `blocked: true`, not as a second one. The call sits before the runner's
+   * `if (guard.blocked)` early return precisely so that case is not lost.
+   *
+   * Must never throw: a ledger fault must not fail the egress path. Omitting it
+   * is supported and makes every call a no-op.
+   */
+  onPrivacyEvents?: (report: {
+    step: number;
+    blocked: boolean;
+    redactedCount: number;
+    category?: string;
+    reason?: string;
+    events: ReadonlyArray<{ type: string; selector: string }>;
+  }) => void;
   /** Cooperative stop flag (issue #70, now SW-owned). */
   isStopped: () => boolean;
   /** Abort signal for an in-flight /plan fetch. */
@@ -552,6 +577,31 @@ export class AgentRunner {
   // warning) instead of spinning the step budget forever.
   private terminalGateStreak = 0;
   private static readonly TERMINAL_GATE_MAX = 3;
+
+  /**
+   * #171: forward the outbound guard's privacy events to the injected ledger
+   * callback. A ledger fault must NEVER fail the egress path - an audit write
+   * is observability, not a gate - so any throw is swallowed here.
+   */
+  private reportPrivacyEvents(
+    d: AgentRunnerDeps,
+    report: {
+      step: number;
+      blocked: boolean;
+      redactedCount: number;
+      category?: string;
+      reason?: string;
+      events: ReadonlyArray<{ type: string; selector: string }>;
+    }
+  ): void {
+    const cb = d.onPrivacyEvents;
+    if (!cb) return;
+    try {
+      cb(report);
+    } catch {
+      /* observability only - never let a ledger fault break the egress path */
+    }
+  }
 
   constructor(private readonly deps: AgentRunnerDeps) {
     this.state = emptyTaskState();
@@ -866,6 +916,19 @@ export class AgentRunner {
           ...(d.crossTabMemory ? { crossTabMemory: handoffForPlanner(d.crossTabMemory()) } : {}),
         },
       });
+      // #171: hand the guard's own redaction events to the audit ledger. Done
+      // BEFORE the blocked check so a blocked egress is recorded too - that is
+      // the most important event in the whole trail, and the runner returns
+      // immediately below, so reporting it after would lose it.
+      this.reportPrivacyEvents(d, {
+        step: currentStep,
+        blocked: guard.blocked,
+        redactedCount: guard.redactedCount,
+        category: guard.category as string | undefined,
+        reason: guard.reason,
+        events: guard.events,
+      });
+
       if (guard.blocked) {
         this.log(
           `⛔ Outbound firewall blocked /plan egress: ${guard.category ?? 'PII'} at ${guard.reason ?? '?'}`

@@ -10,9 +10,10 @@ import {
   normalizeDomains,
   saveOutboundAllowlist,
 } from '../lib/outboundAllowlist';
+import { storageGetMany, storageSet, storageSetMany, STORAGE_KEYS } from '../lib/storage';
 
 // #134: task-history shape (persisted under this key in browser.storage.local).
-const RECENT_TASKS_KEY = 'sih_recent_tasks';
+const RECENT_TASKS_KEY = STORAGE_KEYS.recentTasks;
 const RECENT_TASKS_CAP = 8;
 
 interface RecentTask {
@@ -57,28 +58,33 @@ function Popup() {
 
   // Load saved state from browser.storage
   useEffect(() => {
-    browser.storage.local
-      .get(['task', 'startUrl', 'providerKey', 'apiKey', RECENT_TASKS_KEY, OUTBOUND_STORAGE_KEY])
-      .then((result: Record<string, any>) => {
-        if (result.task) setTask(result.task);
-        if (result.startUrl) setStartUrl(result.startUrl);
-        if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
-        if (result.apiKey) setProviderKey(result.apiKey);
-        if (Array.isArray(result[OUTBOUND_STORAGE_KEY])) {
-          // #143: hydrate the outbound allowlist for the settings field.
-          setOutboundDomains((result[OUTBOUND_STORAGE_KEY] as string[]).join(', '));
-        }
-        if (Array.isArray(result[RECENT_TASKS_KEY])) {
-          setRecentTasks(result[RECENT_TASKS_KEY] as RecentTask[]);
-        }
-        setHydrated(true);
-      });
+    storageGetMany<Record<string, any>>({
+      [STORAGE_KEYS.task]: '',
+      [STORAGE_KEYS.startUrl]: '',
+      [STORAGE_KEYS.providerKey]: '',
+      [STORAGE_KEYS.apiKey]: '',
+      [RECENT_TASKS_KEY]: [],
+      [OUTBOUND_STORAGE_KEY]: [],
+    }).then((result: Record<string, any>) => {
+      if (result.task) setTask(result.task);
+      if (result.startUrl) setStartUrl(result.startUrl);
+      if (result.providerKey) setSelectedProvider(result.providerKey as ProviderKey);
+      if (result.apiKey) setProviderKey(result.apiKey);
+      if (Array.isArray(result[OUTBOUND_STORAGE_KEY])) {
+        // #143: hydrate the outbound allowlist for the settings field.
+        setOutboundDomains((result[OUTBOUND_STORAGE_KEY] as string[]).join(', '));
+      }
+      if (Array.isArray(result[RECENT_TASKS_KEY])) {
+        setRecentTasks(result[RECENT_TASKS_KEY] as RecentTask[]);
+      }
+      setHydrated(true);
+    });
   }, []);
 
   // Save task to browser.storage whenever it changes
   useEffect(() => {
     if (task) {
-      browser.storage.local.set({ task });
+      void storageSet(STORAGE_KEYS.task, task);
     }
   }, [task]);
 
@@ -86,7 +92,7 @@ function Popup() {
   // need a starting point; empty means "run on the current tab").
   useEffect(() => {
     if (startUrl) {
-      browser.storage.local.set({ startUrl });
+      void storageSet(STORAGE_KEYS.startUrl, startUrl);
     }
   }, [startUrl]);
 
@@ -229,7 +235,7 @@ function Popup() {
         const next = prev.map((t) =>
           t.task === active ? { ...t, status: terminal[mirror.status] } : t
         );
-        browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
+        void storageSet(RECENT_TASKS_KEY, next);
         return next;
       });
       activeTaskRef.current = null;
@@ -261,7 +267,7 @@ function Popup() {
         0,
         RECENT_TASKS_CAP
       );
-      browser.storage.local.set({ [RECENT_TASKS_KEY]: next });
+      void storageSet(RECENT_TASKS_KEY, next);
       return next;
     });
     const res: any = await browser.runtime.sendMessage({
@@ -278,7 +284,7 @@ function Popup() {
 
   const clearTaskHistory = useCallback(() => {
     setRecentTasks([]);
-    browser.storage.local.set({ [RECENT_TASKS_KEY]: [] });
+    void storageSet(RECENT_TASKS_KEY, []);
   }, []);
 
   const timeAgo = (ts: number) => {
@@ -378,9 +384,9 @@ function Popup() {
               <button
                 className="save-key-button"
                 onClick={async () => {
-                  await browser.storage.local.set({
-                    providerKey: selectedProvider,
-                    apiKey: providerKey,
+                  await storageSetMany({
+                    [STORAGE_KEYS.providerKey]: selectedProvider,
+                    [STORAGE_KEYS.apiKey]: providerKey,
                   });
                   // Persist the outbound allowlist on-device (normalised).
                   await saveOutboundAllowlist(normalizeDomains(outboundDomains.split(/[\n,]/)));

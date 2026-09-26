@@ -1,5 +1,6 @@
 import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
+import { storageGet, storageGetMany, storageSet, STORAGE_KEYS } from '../lib/storage';
 import type { Runtime } from 'wxt/browser';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
 import { sessionManager } from '../lib/sessionManager';
@@ -47,22 +48,14 @@ export default defineBackground({
     // hydrate the last snapshot at SW start, then write-through on every
     // change (fire-and-forget; storage.local survives SW death and holds the
     // SHA-256 export inputs across sessions).
-    const PRIVACY_LEDGER_KEY = 'sih_privacy_ledger';
-    const AUDIT_LEDGER_KEY = 'sih_audit_ledger';
+    const PRIVACY_LEDGER_KEY = STORAGE_KEYS.privacyLedger;
+    const AUDIT_LEDGER_KEY = STORAGE_KEYS.auditLedger;
 
     const persistPrivacyLedger = async (entries: PrivacyLogEntry[]) => {
-      try {
-        await browser.storage.local.set({ [PRIVACY_LEDGER_KEY]: entries });
-      } catch {
-        // Swallowed: durability is best-effort, never block the live loop.
-      }
+      await storageSet(PRIVACY_LEDGER_KEY, entries);
     };
     const persistAuditLedger = async (entries: any[]) => {
-      try {
-        await browser.storage.local.set({ [AUDIT_LEDGER_KEY]: entries });
-      } catch {
-        // best-effort, as above
-      }
+      await storageSet(AUDIT_LEDGER_KEY, entries);
     };
 
     const privacyLedger = new PrivacyLedger([], persistPrivacyLedger);
@@ -121,14 +114,10 @@ export default defineBackground({
 
     // Persist the live task state so a SW restart can still surface "what
     // happened" (best-effort; the run itself dies with the SW by design).
-    const TASK_STATE_KEY = 'sih_agent_task_state';
+    const TASK_STATE_KEY = STORAGE_KEYS.taskState;
     const persistTaskState = async (state: AgentTaskState) => {
       activeTask = state;
-      try {
-        await browser.storage.local.set({ [TASK_STATE_KEY]: state });
-      } catch {
-        /* best-effort */
-      }
+      await storageSet(TASK_STATE_KEY, state);
     };
     const broadcastProgress = (state: AgentTaskState) => {
       persistTaskState(state);
@@ -148,9 +137,11 @@ export default defineBackground({
     // flight" (and so the display-only value doesn't linger re-served).
     (async () => {
       try {
-        const snap = await browser.storage.local.get(TASK_STATE_KEY);
-        if (snap[TASK_STATE_KEY]) {
-          const restored = snap[TASK_STATE_KEY] as AgentTaskState;
+        const restored = (await storageGet<AgentTaskState | null>(
+          TASK_STATE_KEY,
+          null
+        )) as AgentTaskState | null;
+        if (restored) {
           // A run cannot survive the SW, so a restored 'awaiting-confirmation'
           // or 'running' is a finished run; drop the staged value + the pause
           // and mark it as having ended (stopped) for the history view.
@@ -878,6 +869,32 @@ export default defineBackground({
         onProgress: broadcastProgress,
         isStopped: () => stopFlag.stopped,
         abortSignal: abortController.signal,
+        // #171: the runner's outbound guard already produces the privacy events
+        // ({ type, selector } per redaction, plus the blocked verdict) and used
+        // to discard them. The rich audit ledger lives here in the SW, so this
+        // adapter records them: one REDACTED per event, then the SENT or
+        // BLOCKED outcome for this egress. Only category + selector cross over -
+        // never a value.
+        onPrivacyEvents: (report) => {
+          try {
+            for (const ev of report.events) {
+              auditLedger.redacted(ev.type, ev.selector, 1);
+            }
+            if (report.blocked) {
+              auditLedger.blocked(
+                report.category ?? 'PII',
+                `step ${report.step}`,
+                report.reason ?? 'outbound firewall blocked egress'
+              );
+            } else {
+              // elementCount must be >= 1: getSummary() sums entry.count, so a 0
+              // would record a SENT event that counts as nothing.
+              auditLedger.sent(1, report.redactedCount);
+            }
+          } catch {
+            /* observability only - never fail the run on a ledger fault */
+          }
+        },
         // #100: optional on-device vision confirm. Returns null when the
         // model isn't ready; the deterministic backstop carries the loop.
         confirmGoal,
@@ -956,9 +973,12 @@ export default defineBackground({
       let privacyInitial: PrivacyLogEntry[] = [];
       let auditInitial: any[] = [];
       try {
-        const snap = await browser.storage.local.get([PRIVACY_LEDGER_KEY, AUDIT_LEDGER_KEY]);
-        privacyInitial = (snap[PRIVACY_LEDGER_KEY] as PrivacyLogEntry[]) || [];
-        auditInitial = (snap[AUDIT_LEDGER_KEY] as any[]) || [];
+        const snap = await storageGetMany<{
+          [PRIVACY_LEDGER_KEY]: PrivacyLogEntry[];
+          [AUDIT_LEDGER_KEY]: any[];
+        }>({ [PRIVACY_LEDGER_KEY]: [], [AUDIT_LEDGER_KEY]: [] });
+        privacyInitial = snap[PRIVACY_LEDGER_KEY] || [];
+        auditInitial = snap[AUDIT_LEDGER_KEY] || [];
       } catch {
         // first launch / storage unavailable - start empty.
       }
