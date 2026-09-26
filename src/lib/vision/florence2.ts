@@ -354,7 +354,6 @@ class Florence2Pipeline {
       console.time = silencedConsole.time;
       console.timeEnd = silencedConsole.timeEnd;
       console.timeStamp = silencedConsole.timeStamp;
-      const elapsed = performance.now() - startTime;
     }
   }
 

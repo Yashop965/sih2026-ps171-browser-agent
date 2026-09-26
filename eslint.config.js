@@ -52,6 +52,12 @@ export default tseslint.config(
       'scripts/',
       'server/',
       'tests/',
+      // #126: the ONNX runtime + jsep .wasm are VENDORED third-party bundles
+      // (onnxruntime-web, ~21MB wasm). We copy them into src/public so the
+      // offscreen worker can import() them same-origin, but they are NOT our
+      // source - linting them produced ~150 false-positive errors (no-undef,
+      // no-unused-expressions, ...) that say nothing about our code.
+      'src/public/vlm/ort/',
     ],
   },
   js.configs.recommended,
@@ -75,6 +81,26 @@ export default tseslint.config(
       // IS the user-facing log channel). Keep the rule available but off by
       // default; hot-path console spam is tracked in #126 item 6 instead.
       'no-console': 'off',
+      // #126: the 4 real no-useless-assignment sites in our source are all
+      // legitimate "init-then-assign under try/catch" definite-assignment
+      // patterns (let x = init; try { x = ... } catch { x = fallback }). The
+      // rule is over-eager here; keep it off and let tsc's strict
+      // definite-assignment be the source of truth instead.
+      'no-useless-assignment': 'off',
+    },
+  },
+  // #126: the VLM host relay + offscreen host entry are plain .js that run in
+  // offscreen-doc / worker contexts. Give them the browser + worker globals
+  // they actually use (Worker, postMessage, onmessage, self, ...) so the
+  // core no-undef rule stops flagging them.
+  {
+    files: ['src/public/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.worker,
+        ...wxtGlobals,
+      },
     },
   },
   // Must be last so Prettier turns off conflicting style rules.

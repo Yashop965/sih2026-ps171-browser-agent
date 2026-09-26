@@ -102,7 +102,7 @@ export class SessionManager {
     this.contextMap.set(sessionId, context);
 
     // Listen for tab updates - store reference for cleanup
-    const tabListener = (updatedTabId: number, changeInfo: any) => {
+    const tabListener = (updatedTabId: number, _changeInfo: any) => {
       if (updatedTabId === tabId) {
         this.handleTabUpdate(sessionId, updatedTabId);
       }

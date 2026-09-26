@@ -3,7 +3,7 @@
  *
  * Canonical implementations of checksum-backed validators used throughout
  * the privacy pipeline. Centralises logic that was previously duplicated
- * in detector.ts and content/index.ts.
+ * in detector.ts and the legacy standalone content script (now removed).
  *
  * Exports:
  *   validateAadhaar  — Verhoeff checksum (12 digits)

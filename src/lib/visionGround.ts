@@ -104,7 +104,7 @@ export function resolveGroundNode(
   cx: number,
   cy: number,
 ): Element | null {
-  let el = document.elementFromPoint(cx, cy) as Element | null;
+  const el = document.elementFromPoint(cx, cy) as Element | null;
   if (!el) return null;
   const tag = el.tagName.toLowerCase();
   if (tag === 'html' || tag === 'body') return null;

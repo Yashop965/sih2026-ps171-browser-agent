@@ -91,9 +91,7 @@ export class PIIManager {
     // 1. Password fields
     document.querySelectorAll('input').forEach(input => {
       const type = input.getAttribute('type')?.toLowerCase() || 'text';
-      const name = (input.getAttribute('name') || '').toLowerCase();
-      const id = (input.getAttribute('id') || '').toLowerCase();
-      
+
       if (type === 'password') {
         this.detections.push({
           type: 'PASSWORD_FIELD',
@@ -334,7 +332,7 @@ export class PIIManager {
               },
             });
           }
-        } catch (e) {
+        } catch {
           // Face detection failed, continue
         }
       }
@@ -440,7 +438,6 @@ export class PIIManager {
     // Check for form-associated elements first
     const tagName = element.tagName.toLowerCase();
     const name = element.getAttribute('name');
-    const type = element.getAttribute('type');
 
     if (tagName === 'input' && name) {
       return `input[name="${name}"]`;

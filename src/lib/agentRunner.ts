@@ -1151,7 +1151,7 @@ export class AgentRunner {
     sessionId: string | null,
     elements?: ElementLike[],
     pageUrl?: string,
-    pageTitle?: string,
+    _pageTitle?: string,
   ): Promise<void> {
     // #102: profile-token resolution, ON-DEVICE and at execution time. The
     // planner saw only the token (the outbound guard masks raw values before

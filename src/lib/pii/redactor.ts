@@ -42,7 +42,7 @@ export class RedactionEngine {
           default:
             this.overlayElement(element, detection);
         }
-      } catch (e) {
+      } catch {
         console.warn('[Redaction] Failed to redact:', detection.selector);
       }
     }
