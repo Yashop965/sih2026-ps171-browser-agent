@@ -308,7 +308,10 @@ export default defineBackground({
             rePerceiveWatchedTab(tabId);
           }
           // The snapshot advances either way, so a title that flaps A->B->A
-          // cannot re-fire forever on a stale comparison.
+          // cannot re-fire forever on a stale comparison. (The url half is
+          // written by the event path above, which is authoritative for it;
+          // writing it here too would be harmless but would mask a genuinely
+          // missed event, so ownership stays with one path.)
           watch.snapshot = { url: next.url, title: next.title };
         }
       }, MIN_WATCH_POLL_MS);
@@ -324,7 +327,23 @@ export default defineBackground({
     // No-op when the tab isn't watched or IS the agent's focus tab.
     const watcherUrlListener = (tabId: number, changeInfo: any): void => {
       if (!watchedSourceTabs.has(tabId) || currentTargetTab?.tabId === tabId) return;
-      if (changeInfo?.url) rePerceiveWatchedTab(tabId);
+      if (!changeInfo?.url) return;
+      // #167: advance the snapshot HERE too. The poll now compares against
+      // watch.snapshot, and this event is the only thing that tells the poll a
+      // url already moved. Without this, the poll's next tick sees
+      // snapshot.url === next.url and reports "no change" for a navigation it
+      // was never told about - the re-perception this event just triggered
+      // would be the ONLY one, and the poll's title check would then be
+      // comparing against a pre-navigation title forever.
+      //
+      // The event path is authoritative for url changes (it fires the moment
+      // tabs.onUpdated delivers one), so it owns writing the url. The poll owns
+      // the title.
+      const entry = watchedSourceTabs.get(tabId);
+      if (entry && entry.snapshot.url !== changeInfo.url) {
+        entry.snapshot = { ...entry.snapshot, url: changeInfo.url };
+      }
+      rePerceiveWatchedTab(tabId);
     };
     /**
      * Register a harvested source tab for passive watching. The guard skips

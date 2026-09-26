@@ -178,7 +178,63 @@ describe('#167 the shipped poll uses the tested policy', () => {
   it('advances the snapshot after a tick so a flapping title cannot re-fire', () => {
     const src = bgSrc();
     const i = src.indexOf('watchTickFires(watch.trigger');
-    expect(src.slice(i, i + 400)).toContain('watch.snapshot =');
+    expect(src.slice(i, i + 900)).toContain('watch.snapshot =');
+  });
+
+  // Regression found in self-review of #187. The poll compares against
+  // watch.snapshot, but the EVENT path (watcherUrlListener) used to fire a
+  // re-perception on a url change without ever recording that the url moved.
+  // The poll's next tick then saw snapshot.url === next.url and reported "no
+  // change" - so the event's re-perception was the only one that ever happened
+  // for that navigation, and the title comparison was left comparing against a
+  // pre-navigation title indefinitely.
+  it('the event path also advances the snapshot url', () => {
+    const src = bgSrc();
+    const i = src.indexOf('const watcherUrlListener');
+    // Generous window: the function is heavily commented, and a fixed
+    // narrow slice silently started failing when a comment was rewrapped.
+    const body = src.slice(i, i + 2000);
+    expect(body).toContain('changeInfo.url');
+    expect(body).toMatch(/snapshot\s*=\s*\{[^}]*url/);
+  });
+
+  it('event + poll on one url change yields exactly one re-perception', () => {
+    // Composed, not just asserted per-path: the event records the url, so the
+    // poll that follows must not report a second change.
+    const trigger = { urlChange: true, pollMs: 60_000 };
+    let snap = { url: 'https://x.example/a', title: 'A' };
+    let fired = 0;
+
+    // event path, as shipped
+    const onUrlEvent = (u: string) => {
+      if (snap.url !== u) snap = { ...snap, url: u };
+      fired++;
+    };
+    // poll, as shipped
+    const poll = (u: string, t: string) => {
+      if (watchTickFires(trigger, snap, { url: u, title: t })) fired++;
+      snap = { url: u, title: t };
+    };
+
+    onUrlEvent('https://x.example/b');
+    poll('https://x.example/b', 'A'); // url already recorded by the event
+    expect(fired).toBe(1);
+  });
+
+  it('the poll still catches a url change when the event is missed', () => {
+    // The event path is the fast path, not the only path. If the SW was asleep
+    // and the event never arrived, the poll must still notice on its own.
+    const trigger = { urlChange: true, pollMs: 60_000 };
+    const snap = { url: 'https://x.example/a', title: 'A' };
+    expect(watchTickFires(trigger, snap, { url: 'https://x.example/b', title: 'A' })).toBe(true);
+  });
+
+  it('the poll still catches a title-only change (the SPA case it exists for)', () => {
+    const trigger = { urlChange: true, pollMs: 60_000 };
+    const snap = { url: 'https://x.example/b', title: 'A' };
+    expect(watchTickFires(trigger, snap, { url: 'https://x.example/b', title: 'Loaded' })).toBe(
+      true
+    );
   });
 });
 
