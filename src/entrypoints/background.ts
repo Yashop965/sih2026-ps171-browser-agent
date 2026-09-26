@@ -24,7 +24,13 @@ import {
   type TabHandoff,
   type OpenTabInfo,
 } from '../lib/tabHandoff';
-import { MAX_WATCHED_TABS, MIN_WATCH_POLL_MS, hostOfUrl } from '../lib/tabOrchestrator';
+import {
+  MAX_WATCHED_TABS,
+  MIN_WATCH_POLL_MS,
+  hostOfUrl,
+  watchTickFires,
+  type WatchTrigger,
+} from '../lib/tabOrchestrator';
 import { loadOutboundAllowlist } from '../lib/outboundAllowlist';
 import { vlmHostOcr, vlmHostStatus, closeVlmHost, vlmHostGround } from '../lib/vlmHost';
 import { groundQueryForContext } from '../lib/visionGround';
@@ -195,6 +201,9 @@ export default defineBackground({
       {
         originHost: string;
         snapshot: { url: string; title: string };
+        // #167: the trigger for this tab, so the poll defers to the shared
+        // watchTickFires policy instead of re-deciding the rule inline.
+        trigger: WatchTrigger;
         lastReperceive?: Promise<void>;
       }
     > = new Map();
@@ -290,8 +299,20 @@ export default defineBackground({
             watchedSourceTabs.delete(tabId);
             continue;
           }
-          const fired = next.url !== watch.snapshot.url || next.title !== watch.snapshot.title;
-          if (fired) rePerceiveWatchedTab(tabId);
+          // #167: ask the shared, tested policy instead of re-deciding here.
+          // The inline `url !== prev.url || title !== prev.title` this replaces
+          // ignored the trigger entirely and fired on either field under both
+          // trigger kinds, which is not what watchTickFires specifies and not
+          // what its tests assert.
+          if (watchTickFires(watch.trigger, watch.snapshot, next)) {
+            rePerceiveWatchedTab(tabId);
+          }
+          // The snapshot advances either way, so a title that flaps A->B->A
+          // cannot re-fire forever on a stale comparison. (The url half is
+          // written by the event path above, which is authoritative for it;
+          // writing it here too would be harmless but would mask a genuinely
+          // missed event, so ownership stays with one path.)
+          watch.snapshot = { url: next.url, title: next.title };
         }
       }, MIN_WATCH_POLL_MS);
     };
@@ -306,7 +327,23 @@ export default defineBackground({
     // No-op when the tab isn't watched or IS the agent's focus tab.
     const watcherUrlListener = (tabId: number, changeInfo: any): void => {
       if (!watchedSourceTabs.has(tabId) || currentTargetTab?.tabId === tabId) return;
-      if (changeInfo?.url) rePerceiveWatchedTab(tabId);
+      if (!changeInfo?.url) return;
+      // #167: advance the snapshot HERE too. The poll now compares against
+      // watch.snapshot, and this event is the only thing that tells the poll a
+      // url already moved. Without this, the poll's next tick sees
+      // snapshot.url === next.url and reports "no change" for a navigation it
+      // was never told about - the re-perception this event just triggered
+      // would be the ONLY one, and the poll's title check would then be
+      // comparing against a pre-navigation title forever.
+      //
+      // The event path is authoritative for url changes (it fires the moment
+      // tabs.onUpdated delivers one), so it owns writing the url. The poll owns
+      // the title.
+      const entry = watchedSourceTabs.get(tabId);
+      if (entry && entry.snapshot.url !== changeInfo.url) {
+        entry.snapshot = { ...entry.snapshot, url: changeInfo.url };
+      }
+      rePerceiveWatchedTab(tabId);
     };
     /**
      * Register a harvested source tab for passive watching. The guard skips
@@ -330,7 +367,27 @@ export default defineBackground({
       } catch {
         /* already closed - nothing to watch */
       }
-      watchedSourceTabs.set(tabId, { originHost: hostOfUrl(url), snapshot: { url, title } });
+      // #167: the trigger is recorded per tab, and the poll asks the SHARED
+      // policy (watchTickFires) whether a tick should fire.
+      //
+      // Before this, the shipped poll inlined its own rule
+      // (`url changed OR title changed`) and watchTickFires - which is pure,
+      // exported, and has tests - had zero production call sites. The tested
+      // policy and the shipped one disagreed: watchTickFires separates the two
+      // triggers (url-change watches the url, poll watches the title), while
+      // the inline version fired on either changing under both. So the tests
+      // were green and described behaviour that never shipped.
+      //
+      // The trigger set here is `{ urlChange: true, pollMs: MIN_WATCH_POLL_MS }`
+      // because the timer only exists to catch a title/content move the
+      // event path cannot see: tabs.onUpdated already delivers a url change
+      // synchronously (see watcherUrlListener), so url-diffing again in the
+      // poll is both redundant and a source of duplicate re-perceptions.
+      watchedSourceTabs.set(tabId, {
+        originHost: hostOfUrl(url),
+        snapshot: { url, title },
+        trigger: { urlChange: true, pollMs: MIN_WATCH_POLL_MS },
+      });
       startWatcherPoll();
     };
     const resetPassiveWatch = (): void => {
@@ -1150,8 +1207,19 @@ export default defineBackground({
             // Resolve the target web tab BEFORE the try so the catch block can
             // also reference it when logging a navigation-triggered disconnect.
             // resolveWebTab always targets a real http(s) tab - never the
-            // extension's own pages.
-            const tabId = await resolveWebTab(sender);
+            // extension's own pages, and it never rejects (#174).
+            let tabId: number | undefined;
+            try {
+              tabId = await resolveWebTab(sender);
+            } catch (e) {
+              // Belt and braces. resolveWebTab handles its own rejections, so
+              // this should be unreachable - but the cost of being wrong here
+              // is a channel that never responds, and the runner awaits it.
+              // Answering is always better than hanging.
+              console.warn('[agent] EXECUTE: resolveWebTab threw', e);
+              sendResponse({ error: 'No web tab found', ok: false });
+              return;
+            }
             if (!tabId) {
               sendResponse({ error: 'No web tab found', ok: false });
               return;
@@ -1445,18 +1513,44 @@ async function resolveWebTab(sender: Runtime.MessageSender): Promise<number | un
   }
 
   // 2) Active web tab in the sender's window.
+  //
+  // Issue #174. Both browser.tabs.query calls used to be unguarded, and the
+  // EXECUTE handler calls this OUTSIDE its try block (deliberately - the
+  // catch needs `tabId` in scope to log a navigation-triggered disconnect).
+  // So a query rejection did not get caught by the handler: it became an
+  // unhandled promise rejection inside the async IIFE, `sendResponse` was
+  // never called, and the channel stayed open forever. Every `await` on that
+  // channel in the runner waited on a response that could not arrive.
+  //
+  // `browser.tabs.query` genuinely rejects in ordinary use - the extension
+  // loses host permission when a tab navigates cross-origin to a scheme it
+  // cannot read, and the user can revoke permission mid-run.
+  //
+  // Handled HERE rather than at the call site, so every caller is safe
+  // including future ones. `undefined` is the function's existing "no web tab"
+  // answer, so each caller's existing `if (!tabId)` branch reports it as the
+  // ordinary "No web tab found" error instead of the channel hanging.
   const inWindow = sender.tab?.windowId
     ? { windowId: sender.tab.windowId }
     : { currentWindow: true };
-  const [active] = await browser.tabs.query({ active: true, ...inWindow });
-  if (active?.id && isWeb(active.url)) {
-    return active.id;
-  }
 
-  // 3) Any web tab in that window (e.g. a background tab the user is on).
-  const tabs = await browser.tabs.query({ ...inWindow });
-  const web = tabs.find((t) => isWeb(t.url));
-  return web?.id;
+  try {
+    const [active] = await browser.tabs.query({ active: true, ...inWindow });
+    if (active?.id && isWeb(active.url)) {
+      return active.id;
+    }
+
+    // 3) Any web tab in that window (e.g. a background tab the user is on).
+    const tabs = await browser.tabs.query({ ...inWindow });
+    const web = tabs.find((t) => isWeb(t.url));
+    return web?.id;
+  } catch (e) {
+    // Logged rather than swallowed: a silent undefined here would look
+    // identical to "user has no web tab open", which is a very different
+    // diagnosis and the reason this was hard to find.
+    console.warn('[agent] resolveWebTab: tabs.query failed', e);
+    return undefined;
+  }
 }
 
 /**
