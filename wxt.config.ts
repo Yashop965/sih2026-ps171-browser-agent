@@ -17,19 +17,18 @@ export default defineConfig({
       // content-script isolated world (no import() of module URLs) can.
       'offscreen',
     ],
-    // #141: expose the bundled onnxruntime-web loader + jsep .wasm to the
-    // content script so transformers.js can `import()` the ORT runtime from
-    // the extension's own origin (same-origin = CSP-clean, no jsdelivr).
-    // Without this, the content script's dynamic module import of a
-    // chrome-extension:// URL is refused -> "Failed to fetch dynamically
-    // imported module" -> "no available backend found" and the on-device
-    // VLM never loads.
-    web_accessible_resources: [
-      {
-        resources: ['vlm/ort/*'],
-        matches: ['*://*/*', 'file://*'],
-      },
-    ],
+    // #151: NO web_accessible_resources. The onnxruntime-web loader + jsep
+    // .wasm (public/vlm/ort/, copied to the dist root by WXT) are fetched
+    // ONLY by the offscreen module worker via runtime.getURL('vlm/ort/') — an
+    // EXTENSION-ORIGIN fetch, which the extension may always access WITHOUT a
+    // WAR (WARs only expose resources to *web / other-extension* origins). The
+    // original #141 WAR ({ resources: ['vlm/ort/*'], matches:
+    // ['*://*/*','file://*'] }) exposed the 21MB ORT runtime + wasm to ANY web
+    // page — an unnecessary egress surface left over from when ORT ran in the
+    // content script. #142 moved ORT to the offscreen worker, so the WAR is
+    // vestigial and is removed here (nothing in a web-page context touches
+    // vlm/ort/*; the only consumers are the extension-origin worker + relay).
+    web_accessible_resources: [],
     host_permissions: [
       'http://localhost:8000/*',
       // #113: captureVisibleTab (on-device VLM screenshots) runs from the
