@@ -1,5 +1,6 @@
 import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
+import { sanitizedPageUrl } from '../lib/dom';
 import { storageGet, storageGetMany, storageSet, STORAGE_KEYS } from '../lib/storage';
 import type { Runtime } from 'wxt/browser';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
@@ -403,10 +404,22 @@ export default defineBackground({
         windowId !== undefined
           ? await browser.tabs.query({ windowId })
           : await browser.tabs.query({ currentWindow: true });
-      return tabs
-        .filter((t) => t.id !== undefined && t.url?.startsWith('http'))
-        .slice(0, 10)
-        .map((t) => ({ tabId: t.id as number, url: t.url || '', title: t.title || '' }));
+      return (
+        tabs
+          .filter((t) => t.id !== undefined && t.url?.startsWith('http'))
+          .slice(0, 10)
+          // #170: browser.tabs gives the RAW url, query string and all, and
+          // this list crosses to the planner as `openTabs` - the same leak
+          // getPageContext() had, on a different channel. Every one of a user's
+          // open tabs is listed, so this is a wider surface than the current
+          // page. Same one-line strip; origin + path is what the model needs to
+          // pick a tab (it matches urlHint against the host).
+          .map((t) => ({
+            tabId: t.id as number,
+            url: sanitizedPageUrl(t.url || ''),
+            title: t.title || '',
+          }))
+      );
     };
 
     const extractChannel = async (): Promise<any> => {

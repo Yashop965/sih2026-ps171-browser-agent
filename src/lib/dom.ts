@@ -455,13 +455,44 @@ export interface PageContext {
   omitted: number;
 }
 
+/**
+ * The page URL as it may safely be transmitted: origin + path, with the
+ * query string and fragment removed.
+ *
+ * Issue #170. There were two implementations of "the URL we send", and only
+ * one of them sanitised. `captureDOM()` built a URL with `search = ''` and sent
+ * that, while `getPageContext()` - carried on the same snapshot as
+ * `context` - set `url: location.href` raw. The two sat on the same outbound
+ * payload, so the strip the snapshot clearly intended was undone one field
+ * away. Query strings are where PII actually lives (`?email=`,
+ * `?aadhaar=`, `?token=`), and the fragment is never sent to a server but is
+ * routinely used client-side to hold exactly that kind of value.
+ *
+ * One implementation, both call sites. If this is ever widened, it must widen
+ * for both.
+ *
+ * Degrades rather than throws: a URL the platform refuses to parse (or a
+ * missing base) yields an empty string, which the planner reads as "unknown
+ * page" instead of the whole extract failing.
+ */
+export function sanitizedPageUrl(href: string = location.href): string {
+  try {
+    const u = new URL(href);
+    u.search = '';
+    u.hash = '';
+    return u.toString();
+  } catch {
+    return '';
+  }
+}
+
 export function getPageContext(): PageContext {
   // 4px epsilon so a page scrolled flush to the bottom doesn't report
   // "more below" and cause an endless scroll.
   const bottom = Math.round(window.scrollY + window.innerHeight);
   const height = Math.round(document.body.scrollHeight);
   return {
-    url: location.href,
+    url: sanitizedPageUrl(),
     title: document.title,
     scrollY: Math.round(window.scrollY),
     scrollHeight: height,
