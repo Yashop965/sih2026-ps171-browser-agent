@@ -869,6 +869,32 @@ export default defineBackground({
         onProgress: broadcastProgress,
         isStopped: () => stopFlag.stopped,
         abortSignal: abortController.signal,
+        // #171: the runner's outbound guard already produces the privacy events
+        // ({ type, selector } per redaction, plus the blocked verdict) and used
+        // to discard them. The rich audit ledger lives here in the SW, so this
+        // adapter records them: one REDACTED per event, then the SENT or
+        // BLOCKED outcome for this egress. Only category + selector cross over -
+        // never a value.
+        onPrivacyEvents: (report) => {
+          try {
+            for (const ev of report.events) {
+              auditLedger.redacted(ev.type, ev.selector, 1);
+            }
+            if (report.blocked) {
+              auditLedger.blocked(
+                report.category ?? 'PII',
+                `step ${report.step}`,
+                report.reason ?? 'outbound firewall blocked egress'
+              );
+            } else {
+              // elementCount must be >= 1: getSummary() sums entry.count, so a 0
+              // would record a SENT event that counts as nothing.
+              auditLedger.sent(1, report.redactedCount);
+            }
+          } catch {
+            /* observability only - never fail the run on a ledger fault */
+          }
+        },
         // #100: optional on-device vision confirm. Returns null when the
         // model isn't ready; the deterministic backstop carries the loop.
         confirmGoal,
