@@ -75,20 +75,27 @@ jobs:
       run: npm run format:check
 
   security:
-    name: Dependency audit (advisory)
+    name: Dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Advisory only - this job must never turn a green push red. `npm audit` is
-    # noisy on dev dependencies, and the 2 high-severity production findings are
-    # tracked in issue #178 rather than fixed here: `npm audit fix --force` wants
-    # major-version bumps that can break the WXT build.
+    # Now BLOCKING, and green as of #178: `npm audit --omit=dev` reports 0
+    # findings.
     #
-    # It previously ran `npm audit --production` as-is, which exits non-zero on
-    # ANY finding. Even with continue-on-error, GitHub still painted a red X and a
-    # "Some checks were not successful" banner over the commit - which reads as a
-    # failed push to anyone who is not looking at the job matrix (issue #182).
-    # The findings are still reported, now as a job-summary warning instead of a
-    # failing check. Promote this job to required once #178 is resolved.
+    # It used to run `npm audit --production` and exit non-zero on any
+    # high-severity finding from `sharp` (a transitive native image dep of
+    # @huggingface/transformers). Those were fixed by an `overrides` entry
+    # pinning sharp ^0.35.4, rather than the major @huggingface/transformers
+    # upgrade npm's own --force suggested. `sharp` is a Node-native addon and
+    # never reaches the browser bundle: a clean 23.92 MB production build
+    # contains zero references to sharp, libvips or libheif.
+    #
+    # Scoped to --omit=dev on purpose. The full tree still reports 11 findings
+    # (4 critical, 5 high) that all arrive transitively through `wxt` and its
+    # Firefox/`web-ext` dev tooling - `shell-quote`, `tar`, `adm-zip`, `giget`,
+    # `node-notifier`, `uuid`. None of them appear in the shipped extension
+    # either, and forcing those would mean replacing the build tool itself.
+    # They are dev-only, never executed on a user's machine by the extension,
+    # and are tracked separately for an upstream wxt fix.
     steps:
     - uses: actions/checkout@v4
 
@@ -101,49 +108,10 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    # Never fails the job: report the counts, surface them in the run summary,
-    # and exit 0 whatever `npm audit` returns.
-    - name: npm audit (production, advisory)
-      run: |
-        set +e
-        npm audit --production --json > audit.json
-        rc=$?
-        set -e
-
-        counts=$(jq -r '.metadata.vulnerabilities
-          | "critical=\(.critical) high=\(.high) moderate=\(.moderate) low=\(.low) total=\(.total)"' audit.json)
-        total=$(jq -r '.metadata.vulnerabilities.total' audit.json)
-
-        {
-          echo "### Dependency audit (advisory)"
-          echo ""
-          echo "Production dependencies: \`$counts\`"
-          echo ""
-          echo "<details><summary>npm audit output</summary>"
-          echo ""
-          echo '```'
-          npm audit --production || true
-          echo '```'
-          echo ""
-          echo "</details>"
-        } >> "$GITHUB_STEP_SUMMARY"
-
-        if [ "$total" -gt 0 ]; then
-          echo "::warning title=Dependency audit::${counts} in production dependencies (tracked in #178, advisory - does not block)"
-        else
-          echo "::notice title=Dependency audit::No production dependency findings."
-        fi
-
-        # Deliberately always 0 - this job reports, it does not gate.
-        echo "npm audit exit code was $rc; advisory step is non-blocking by design."
-        exit 0
+    - name: npm audit (production)
+      run: npm audit --omit=dev
 
     - name: Python safety
       run: |
-        set +e
         python -m pip install -q safety
         safety check -r server/requirements.txt
-        rc=$?
-        set -e
-        echo "safety exit code was $rc; advisory step is non-blocking by design."
-        exit 0
