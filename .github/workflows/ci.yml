@@ -78,11 +78,17 @@ jobs:
     name: Dependency audit (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Advisory only. `npm audit` is noisy on dev dependencies, and the current
-    # 2 high-severity findings are tracked in issue #178 rather than fixed
-    # here - `npm audit fix --force` wants major-version bumps that can break
-    # the WXT build. Make this job required once those are resolved.
-    continue-on-error: true
+    # Advisory only - this job must never turn a green push red. `npm audit` is
+    # noisy on dev dependencies, and the 2 high-severity production findings are
+    # tracked in issue #178 rather than fixed here: `npm audit fix --force` wants
+    # major-version bumps that can break the WXT build.
+    #
+    # It previously ran `npm audit --production` as-is, which exits non-zero on
+    # ANY finding. Even with continue-on-error, GitHub still painted a red X and a
+    # "Some checks were not successful" banner over the commit - which reads as a
+    # failed push to anyone who is not looking at the job matrix (issue #182).
+    # The findings are still reported, now as a job-summary warning instead of a
+    # failing check. Promote this job to required once #178 is resolved.
     steps:
     - uses: actions/checkout@v4
 
@@ -95,10 +101,49 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: npm audit (production)
-      run: npm audit --production
+    # Never fails the job: report the counts, surface them in the run summary,
+    # and exit 0 whatever `npm audit` returns.
+    - name: npm audit (production, advisory)
+      run: |
+        set +e
+        npm audit --production --json > audit.json
+        rc=$?
+        set -e
+
+        counts=$(jq -r '.metadata.vulnerabilities
+          | "critical=\(.critical) high=\(.high) moderate=\(.moderate) low=\(.low) total=\(.total)"' audit.json)
+        total=$(jq -r '.metadata.vulnerabilities.total' audit.json)
+
+        {
+          echo "### Dependency audit (advisory)"
+          echo ""
+          echo "Production dependencies: \`$counts\`"
+          echo ""
+          echo "<details><summary>npm audit output</summary>"
+          echo ""
+          echo '```'
+          npm audit --production || true
+          echo '```'
+          echo ""
+          echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$total" -gt 0 ]; then
+          echo "::warning title=Dependency audit::${counts} in production dependencies (tracked in #178, advisory - does not block)"
+        else
+          echo "::notice title=Dependency audit::No production dependency findings."
+        fi
+
+        # Deliberately always 0 - this job reports, it does not gate.
+        echo "npm audit exit code was $rc; advisory step is non-blocking by design."
+        exit 0
 
     - name: Python safety
       run: |
+        set +e
         python -m pip install -q safety
         safety check -r server/requirements.txt
+        rc=$?
+        set -e
+        echo "safety exit code was $rc; advisory step is non-blocking by design."
+        exit 0
