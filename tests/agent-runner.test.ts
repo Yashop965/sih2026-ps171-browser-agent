@@ -38,13 +38,31 @@ function makeSessionManagerStub() {
       calls.push('start');
       return 'sess_test';
     },
-    getContext: () => ({ taskDescription: 'x', stepCount: 0, maxSteps, failedElements: failedElements as any, visitedUrls: new Set() }),
-    isTaskViable: () => { calls.push('viable'); return viable; },
-    recordFailedElement: (_id: string, el: string) => { failedElements.add(el); calls.push(`fail:${el}`); },
-    completeSession: (id: string, summary?: string) => { calls.push(`complete:${summary ?? ''}`); },
-    failSession: (id: string, reason?: string) => { calls.push(`failSession:${reason ?? ''}`); },
+    getContext: () => ({
+      taskDescription: 'x',
+      stepCount: 0,
+      maxSteps,
+      failedElements: failedElements as any,
+      visitedUrls: new Set(),
+    }),
+    isTaskViable: () => {
+      calls.push('viable');
+      return viable;
+    },
+    recordFailedElement: (_id: string, el: string) => {
+      failedElements.add(el);
+      calls.push(`fail:${el}`);
+    },
+    completeSession: (id: string, summary?: string) => {
+      calls.push(`complete:${summary ?? ''}`);
+    },
+    failSession: (id: string, reason?: string) => {
+      calls.push(`failSession:${reason ?? ''}`);
+    },
     // force-flagged helper
-    __setViable: (v: boolean) => { viable = v; },
+    __setViable: (v: boolean) => {
+      viable = v;
+    },
     __failedElements: failedElements,
     __calls: calls,
   };
@@ -80,10 +98,12 @@ function makeRunner(planSteps: PlanStep[], opts: Partial<Record<string, any>> = 
       return { ok: true, ...(list[execIndex++ % list.length] ?? {}) };
     },
     navigate: async () => ({ ok: true }),
-    fetchPlan: opts.fetchPlan ?? (async () => {
-      const step = planSteps[planIndex++] ?? { plan: { action: { type: 'DONE' } } };
-      return step.plan;
-    }),
+    fetchPlan:
+      opts.fetchPlan ??
+      (async () => {
+        const step = planSteps[planIndex++] ?? { plan: { action: { type: 'DONE' } } };
+        return step.plan;
+      }),
     delay: async () => {},
     sessionManager: sm,
     tabId: 1,
@@ -100,14 +120,19 @@ function makeRunner(planSteps: PlanStep[], opts: Partial<Record<string, any>> = 
     runner,
     sm,
     progress,
-    stop: () => { stopNow = true; },
+    stop: () => {
+      stopNow = true;
+    },
   };
 }
 
 describe('AgentRunner - SW-owned loop (#71/#69)', () => {
   it('completes a multi-step task: TYPE, CLICK, then DONE', async () => {
     const steps = [
-      { plan: { action: { type: 'TYPE', targetId: 1, value: 'a' } }, executeResults: [{ ok: true }] },
+      {
+        plan: { action: { type: 'TYPE', targetId: 1, value: 'a' } },
+        executeResults: [{ ok: true }],
+      },
       { plan: { action: { type: 'CLICK', targetId: 2 } }, executeResults: [{ ok: true }] },
       { plan: { action: { type: 'DONE', reasoning: 'done' } } },
     ];
@@ -125,7 +150,10 @@ describe('AgentRunner - SW-owned loop (#71/#69)', () => {
 
   it('records a failed TYPE to the session failed-element memory (#69)', async () => {
     const steps = [
-      { plan: { action: { type: 'TYPE', targetId: 1, value: 'a' } }, executeResults: [{ ok: false, error: 'boom' }] },
+      {
+        plan: { action: { type: 'TYPE', targetId: 1, value: 'a' } },
+        executeResults: [{ ok: false, error: 'boom' }],
+      },
       { plan: { action: { type: 'DONE' } } },
     ];
     const { runner, sm } = makeRunner(steps);
@@ -159,7 +187,9 @@ describe('AgentRunner - SW-owned loop (#71/#69)', () => {
       execute: async () => ({ ok: true, note }),
       navigate: async () => ({ ok: true }),
       fetchPlan: async () => steps[planIdx++]?.plan ?? { action: { type: 'DONE' } },
-      delay: async (ms: number) => { delayCalls.push(ms); },
+      delay: async (ms: number) => {
+        delayCalls.push(ms);
+      },
       sessionManager: sm,
       tabId: 1,
       windowId: 1,
@@ -203,7 +233,10 @@ describe('AgentRunner - SW-owned loop (#71/#69)', () => {
     // Count steps via the session's getContext step counter is internal; use a
     // local proxy by wrapping fetchPlan's call count instead.
     const realFetch = deps.fetchPlan;
-    deps.fetchPlan = async (...a: any[]) => { stepCount++; return realFetch(...a); };
+    deps.fetchPlan = async (...a: any[]) => {
+      stepCount++;
+      return realFetch(...a);
+    };
 
     const runner = new AgentRunner(deps);
     await runner.run();
@@ -224,7 +257,8 @@ describe('AgentRunner - SW-owned loop (#71/#69)', () => {
     await r2.run();
     expect(r2.getState().status).toBe('failed');
     expect(sm2.__calls).toContain('failSession:extract failed');
-    void runner; void sm;
+    void runner;
+    void sm;
   });
 });
 
@@ -249,12 +283,19 @@ function makeRunner2FailingExtract() {
 
 describe('AgentRunner - pure helpers', () => {
   it('buildPlanHistory marks retries as OK only when they later succeeded', () => {
-    const failedErrors = new Map([['1', 'boom'], ['2', 'x']]);
+    const failedErrors = new Map([
+      ['1', 'boom'],
+      ['2', 'x'],
+    ]);
     // id 1 filled + failed -> OK (succeeded on a later retry).
     // id 2 failed but NEVER filled -> FAILED with the error.
     const h = buildPlanHistory(['1'], ['1', '2'], failedErrors);
     expect(h.find((e) => e.targetId === '1')).toEqual({ targetId: '1', result: 'OK' });
-    expect(h.find((e) => e.targetId === '2')).toEqual({ targetId: '2', result: 'FAILED', error: 'x' });
+    expect(h.find((e) => e.targetId === '2')).toEqual({
+      targetId: '2',
+      result: 'FAILED',
+      error: 'x',
+    });
   });
 
   it('calculateMaxSteps is generous but capped at 100', () => {
@@ -283,9 +324,7 @@ describe('mergeChecklist (cross-page task memory)', () => {
       { id: '1', description: 'search Web browser', done: true },
       { id: '2', description: 'open the Web browser article', done: false },
     ];
-    const merged = mergeChecklist(existing, [
-      { id: '3', description: 'search PWA', done: false },
-    ]);
+    const merged = mergeChecklist(existing, [{ id: '3', description: 'search PWA', done: false }]);
     expect(merged.map((c) => c.id)).toEqual(['1', '2', '3']);
     expect(merged[2]?.description).toBe('search PWA');
   });
@@ -317,7 +356,10 @@ describe('mergeChecklist (cross-page task memory)', () => {
 // A DONE with open items keeps the loop going (strikes), and three consecutive
 // open-item DONEs cap out as best-effort degraded.
 
-function makeChecklistRunner(steps: Array<{ plan: any }>, opts: { executeResults?: Array<{ ok: boolean; error?: string; note?: string }> } = {}) {
+function makeChecklistRunner(
+  steps: Array<{ plan: any }>,
+  opts: { executeResults?: Array<{ ok: boolean; error?: string; note?: string }> } = {}
+) {
   const sm = makeSessionManagerStub();
   let planIdx = 0;
   let execIdx = 0;
@@ -353,8 +395,24 @@ function makeChecklistRunner(steps: Array<{ plan: any }>, opts: { executeResults
 describe('AgentRunner - checklist DONE-gating', () => {
   it('completes (not degraded) when every checklist item is done at DONE', async () => {
     const steps = [
-      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '1', description: 'search', done: false }, { id: '2', description: 'open article', done: false }] } },
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: true }] } },
+      {
+        plan: {
+          action: { type: 'TYPE', targetId: 1, value: 'x' },
+          checklist: [
+            { id: '1', description: 'search', done: false },
+            { id: '2', description: 'open article', done: false },
+          ],
+        },
+      },
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [
+            { id: '1', description: 'search', done: true },
+            { id: '2', description: 'open article', done: true },
+          ],
+        },
+      },
     ];
     const { runner } = makeChecklistRunner(steps);
     await runner.run();
@@ -368,9 +426,33 @@ describe('AgentRunner - checklist DONE-gating', () => {
     // Step 1: seed a 2-item checklist, item 1 done, item 2 open. Planner
     // blurs a DONE while item 2 is still open -> the runner must NOT stop.
     const steps = [
-      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: false }] } },
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: false }] } }, // open -> continue
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: true }] } }, // now done -> complete
+      {
+        plan: {
+          action: { type: 'TYPE', targetId: 1, value: 'x' },
+          checklist: [
+            { id: '1', description: 'search', done: true },
+            { id: '2', description: 'open article', done: false },
+          ],
+        },
+      },
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [
+            { id: '1', description: 'search', done: true },
+            { id: '2', description: 'open article', done: false },
+          ],
+        },
+      }, // open -> continue
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [
+            { id: '1', description: 'search', done: true },
+            { id: '2', description: 'open article', done: true },
+          ],
+        },
+      }, // now done -> complete
     ];
     const { runner } = makeChecklistRunner(steps);
     await runner.run();
@@ -384,11 +466,36 @@ describe('AgentRunner - checklist DONE-gating', () => {
   it('caps a stuck planner at 3 consecutive open-item DONEs -> best-effort degraded', async () => {
     const open = () => ({ id: '2', description: 'open article', done: false });
     const steps = [
-      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } },
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // strike 1
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // strike 2
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // strike 3 -> cap
-      { plan: { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'search', done: true }, open()] } }, // (not reached)
+      {
+        plan: {
+          action: { type: 'TYPE', targetId: 1, value: 'x' },
+          checklist: [{ id: '1', description: 'search', done: true }, open()],
+        },
+      },
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [{ id: '1', description: 'search', done: true }, open()],
+        },
+      }, // strike 1
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [{ id: '1', description: 'search', done: true }, open()],
+        },
+      }, // strike 2
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [{ id: '1', description: 'search', done: true }, open()],
+        },
+      }, // strike 3 -> cap
+      {
+        plan: {
+          action: { type: 'DONE' },
+          checklist: [{ id: '1', description: 'search', done: true }, open()],
+        },
+      }, // (not reached)
     ];
     const { runner, sm } = makeChecklistRunner(steps);
     await runner.run();
@@ -406,7 +513,12 @@ describe('AgentRunner - checklist DONE-gating', () => {
 describe('AgentRunner - proactive VLM goal stop (#100)', () => {
   it('stops early when the VLM confirms the final goal after an action', async () => {
     const steps = [
-      { plan: { action: { type: 'TYPE', targetId: 1, value: 'x' }, checklist: [{ id: '2', description: 'open article', done: false }] } },
+      {
+        plan: {
+          action: { type: 'TYPE', targetId: 1, value: 'x' },
+          checklist: [{ id: '2', description: 'open article', done: false }],
+        },
+      },
       { plan: { action: { type: 'DONE' } } },
     ];
     const sm = makeSessionManagerStub();
@@ -449,15 +561,30 @@ describe('AgentRunner - proactive VLM goal stop (#100)', () => {
     // from the VLM does not force an early stop.
     const openArticle = { id: '2', description: 'open article', done: false };
     const steps = [
-      { plan: { action: { type: 'CLICK', targetId: 2 } }, checklist: [{ id: '1', description: 'search', done: true }, { ...openArticle }] },
-      { plan: { action: { type: 'SCROLL', scrollDirection: 'down' } }, checklist: [{ id: '1', description: 'search', done: true }, { ...openArticle }] },
-      { plan: { action: { type: 'DONE' } }, checklist: [{ id: '1', description: 'search', done: true }, { id: '2', description: 'open article', done: true }] },
+      {
+        plan: { action: { type: 'CLICK', targetId: 2 } },
+        checklist: [{ id: '1', description: 'search', done: true }, { ...openArticle }],
+      },
+      {
+        plan: { action: { type: 'SCROLL', scrollDirection: 'down' } },
+        checklist: [{ id: '1', description: 'search', done: true }, { ...openArticle }],
+      },
+      {
+        plan: { action: { type: 'DONE' } },
+        checklist: [
+          { id: '1', description: 'search', done: true },
+          { id: '2', description: 'open article', done: true },
+        ],
+      },
     ];
     const sm = makeSessionManagerStub();
     const deps: AgentRunnerDeps = {
       extract: async () => ({
         ok: true,
-        elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }, { id: 2, tag: 'button', role: 'button', label: 'Go' }],
+        elements: [
+          { id: 1, tag: 'input', role: 'textbox', label: 'name' },
+          { id: 2, tag: 'button', role: 'button', label: 'Go' },
+        ],
         url: 'https://example.com',
         title: 'Page',
         context: null,
@@ -492,7 +619,13 @@ describe('AgentRunner - proactive VLM goal stop (#100)', () => {
     ];
     const sm = makeSessionManagerStub();
     const deps: AgentRunnerDeps = {
-      extract: async () => ({ ok: true, elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'n' }], url: 'u', title: 't', context: null }),
+      extract: async () => ({
+        ok: true,
+        elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'n' }],
+        url: 'u',
+        title: 't',
+        context: null,
+      }),
       execute: async () => ({ ok: true }),
       navigate: async () => ({ ok: true }),
       fetchPlan: async () => (steps.shift() ?? { plan: { action: { type: 'DONE' } } }).plan,
@@ -511,7 +644,6 @@ describe('AgentRunner - proactive VLM goal stop (#100)', () => {
     expect(runner.getState().status).toBe('complete');
   });
 });
-
 
 describe('AgentRunner - per-page memory scoping + 0-element stall (#114 live findings)', () => {
   it('clears filled/failed element memory when the URL changes between extracts', async () => {
@@ -562,7 +694,9 @@ describe('AgentRunner - per-page memory scoping + 0-element stall (#114 live fin
     // #2 carries NO page-A ids.
     const pageBIds = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
     expect(pageBIds).not.toContain('1');
-    expect(runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))).toBe(true);
+    expect(
+      runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))
+    ).toBe(true);
     expect(runner.getState().status).toBe('complete');
   });
 
@@ -580,15 +714,27 @@ describe('AgentRunner - per-page memory scoping + 0-element stall (#114 live fin
         // First read transiently empty (render race); retries see the settled page.
         return extractCall === 1
           ? { ok: true, elements: [], url: 'https://x.test/a', title: 'A', context: null }
-          : { ok: true, elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }], url: 'https://x.test/a', title: 'A', context: null };
+          : {
+              ok: true,
+              elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+              url: 'https://x.test/a',
+              title: 'A',
+              context: null,
+            };
       },
       execute: async () => ({ ok: true }),
       navigate: async () => ({ ok: true }),
       fetchPlan: async () => {
         planCall++;
         return planCall === 1
-          ? { action: { type: 'WAIT', waitMs: 100 }, checklist: [{ id: '1', description: 'first goal', done: false }] }
-          : { action: { type: 'DONE' }, checklist: [{ id: '1', description: 'first goal', done: true }] };
+          ? {
+              action: { type: 'WAIT', waitMs: 100 },
+              checklist: [{ id: '1', description: 'first goal', done: false }],
+            }
+          : {
+              action: { type: 'DONE' },
+              checklist: [{ id: '1', description: 'first goal', done: true }],
+            };
       },
       delay: async () => {},
       sessionManager: sm,
@@ -621,7 +767,13 @@ describe('AgentRunner - per-page memory scoping + 0-element stall (#114 live fin
         extractCall++;
         // Page A has an element; the navigated-to page B stays empty.
         return extractCall === 1
-          ? { ok: true, elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }], url: 'https://x.test/a', title: 'A', context: null }
+          ? {
+              ok: true,
+              elements: [{ id: 1, tag: 'input', role: 'textbox', label: 'name' }],
+              url: 'https://x.test/a',
+              title: 'A',
+              context: null,
+            }
           : { ok: true, elements: [], url: 'https://x.test/b', title: 'B', context: null };
       },
       execute: async () => ({ ok: true }),
@@ -677,7 +829,13 @@ describe('AgentRunner - log-before-observe discipline (#121 audit)', () => {
         // First read (before the click) is fine; the post-action observe
         // (top of the next iteration) fails - the #121 injection point.
         return extractCall === 1
-          ? { ok: true, elements: [{ id: 3, tag: 'a', role: 'link', label: 'article' }], url: 'https://x.test/a', title: 'A', context: null }
+          ? {
+              ok: true,
+              elements: [{ id: 3, tag: 'a', role: 'link', label: 'article' }],
+              url: 'https://x.test/a',
+              title: 'A',
+              context: null,
+            }
           : { ok: false, error: 'mid-navigation - page dead' };
       },
       execute: async () => {
@@ -687,7 +845,9 @@ describe('AgentRunner - log-before-observe discipline (#121 audit)', () => {
       navigate: async () => ({ ok: true }),
       fetchPlan: async () => {
         planCall++;
-        return planCall === 1 ? { action: { type: 'CLICK', targetId: 3 } } : { action: { type: 'DONE' } };
+        return planCall === 1
+          ? { action: { type: 'CLICK', targetId: 3 } }
+          : { action: { type: 'DONE' } };
       },
       delay: async () => {},
       sessionManager: sm,
@@ -709,7 +869,9 @@ describe('AgentRunner - log-before-observe discipline (#121 audit)', () => {
     // The observe failure is reported as unknown state (extract failed),
     // and the mutation was NOT replayed: exactly one execute call, ever.
     expect(final.status).toBe('failed');
-    expect(final.logs.some((l) => /Failed to extract elements: mid-navigation - page dead/.test(l))).toBe(true);
+    expect(
+      final.logs.some((l) => /Failed to extract elements: mid-navigation - page dead/.test(l))
+    ).toBe(true);
     expect(executeCalls).toBe(1);
     expect(sm.__calls).toContain('failSession:extract failed');
     // Planner was called for the pre-action step only - the failing observe
@@ -727,7 +889,13 @@ describe('AgentRunner - log-before-observe discipline (#121 audit)', () => {
     let executeCalls = 0;
     let planCall = 0;
     const deps: AgentRunnerDeps = {
-      extract: async () => ({ ok: true, elements: [{ id: 3, tag: 'a', role: 'link', label: 'article' }], url: 'https://x.test/a', title: 'A', context: null }),
+      extract: async () => ({
+        ok: true,
+        elements: [{ id: 3, tag: 'a', role: 'link', label: 'article' }],
+        url: 'https://x.test/a',
+        title: 'A',
+        context: null,
+      }),
       execute: async () => {
         executeCalls++;
         return { ok: true };
@@ -821,7 +989,9 @@ describe('AgentRunner - same-URL re-render content signature (#128)', () => {
     const step2 = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
     expect(step2).not.toContain('1');
     expect(runner.getState().logs.some((l) => /content re-rendered/i.test(l))).toBe(true);
-    expect(runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))).toBe(true);
+    expect(
+      runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))
+    ).toBe(true);
     expect(runner.getState().status).toBe('complete');
   });
 
@@ -841,7 +1011,9 @@ describe('AgentRunner - same-URL re-render content signature (#128)', () => {
     // sent to /plan MUST still carry "1" as already filled.
     const step2 = ((histories[1] ?? []) as Array<{ targetId: string }>).map((h) => h.targetId);
     expect(step2).toContain('1');
-    expect(runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))).toBe(false);
+    expect(
+      runner.getState().logs.some((l) => /clearing per-page interaction memory/i.test(l))
+    ).toBe(false);
     expect(runner.getState().status).toBe('complete');
   });
 
@@ -861,8 +1033,9 @@ describe('AgentRunner - same-URL re-render content signature (#128)', () => {
 
 describe('pageContentSignature (pure helper, #128)', () => {
   it('is invariant under scroll position (scrollY is deliberately excluded)', () => {
-    expect(pageContentSignature({ scrollY: 0, scrollHeight: 1000, omitted: 0 }))
-      .toBe(pageContentSignature({ scrollY: 9999, scrollHeight: 1000, omitted: 0 }));
+    expect(pageContentSignature({ scrollY: 0, scrollHeight: 1000, omitted: 0 })).toBe(
+      pageContentSignature({ scrollY: 9999, scrollHeight: 1000, omitted: 0 })
+    );
   });
 
   it('changes when document height or omitted-cap count changes', () => {
@@ -880,18 +1053,45 @@ describe('pageContentSignature (pure helper, #128)', () => {
 });
 
 describe('per-event timeout (stall guard)', () => {
+  // Fake timers throughout. The two ordering tests below used real 5ms/20ms/80ms
+  // sleeps, which is a genuine race: if the machine stalls, the "late" promise
+  // can settle before withTimeout's own deadline is installed, and the test
+  // asserts the opposite of what actually happened. Virtual time removes the
+  // dependence on how busy the CPU is.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('withTimeout resolves with the value when the event settles before the deadline', async () => {
-    await expect(withTimeout(Promise.resolve('ok'), 50, 'evt')).resolves.toBe('ok');
+    vi.useFakeTimers();
+    const settled = withTimeout(Promise.resolve('ok'), 50, 'evt');
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(settled).resolves.toBe('ok');
   });
 
   it('withTimeout rejects with EventTimeoutError when the event outlasts the deadline', async () => {
-    const late = new Promise((r) => setTimeout(() => r('late'), 80));
-    await expect(withTimeout(late, 20, 'planner event')).rejects.toBeInstanceOf(EventTimeoutError);
+    vi.useFakeTimers();
+    let resolveLate: (v: string) => void = () => {};
+    const late = new Promise<string>((r) => {
+      resolveLate = r;
+    });
+    const guarded = withTimeout(late, 20, 'planner event');
+    const assertion = expect(guarded).rejects.toBeInstanceOf(EventTimeoutError);
+    // Push past the 20ms deadline. The inner promise has NOT settled, so the
+    // only thing that can reject the guard is its own timer.
+    await vi.advanceTimersByTimeAsync(21);
+    await assertion;
+    // Settle the dangling promise afterwards so it is not left pending.
+    resolveLate('late');
   });
 
   it('withTimeout propagates a non-timeout rejection unchanged', async () => {
+    vi.useFakeTimers();
     const boom = new Promise((_r, rej) => setTimeout(() => rej(new Error('boom')), 5));
-    await expect(withTimeout(boom, 50, 'evt')).rejects.toThrow('boom');
+    const guarded = withTimeout(boom, 50, 'evt');
+    const assertion = expect(guarded).rejects.toThrow('boom');
+    await vi.advanceTimersByTimeAsync(5);
+    await assertion;
   });
 
   it('exposes a generous default deadline that leaves planner headroom', () => {
@@ -918,7 +1118,9 @@ describe('per-event timeout (stall guard)', () => {
     expect(s.running).toBe(false);
     expect(s.status).toBe('failed');
     expect(sm.__calls).toContain('failSession:stalled: repeated per-event timeouts');
-    expect(runner.getState().logs.some((l) => /consecutive planner events timed out/.test(l))).toBe(true);
+    expect(runner.getState().logs.some((l) => /consecutive planner events timed out/.test(l))).toBe(
+      true
+    );
   });
 
   it('a timely plan resets the stall streak (no stop after a single timeout)', async () => {

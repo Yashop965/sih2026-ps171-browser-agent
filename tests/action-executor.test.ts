@@ -1,6 +1,6 @@
 /**
  * Action Executor Tests
- * 
+ *
  * Tests for click, type, scroll, and navigation actions
  */
 
@@ -81,17 +81,29 @@ describe('Action Executor - Staleness', () => {
   });
 
   it('should handle element removal during action', async () => {
-    const dom = new JSDOM('<!DOCTYPE html><html><body><button id="btn">Click</button></body></html>');
+    const dom = new JSDOM(
+      '<!DOCTYPE html><html><body><button id="btn">Click</button></body></html>'
+    );
     const btn = dom.window.document.getElementById('btn');
 
-    // Simulate async operation with removal
-    setTimeout(() => {
-      btn?.remove();
-    }, 10);
+    // Fake timers: this test previously used real 10ms/20ms sleeps, so under
+    // CPU contention (a loaded CI runner, a parallel vitest worker) the 20ms
+    // wait could elapse before the 10ms removal ran, or the removal could be
+    // starved entirely. Virtual time makes the ordering deterministic.
+    vi.useFakeTimers();
+    try {
+      // Simulate async operation with removal
+      setTimeout(() => {
+        btn?.remove();
+      }, 10);
 
-    await new Promise(resolve => setTimeout(resolve, 20));
+      // Cross the 10ms boundary so the removal callback has definitely run.
+      await vi.advanceTimersByTimeAsync(20);
 
-    expect(btn?.isConnected).toBe(false);
+      expect(btn?.isConnected).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -133,7 +145,7 @@ describe('Action Executor - Timeout', () => {
     ): Promise<boolean> => {
       return Promise.race([
         action(),
-        new Promise<boolean>((_, reject) => 
+        new Promise<boolean>((_, reject) =>
           setTimeout(() => reject(new Error('Timeout')), timeoutMs)
         ),
       ]);
