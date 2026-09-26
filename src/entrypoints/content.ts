@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser';
 import {
   extract,
   getPageContext,
+  sanitizedPageUrl,
   maskLabel,
   registerGroundedElement,
   getElementById,
@@ -71,12 +72,15 @@ export default defineContentScript({
       const a11yTree = buildAccessibilityTree(document.documentElement);
       const interactiveElements = captureInteractiveElements();
 
-      // Sanitize URL to remove query params that may contain PII
-      const url = new URL(window.location.href);
-      url.search = '';
+      // Sanitize URL to remove query params that may contain PII.
+      // #170: delegated to the one implementation in dom.ts. This call site
+      // used to build its own URL with `search = ''` while getPageContext()
+      // - one field away on the same payload - sent location.href raw, so the
+      // strip was silently undone. One implementation, both call sites.
+      const url = sanitizedPageUrl();
 
       return {
-        url: url.toString(),
+        url,
         title: document.title,
         timestamp: Date.now(),
         // SECURITY: Never send raw HTML — it contains user input (passwords, Aadhaar, PAN)

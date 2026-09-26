@@ -76,8 +76,22 @@ export function maskProfileValues(text: string, profile: UserProfile): string {
     // emails have dots, etc.).
     const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // Word-boundary on both ends so a value is not clobbered inside a longer
-    // word; a boundary is asserted against non-word chars on either side.
-    out = out.replace(new RegExp(`\\b${escaped}\\b`, 'g'), token);
+    // word (Pune must not match inside Punegaon).
+    //
+    // Issue #165: `\b` is only a word boundary when the edge it guards is
+    // itself a word character. A profile value that ENDS in punctuation
+    // ("Pune.", "Acme Ltd.", "Bangalore,") has a non-word char at that edge,
+    // so there is no word/non-word transition there and `\b...\b` can never
+    // match - the raw value was then sent to /plan inside the task string.
+    // 8 of 13 punctuation-ending values leaked.
+    //
+    // So assert a boundary only on edges that actually have a word character
+    // to anchor to, and a non-word character (or nothing) where they do not:
+    // the latter already IS the boundary, so adding \b there is both
+    // unsatisfiable and, at the string ends, meaningless.
+    const lead = /^\w/.test(value) ? '\\b' : '';
+    const tail = /\w$/.test(value) ? '\\b' : '';
+    out = out.replace(new RegExp(`${lead}${escaped}${tail}`, 'g'), token);
   }
   return out;
 }
