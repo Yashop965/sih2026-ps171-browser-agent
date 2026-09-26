@@ -107,10 +107,77 @@ const FIREWALL_PATTERNS: FirewallPattern[] = [
     regex: /\b\d{3}-\d{2}-\d{4}\b/g,
     highPrecision: true,
   },
-  // API key / secret value (contextual — look for assignment patterns)
+  // API key / secret value.
+  //
+  // Two patterns, because one is not enough (issue #164):
+  //
+  // 1. CONTEXTUAL - an assignment or label, e.g. "api_key=abc123...". Catches
+  //    secrets the page described.
+  // 2. BARE - the well-known literal prefixes, with no label required. A page
+  //    that renders a token on its own ("AKIA...", "ghp_...", "xoxb-...") gave
+  //    the contextual pattern nothing to match, so every one of these passed
+  //    the last line of defence. The `highPrecision` flag means a bare match
+  //    blocks, so these are narrow enough to be safe: each prefix is
+  //    vendor-specific with a fixed shape and length.
   {
     type: 'API_KEY',
-    regex: /\b(api[_-]?key|apikey|access[_-]?token|secret[_-]?key)\s*[:=]\s*([^\s,;'"]{8,})/gi,
+    regex: /\b(api[_-]?key|apikey|access[_-]?token|secret[_-]?key)\s*[:=]\s*([^\s,;'"\n]{8,})/gi,
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\bsk-[A-Za-z0-9_-]{16,}\b/g, // OpenAI / Anthropic style
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b/g, // GitHub PAT
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\bfine_[A-Za-z0-9]{36}\b/g, // GitHub fine-grained PAT
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\bASIA[0-9A-Z]{16}\b/g, // AWS temporary access key id
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\bAIza[0-9A-Za-z_-]{35}\b/g, // Google API key
+    highPrecision: true,
+  },
+  {
+    // Slack: xoxb/xoxp/xoxa/xoxr/xoxs bot+user+app tokens, plus the newer
+    // xapp-… app-level token. All are secret-bearing.
+    type: 'API_KEY',
+    regex: /\bx(?:ox[abprs]|app)-[A-Za-z0-9-]{10,}\b/g,
+    highPrecision: true,
+  },
+  {
+    type: 'API_KEY',
+    regex: /\bglpat-[A-Za-z0-9_-]{16,}\b/g, // GitLab PAT
+    highPrecision: true,
+  },
+  {
+    // JWT: three base64url segments, each non-empty, starting with eyJ (the
+    // base64 of '{"'). Requires all three segments so ordinary dotted text
+    // ("version 1.2.3") cannot match.
+    type: 'API_KEY',
+    regex: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+    highPrecision: true,
+  },
+  {
+    // Private key blocks. A PEM header on a page is unambiguous.
+    type: 'API_KEY',
+    regex: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
     highPrecision: true,
   },
 ];
@@ -160,6 +227,73 @@ const MAX_DEPTH = 10;
 const MAX_STRING_LENGTH = 10_000;
 
 /**
+ * Per-structure budget for the deep (past-MAX_DEPTH) walk.
+ *
+ * Past MAX_DEPTH the walker stops descending into structure and instead
+ * collects and scans every reachable string, so a secret at ANY depth is still
+ * inspected. Depth is a cost control, not a security control - before this,
+ * `depth > MAX_DEPTH` returned `{ passed: true }` and never looked at all
+ * (issue #164).
+ *
+ * The limit counts STRINGS, not characters, and each is scanned through in full
+ * (bounded individually by MAX_STRING_LENGTH). An earlier attempt sliced the
+ * serialised blob to a fixed character count, which let a page push a secret out
+ * of the scanned window by padding earlier keys - a page-controlled fail-open.
+ * Measured: 600 chars of filler before the secret was enough to walk a PAN and a
+ * key straight through. Counting strings makes position within the structure
+ * irrelevant.
+ */
+const DEEP_STRING_BUDGET = 5_000;
+
+/**
+ * Collect every string reachable from a value.
+ *
+ * Used for the past-MAX_DEPTH path, where we deliberately do not walk one level
+ * at a time. `seen` is required, not defensive: a page controls the shape of what
+ * it returns, so a cyclic structure is possible and the walk must terminate.
+ * WeakSet so we do not retain the page's objects.
+ */
+function collectStrings(
+  value: unknown,
+  out: string[],
+  budget: number,
+  seen: WeakSet<object>
+): string[] {
+  if (out.length >= budget) return out;
+  if (typeof value === 'string') {
+    if (value.length > 0) out.push(value);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return out;
+    seen.add(value);
+    for (const item of value) collectStrings(item, out, budget, seen);
+    return out;
+  }
+  if (value !== null && typeof value === 'object') {
+    if (seen.has(value as object)) return out;
+    seen.add(value as object);
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      collectStrings((value as Record<string, unknown>)[key], out, budget, seen);
+    }
+  }
+  return out;
+}
+
+/** Scan every string reachable from a value that sits past MAX_DEPTH. */
+function inspectDeep(value: unknown, path: string): FirewallResult {
+  const strings = collectStrings(value, [], DEEP_STRING_BUDGET, new WeakSet());
+  for (const s of strings) {
+    const result = inspectString(
+      s.length > MAX_STRING_LENGTH ? s.slice(0, MAX_STRING_LENGTH) : s,
+      path
+    );
+    if (!result.passed) return result;
+  }
+  return { passed: true };
+}
+
+/**
  * Recursively inspect any JSON-serializable value for PII.
  *
  * @param value  The value to inspect (string, array, object, or primitive)
@@ -167,8 +301,6 @@ const MAX_STRING_LENGTH = 10_000;
  * @param depth  Current recursion depth (guards against deeply-nested objects)
  */
 export function inspectPayload(value: unknown, path = 'root', depth = 0): FirewallResult {
-  if (depth > MAX_DEPTH) return { passed: true }; // treat excessively nested as safe
-
   if (typeof value === 'string') {
     if (value.length === 0 || value === '[REDACTED]') return { passed: true };
     if (value.length > MAX_STRING_LENGTH) {
@@ -180,6 +312,7 @@ export function inspectPayload(value: unknown, path = 'root', depth = 0): Firewa
   }
 
   if (Array.isArray(value)) {
+    if (depth > MAX_DEPTH) return inspectDeep(value, path);
     for (let i = 0; i < value.length; i++) {
       const result = inspectPayload(value[i], `${path}[${i}]`, depth + 1);
       if (!result.passed) return result;
@@ -189,6 +322,7 @@ export function inspectPayload(value: unknown, path = 'root', depth = 0): Firewa
 
   if (value !== null && typeof value === 'object') {
     const obj = value as Record<string, unknown>;
+    if (depth > MAX_DEPTH) return inspectDeep(obj, path);
     for (const key of Object.keys(obj)) {
       const result = inspectPayload(obj[key], `${path}.${key}`, depth + 1);
       if (!result.passed) return result;
