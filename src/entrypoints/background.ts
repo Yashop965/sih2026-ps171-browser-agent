@@ -1,6 +1,7 @@
 import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { sanitizedPageUrl } from '../lib/dom';
+import { resolveNavUrl } from '../lib/navUrl';
 import { storageGet, storageGetMany, storageSet, STORAGE_KEYS } from '../lib/storage';
 import type { Runtime } from 'wxt/browser';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
@@ -1291,18 +1292,17 @@ export default defineBackground({
               }
               const target = message.url;
               // Only http(s) - refuse javascript: and other dangerous schemes.
-              let url = target;
-              try {
-                const parsed = new URL(target, 'http://invalid');
-                if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-                  sendResponse({ ok: false, error: `refused protocol: ${parsed.protocol}` });
-                  return;
-                }
-                url = parsed.href;
-              } catch {
-                sendResponse({ ok: false, error: 'invalid url' });
+              // #159: the policy is extracted to lib/navUrl.ts so it is directly
+              // testable. It was the one security check in this file that no
+              // test could reach without standing up a whole service worker
+              // with a fake browser.tabs, and it guards the only path that
+              // navigates a tab without going through the content script.
+              const nav = resolveNavUrl(target);
+              if (!nav.ok || !nav.url) {
+                sendResponse({ ok: false, error: nav.error ?? 'invalid url' });
                 return;
               }
+              const url = nav.url;
               await browser.tabs.update(tabId, { url });
               // Wait for the new page to settle (bounded) so the agent does not
               // re-extract a half-rendered DOM. Falls through on timeout.
