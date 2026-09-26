@@ -756,6 +756,13 @@ export default defineBackground({
     // number or object through to the URL layer.
     const navigateChannel = async (url: unknown): Promise<{ ok: boolean; error?: string }> => {
       try {
+        // #192: resolve the tab FIRST, because a relative target needs a real
+        // base and the tab's current url is the only real base available in a
+        // service worker. `driveTab` had no side effect on ordering - it only
+        // picks a tab id - so hoisting it above the url check is safe.
+        const tabId = await driveTab();
+        if (tabId === undefined) return { ok: false, error: 'No web tab found' };
+
         // #159: the same policy the NAVIGATE_TAB handler uses, now shared
         // rather than duplicated. This copy had drifted in the same two ways:
         // the `http://invalid` placeholder base, and - the real one - no
@@ -765,11 +772,33 @@ export default defineBackground({
         // This is the path that ACTUALLY carries a planner NAVIGATE action
         // (the runner calls d.navigate), so extracting only the NAVIGATE_TAB
         // handler would have left the live one on the old behaviour.
-        const nav = resolveNavUrl(url);
+        //
+        // `base` is the tab's current url, read fresh: a relative target the
+        // planner emitted ("/profile") resolves against the page the agent is
+        // actually on. Without it the target lands on the .invalid placeholder
+        // and the navigation silently fails.
+        const currentUrl = await browser.tabs
+          .get(tabId)
+          .then((t) => t.url)
+          .catch(() => undefined);
+        const nav = resolveNavUrl(url, currentUrl);
         if (!nav.ok || !nav.url) return { ok: false, error: nav.error ?? 'invalid url' };
+
+        // Relative target and no usable base - the resolved url points at the
+        // placeholder host and will not load. Say so precisely, because
+        // "invalid url" would send the planner looking for a syntax problem
+        // that is not there.
+        if (nav.needsBase) {
+          return {
+            ok: false,
+            error:
+              currentUrl === undefined
+                ? 'relative url but the current page url is unknown - use an absolute url'
+                : 'relative url could not be resolved - use an absolute url',
+          };
+        }
+
         const target = nav.url;
-        const tabId = await driveTab();
-        if (tabId === undefined) return { ok: false, error: 'No web tab found' };
         await browser.tabs.update(tabId, { url: target });
         await waitForTabLoad(tabId, 10_000);
         // #141: a navigation inside the task re-asserts the target so a later

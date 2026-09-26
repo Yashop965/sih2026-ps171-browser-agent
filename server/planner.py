@@ -372,7 +372,8 @@ ACTION EXAMPLES:
 - For button: {{"type": "CLICK", "targetId": 4, "reasoning": "clicking submit button"}}
 - To submit a filled search box (press Enter): {{"type": "KEY", "key": "Enter", "reasoning": "submitting the search I just typed"}}
 - To move into an autocomplete suggestion then submit: {{"type": "KEY", "key": "ArrowDown", "reasoning": "select the highlighted suggestion"}}
-- To go to another page: {{"type": "NAVIGATE", "url": "https://site.example/profile", "reasoning": "task continues on the profile page"}}
+- For a different page: {{"type": "NAVIGATE", "url": "https://site.example/profile", "reasoning": "task continues on the profile page"}}
+- NAVIGATE `url` MUST be absolute, starting with `https://` or `http://` — copy a full URL out of the page or the task. A relative url like `/profile` or `settings` is rejected.
 - To let content load: {{"type": "WAIT", "waitMs": 2000, "reasoning": "page still loading, settle before next step"}}
 {switch_tab_example}
 
