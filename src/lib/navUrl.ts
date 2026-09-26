@@ -21,13 +21,25 @@
  *     to the browser as code.
  *
  *  2. A RELATIVE url is resolved against a placeholder base rather than
- *     refused. The planner legitimately emits `/dashboard` and
- *     `example.com/x`, and refusing those would break multi-page autonomy.
- *     The placeholder base is `http://invalid` - deliberately not a real host,
- *     because a relative target must not silently inherit a real origin. What
- *     comes back is an absolute URL on a host that will not resolve, so the
- *     browser reports it as a navigation failure rather than quietly landing
- *     somewhere unintended.
+ *     refused, so the scheme check still runs on it.
+ *
+ *     Read that carefully: a relative target is NOT made to work by this.
+ *     There is no page context in a service worker, so `/dashboard` resolves
+ *     to `http://relative-target.invalid/dashboard` - a host that cannot
+ *     resolve, and the navigation fails. It failed before this extraction too
+ *     (against `http://invalid`), so this is not a regression; it is a
+ *     pre-existing limitation that was easy to mistake for support.
+ *
+ *     The placeholder is RFC 2606 `.invalid` rather than `http://invalid`
+ *     specifically so the failure is unmissable and cannot accidentally be a
+ *     registrable host. See #192 for making a relative target actually
+ *     resolve against the active tab, or for refusing it with an error the
+ *     planner can act on.
+ *
+ * Do not fold `doNavigate` in src/lib/actions.ts into this. It resolves
+ * against `location.href` because it runs IN the page, where a relative target
+ * has a real base. Same scheme rule, deliberately different base - unifying
+ * them would break the content script.
  */
 
 export interface NavUrlResult {

@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { resolveNavUrl } from '../src/lib/navUrl';
 
 describe('refuses dangerous schemes', () => {
@@ -67,31 +68,72 @@ describe('accepts http(s)', () => {
   });
 });
 
-describe('relative targets resolve, they are not refused', () => {
-  // The planner emits these routinely. Refusing them would break multi-page
-  // autonomy, which is the whole point of NAVIGATE_TAB.
-  it.each(['/dashboard', '/a/b/c?q=1', 'settings/profile'])('resolves %j', (target) => {
-    const r = resolveNavUrl(target);
-    expect(r.ok).toBe(true);
-    expect(r.url).toMatch(/^http:\/\//);
-  });
-
-  it('a resolved relative target never lands on a real host', () => {
-    // The placeholder base is RFC 2606 `.invalid`, which cannot be registered.
-    // So a relative target that fails to carry its own host cannot silently
-    // land somewhere real.
-    for (const t of ['/dashboard', 'settings/profile', 'example.com/x']) {
-      const r = resolveNavUrl(t);
-      expect(r.ok).toBe(true);
-      expect(r.url).toContain('.invalid');
+describe('relative targets resolve to an unresolvable host - they do NOT work', () => {
+  // There is no page context in a service worker, so a relative target has no
+  // real base. It resolves against the RFC 2606 placeholder and the navigation
+  // then fails.
+  //
+  // The first version of this file claimed these "must not be refused because
+  // the planner legitimately emits /dashboard" and asserted only that the
+  // result was http://. That assertion was weak enough to pass while the
+  // docstring next to it was wrong. Asserted properly below.
+  it.each(['/dashboard', '/a/b/c?q=1', 'settings/profile'])(
+    'resolves %j onto the .invalid placeholder',
+    (target) => {
+      const r = resolveNavUrl(target);
+      expect(r.ok).toBe(true); // the SCHEME check passes...
+      expect(r.url).toContain('.invalid'); // ...but it lands nowhere real
     }
+  );
+
+  it('does NOT resolve a relative target against a real origin', () => {
+    // The specific regression risk: a relative target quietly inheriting the
+    // current page's host. It cannot, because the base is a constant.
+    const r = resolveNavUrl('/dashboard');
+    expect(r.url).not.toMatch(/bank\.example/);
+    expect(r.url).toBe('http://relative-target.invalid/dashboard');
   });
 
-  it('a protocol-relative target keeps its own host', () => {
-    // //evil.example/x is NOT relative in the dangerous sense - it names a host.
+  it('a protocol-relative target keeps its own host, and that DOES work', () => {
+    // //evil.example/x names a host, so it is not relative in that sense.
     const r = resolveNavUrl('//evil.example/x');
     expect(r.ok).toBe(true);
     expect(r.url).toBe('http://evil.example/x');
+  });
+});
+
+describe('#159 review: no duplicated copy of the policy survives', () => {
+  // The review of #190 found the same scheme check inlined a SECOND time, in
+  // navigateChannel - and that copy is the LIVE one, because the runner
+  // reaches navigation through d.navigate, not through the NAVIGATE_TAB
+  // message. Extracting only the handler would have left the path that
+  // actually runs on the old behaviour.
+  //
+  // These read the source so the invariant is enforced, not remembered.
+  // Resolved from the cwd, not import.meta.url - under Vitest import.meta.url
+  // is not a file: URL, so readFileSync(URL) throws "The URL must be of
+  // scheme file". Vitest runs from the repo root.
+  const bg = readFileSync('src/entrypoints/background.ts', 'utf-8');
+
+  it('no longer inlines a URL parse against a placeholder base', () => {
+    // The smell: `new URL(x, 'http://invalid')` inlined in a handler.
+    expect(bg).not.toMatch(/new URL\([^)]*'http:\/\/invalid'/);
+  });
+
+  it('routes BOTH navigation call sites through resolveNavUrl', () => {
+    const uses = bg.match(/resolveNavUrl\(/g) ?? [];
+    // 1 = navigateChannel, 1 = the NAVIGATE_TAB handler. The import line reads
+    // `from '../lib/navUrl'` and so does not match `resolveNavUrl(`.
+    // (The first version of this test asserted >= 3 on a miscount that
+    // included the import - it failed, correctly.)
+    expect(uses.length).toBe(2);
+  });
+
+  it('does not claim the type is string when nothing enforces it', () => {
+    // Both sites were typed `url: string` while only truthiness-checking an
+    // LLM-supplied value upstream. The type is now `unknown`.
+    expect(bg).not.toMatch(/NAVIGATE_TAB'; url: string/);
+    expect(bg).not.toMatch(/navigateChannel = async \(url: string\)/);
   });
 });
 

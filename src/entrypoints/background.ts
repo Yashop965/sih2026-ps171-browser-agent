@@ -750,18 +750,24 @@ export default defineBackground({
       }
     };
 
-    const navigateChannel = async (url: string): Promise<{ ok: boolean; error?: string }> => {
+    // `url: unknown` because the runner passes whatever the planner emitted and
+    // only truthiness-checks it (`action.type === 'NAVIGATE' && action.url`).
+    // Typing it `string` would assert a guarantee nothing enforces, and let a
+    // number or object through to the URL layer.
+    const navigateChannel = async (url: unknown): Promise<{ ok: boolean; error?: string }> => {
       try {
-        let target = url;
-        try {
-          const parsed = new URL(url, 'http://invalid');
-          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            return { ok: false, error: `refused protocol: ${parsed.protocol}` };
-          }
-          target = parsed.href;
-        } catch {
-          return { ok: false, error: 'invalid url' };
-        }
+        // #159: the same policy the NAVIGATE_TAB handler uses, now shared
+        // rather than duplicated. This copy had drifted in the same two ways:
+        // the `http://invalid` placeholder base, and - the real one - no
+        // non-string guard, so `new URL(42, base)` navigated to
+        // `http://invalid/42`. resolveNavUrl refuses those.
+        //
+        // This is the path that ACTUALLY carries a planner NAVIGATE action
+        // (the runner calls d.navigate), so extracting only the NAVIGATE_TAB
+        // handler would have left the live one on the old behaviour.
+        const nav = resolveNavUrl(url);
+        if (!nav.ok || !nav.url) return { ok: false, error: nav.error ?? 'invalid url' };
+        const target = nav.url;
         const tabId = await driveTab();
         if (tabId === undefined) return { ok: false, error: 'No web tab found' };
         await browser.tabs.update(tabId, { url: target });
@@ -1069,7 +1075,14 @@ export default defineBackground({
       | { type: 'VLM_OCR' }
       | { type: 'EXTRACT' }
       | { type: 'EXECUTE'; action?: { targetId?: number | string } }
-      | { type: 'NAVIGATE_TAB'; url: string; tabId?: number }
+      // `url` is whatever the planner put in the action, and the planner is an
+      // LLM. `action.url` is only truthiness-checked at the call site
+      // (`action.type === 'NAVIGATE' && action.url`), so a non-string - a
+      // number, an object, a list - reaches this handler intact. Typed
+      // `unknown` rather than `string` so the compiler forces resolveNavUrl's
+      // runtime guard to narrow it, instead of asserting a guarantee nothing
+      // upstream actually enforces.
+      | { type: 'NAVIGATE_TAB'; url: unknown; tabId?: number }
       | { type: 'GET_PRIVACY_LEDGER' }
       | { type: 'GET_AUDIT_LOG' }
       | { type: 'CLEAR_LEDGER' }
