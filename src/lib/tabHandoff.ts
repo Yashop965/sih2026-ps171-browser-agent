@@ -16,7 +16,13 @@
  *
  * PII note: harvested values can be personal data. They cross only
  * SW-local state → executor input. Never the /plan payload, never the log.
+ *
+ * Harvested LABELS are page text too, and #166 showed the firewall does not
+ * catch person names, so `handoffForPlanner` masks them before they leave the
+ * device. See that function's docstring.
  */
+
+import { maskLabel } from './dom';
 
 // One row of a content-script field harvest (see content.ts HARVEST_FIELDS).
 export interface HarvestedField {
@@ -138,6 +144,57 @@ export function mergeHandoff(base: TabHandoff, incoming: TabHandoff): TabHandoff
  * The /plan payload section: what the planner may reference. Tokens + labels
  * ONLY — never the values (that would defeat the firewall). Empty handoff ->
  * undefined (the payload key is omitted, so single-tab tasks see no change).
+ *
+ * Issue #166. The docstring above used to call these labels "safe to show the
+ * planner". They are not: a label is raw page text harvested from `<dt>`,
+ * `<label for>`, `<th>` and "Label: value" blocks, and the firewall - the only
+ * barrier on this channel - does not catch person names. A harvested
+ * "Issued to Ramesh Gupta on 12-03-2024" passed it verbatim.
+ *
+ * So labels are masked HERE, at the single point they leave the device, using
+ * the same maskLabel the DOM extraction already applies to element labels.
+ * Masking at source rather than in outboundGuard is deliberate: this is the
+ * only function that produces the planner-facing array, so one mask here
+ * covers every future caller instead of relying on a downstream pass that has
+ * to remember to include crossTabMemory in its field list.
+ *
+ * The token is unaffected, so the planner can still reference the field by
+ * name - it just cannot read whose name it was.
+ *
+ * ## Residual gap — measured, not assumed
+ *
+ * maskLabel's vocabulary is CARD / AADHAAR / PAN / IFSC / EMAIL / PHONE, and
+ * it catches every one of those inside a label. It has no NAME rule, and the
+ * codebase has no person-name detector anywhere — deliberately, because a
+ * person name is two capitalised words, which is indistinguishable from a
+ * product title or a company name, so any rule for it is a false-positive
+ * machine.
+ *
+ * So a label that is pure PROSE still crosses. Measured against the shipped
+ * path, before and after this change:
+ *
+ *   label                                    sent to /plan after masking
+ *   ---------------------------------------  --------------------------------
+ *   Contact ravi.sharma@example.com          Contact [EMAIL]        closed
+ *   Mobile +91 98765 43210                   Mobile [PHONE]         closed
+ *   PAN ABCDE1234F                           PAN [PAN]              closed
+ *   Aadhaar 100000000004                     Aadhaar [AADHAAR]      closed
+ *   Issued to Ravi Sharma on 12-03-2024       unchanged              OPEN
+ *   Aadhaar of Ravi Sharma                    unchanged              OPEN
+ *
+ * The root cause is upstream, in harvestFields: shapes 1 and 3 harvest <dt>
+ * and <th> ROW labels, so on a page that is a statement rather than a form
+ * (a compliance report, an account summary) its content rows become the
+ * "handoff" and its prose becomes labels. Shape 4 already constrains its label
+ * to 2-40 word characters; shapes 1 and 3 constrain nothing.
+ *
+ * The fix belongs there — harvest only genuine form fields, or bound the label
+ * the way shape 4 does. It is deliberately NOT done here, because a label-
+ * shape heuristic was tried and does not work: clause words false-positive on
+ * "Date of birth", and no punctuation/word-count rule catches a bare
+ * "Ravi Sharma" without also discarding legitimate labels like "Account
+ * holder". Until that upstream change lands, treat prose labels as a known,
+ * measured limitation rather than a closed issue.
  */
 export function handoffForPlanner(
   h: TabHandoff | null | undefined
@@ -145,7 +202,9 @@ export function handoffForPlanner(
   if (!h || Object.keys(h.values).length === 0) return undefined;
   return Object.keys(h.values).map((token) => ({
     token,
-    label: h.labels[token] ?? `field ${token.slice(-1)}`,
+    // #166: masked at the boundary rather than in a downstream pass, so every
+    // caller of this function is covered by one mask.
+    label: maskLabel(h.labels[token] ?? `field ${token.slice(-1)}`),
   }));
 }
 
