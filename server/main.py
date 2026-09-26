@@ -5,7 +5,7 @@ Receives sanitized page metadata and returns actionable instructions using LLM o
 Includes 50KB request limit, sliding window rate limiting, and structured JSON logging.
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, root_validator
 from typing import Optional, List, Dict, Any
@@ -23,6 +23,14 @@ load_dotenv(env_path)
 
 from server.middleware.logging import StructuredLoggingMiddleware
 from server.middleware.validators import PayloadSizeLimitMiddleware, RateLimitingMiddleware
+from server.security import (
+    TOKEN_HEADER,
+    assert_safe_bind,
+    configured_origins,
+    is_loopback_only,
+    origin_is_allowed,
+    require_api_token,
+)
 from server.planner import ActionPlanner, ActionSchema, PlannerResult
 import os
 
@@ -64,12 +72,18 @@ app.add_middleware(StructuredLoggingMiddleware)
 app.add_middleware(RateLimitingMiddleware)
 app.add_middleware(PayloadSizeLimitMiddleware)
 
+# Issue #172: CORS was allow_origins=["*"] together with allow_credentials=True.
+# That pair is invalid per spec (browsers reject a wildcard on a credentialed
+# request) and it meant any page the user visited could drive the planner.
+# Now an explicit allowlist, resolved per-request from SERVER_ALLOWED_ORIGINS
+# so it can be changed without a code edit.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=None,
+    allow_origins=configured_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["Content-Type", TOKEN_HEADER],
 )
 
 
@@ -238,6 +252,23 @@ start_time = time.time()
 
 # ===== Endpoints =====
 
+# Issue #172: these routes had no authentication and sat behind a wildcard CORS
+# policy, so any page the user visited could drive the planner. `Depends` rather
+# than a body parameter so the existing request models are untouched.
+def require_authorized(request: Request) -> None:
+    """
+    Gate for state-changing endpoints: shared token + origin allowlist.
+
+    Raises 401 on a bad/missing token and 403 on a disallowed Origin. Both are
+    no-ops in the shapes that a fresh clone produces (no token configured, no
+    Origin header) - see server/security.py for why that still fails closed via
+    the bind host.
+    """
+    require_api_token(request)
+    if not origin_is_allowed(request.headers.get("Origin")):
+        raise HTTPException(status_code=403, detail="Origin not allowed")
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     return HealthResponse(
@@ -248,7 +279,7 @@ async def health_check():
     )
 
 
-@app.post("/plan", response_model=PlanResponse)
+@app.post("/plan", response_model=PlanResponse, dependencies=[Depends(require_authorized)])
 async def plan_action(request: PlanRequest):
     """
     Main endpoint: receives sanitized page state, returns next action.
@@ -330,7 +361,7 @@ async def plan_action(request: PlanRequest):
         )
 
 
-@app.post("/verify-pii")
+@app.post("/verify-pii", dependencies=[Depends(require_authorized)])
 async def verify_pii(request: PlanRequest):
     """
     Verify and categorize detected PII.
@@ -350,7 +381,7 @@ async def verify_pii(request: PlanRequest):
     return {"session_id": str(uuid.uuid4())[:8], "verifications": results}
 
 
-@app.post("/execute")
+@app.post("/execute", dependencies=[Depends(require_authorized)])
 async def execute_action(request: Dict[str, Any]):
     """
     Execute an action and return result.
@@ -366,7 +397,7 @@ async def execute_action(request: Dict[str, Any]):
     }
 
 
-@app.get("/sessions/{session_id}")
+@app.get("/sessions/{session_id}", dependencies=[Depends(require_authorized)])
 async def get_session(session_id: str):
     session = session_store.get(session_id)
     if not session:
@@ -400,4 +431,20 @@ def verify_pii_type(pii_type: str) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    # Issue #172: was a hardcoded 0.0.0.0 bind with no authentication, so the
+    # planner was reachable from every interface on the machine. Now the host
+    # is configurable but defaults to loopback, and assert_safe_bind refuses a
+    # wildcard bind unless SERVER_API_TOKEN is set - so "no token" can never
+    # silently mean "open to the network".
+    host = os.getenv("SERVER_HOST", "127.0.0.1")
+    port = int(os.getenv("SERVER_PORT", "8000"))
+    assert_safe_bind(host)
+    if is_loopback_only():
+        print(
+            "[server] SERVER_API_TOKEN not set - running WITHOUT auth. "
+            "Bound to loopback only. Set SERVER_API_TOKEN before exposing this "
+            "beyond 127.0.0.1 (issue #172)."
+        )
+    print(f"[server] listening on http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)
