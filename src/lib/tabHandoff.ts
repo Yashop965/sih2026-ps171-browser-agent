@@ -16,7 +16,13 @@
  *
  * PII note: harvested values can be personal data. They cross only
  * SW-local state → executor input. Never the /plan payload, never the log.
+ *
+ * Harvested LABELS are page text too, and #166 showed the firewall does not
+ * catch person names, so `handoffForPlanner` masks them before they leave the
+ * device. See that function's docstring.
  */
+
+import { maskLabel } from './dom';
 
 // One row of a content-script field harvest (see content.ts HARVEST_FIELDS).
 export interface HarvestedField {
@@ -138,6 +144,22 @@ export function mergeHandoff(base: TabHandoff, incoming: TabHandoff): TabHandoff
  * The /plan payload section: what the planner may reference. Tokens + labels
  * ONLY — never the values (that would defeat the firewall). Empty handoff ->
  * undefined (the payload key is omitted, so single-tab tasks see no change).
+ *
+ * Issue #166. The docstring above used to call these labels "safe to show the
+ * planner". They are not: a label is raw page text harvested from `<dt>`,
+ * `<label for>`, `<th>` and "Label: value" blocks, and the firewall - the only
+ * barrier on this channel - does not catch person names. A harvested
+ * "Issued to Ramesh Gupta on 12-03-2024" passed it verbatim.
+ *
+ * So labels are masked HERE, at the single point they leave the device, using
+ * the same maskLabel the DOM extraction already applies to element labels.
+ * Masking at source rather than in outboundGuard is deliberate: this is the
+ * only function that produces the planner-facing array, so one mask here
+ * covers every future caller instead of relying on a downstream pass that has
+ * to remember to include crossTabMemory in its field list.
+ *
+ * The token is unaffected, so the planner can still reference the field by
+ * name - it just cannot read whose name it was.
  */
 export function handoffForPlanner(
   h: TabHandoff | null | undefined
@@ -145,7 +167,9 @@ export function handoffForPlanner(
   if (!h || Object.keys(h.values).length === 0) return undefined;
   return Object.keys(h.values).map((token) => ({
     token,
-    label: h.labels[token] ?? `field ${token.slice(-1)}`,
+    // #166: masked at the boundary rather than in a downstream pass, so every
+    // caller of this function is covered by one mask.
+    label: maskLabel(h.labels[token] ?? `field ${token.slice(-1)}`),
   }));
 }
 

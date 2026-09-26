@@ -159,8 +159,24 @@ const LABEL_PII: Array<{ re: RegExp; tag: string }> = [
   // IFSC: four letters, a zero, six alphanumerics
   { re: /\b[A-Z]{4}0[A-Z0-9]{6}\b/g, tag: '[IFSC]' },
   { re: /\b[\w.+-]+@[\w-]+\.[\w.-]{2,}\b/g, tag: '[EMAIL]' },
-  // Indian mobile numbers, with or without country code
-  { re: /\b(?:\+91[\s-]?)?[6-9]\d{9}\b/g, tag: '[PHONE]' },
+  // Indian mobile numbers, with or without a country code.
+  //
+  // Issue #169. The old pattern permitted a separator ONLY after `+91`, so a
+  // separator inside the 10-digit number went unmatched - and `+91 98765
+  // 43210`, the single most common way an Indian mobile is written on a web
+  // page, was NOT masked. Measured 6 of 9 real formats missed.
+  //
+  // The separator is now permitted between any two digits, and the country
+  // code accepts `91` or a domestic `0` prefix, fused or spaced or dashed.
+  // The digit-run guards (`(?<!\d+)`, `(?!\d)`) do the work `\b` used to: `\b`
+  // is defined against WORD characters, so it could not express "not part of a
+  // longer digit run" and let an 11-digit match inside a longer number through.
+  //
+  // Deliberately NOT matching `91234567890`: that is 91 + 9 digits, and the
+  // core after the country code starts with 2, not 6-9. Indian mobiles are
+  // always 10 digits starting 6-9, so a non-match there is correct - the issue
+  // listed it as a gap, but masking it would mean masking non-phone numbers.
+  { re: /(?<![\d+])(?:\+?91[\s-]?|0)?[6-9](?:[\s-]?\d){9}(?!\d)/g, tag: '[PHONE]' },
 ];
 
 function maskLabel(text: string): string {
