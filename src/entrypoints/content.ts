@@ -11,6 +11,7 @@ import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/
 import { visionPipeline } from '../lib/vision/florence2';
 import { bridgeGroundBoxes, type GroundBox } from '../lib/visionGround';
 import { startThinkingPulse, stopThinkingPulse } from '../lib/agentCursor';
+import { validateAadhaar, validatePAN } from '../lib/pii/validators';
 
 /**
  * Content Script - DOM Capture + PII Redaction + Action Execution
@@ -567,7 +568,9 @@ class PIIDetector {
     // Indian PII
     AADHAAR: /^\d{4}\s?\d{4}\s?\d{4}$/u,
     PAN: /^[A-Z]{5}\d{4}[A-Z]{1}$/u,
-    IFSC: /^[A-Z]{4}0[A-Z0-9]{7}$/u,
+    // 11 characters, not 12: a real IFSC is 4 letters + '0' + 6 alphanumerics.
+    // The old {7} made this pattern unable to match any real IFSC (#163, #168).
+    IFSC: /^[A-Z]{4}0[A-Z0-9]{6}$/u,
     PHONE: /^\+?[1-9]\d{9,11}$/u,
     EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]+$/u,
 
@@ -686,56 +689,22 @@ class PIIDetector {
   }
 
   // Verhoeff algorithm for Aadhaar validation
+  // Aadhaar check digit. The Verhoeff implementation lives in
+  // src/lib/pii/validators.ts and is imported at the top of this file - it used
+  // to be duplicated here with a wrong `p` table, which rejected ~90% of real
+  // Aadhaar numbers (#168). Kept as a thin method so the call sites below are
+  // unchanged.
   private verhoeffCheck(digits: string): boolean {
-    if (digits.length !== 12) return false;
-    if (!/^\d{12}$/.test(digits)) return false;
-
-    const d = [
-      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-      [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-      [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
-      [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-      [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
-      [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
-      [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
-      [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
-      [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
-      [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
-    ];
-
-    const p = [
-      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-      [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-      [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
-      [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-      [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
-      [5, 0, 9, 8, 7, 4, 3, 2, 1, 6],
-      [6, 0, 8, 7, 5, 2, 1, 3, 4, 9],
-      [7, 0, 5, 6, 8, 3, 4, 2, 9, 1],
-      [8, 0, 3, 4, 5, 9, 6, 1, 2, 7],
-      [9, 0, 2, 1, 3, 8, 7, 4, 6, 5],
-    ];
-
-    let checksum = 0;
-    const reversed = digits.split('').reverse().map(Number);
-
-    for (let i = 0; i < reversed.length - 1; i++) {
-      checksum = d[checksum][p[i % 8][reversed[i]]];
-    }
-
-    return checksum === reversed[reversed.length - 1];
+    return validateAadhaar(digits);
   }
 
   // PAN validation
   private validatePAN(pan: string): boolean {
-    if (!/^[A-Z]{5}\d{4}[A-Z]{1}$/.test(pan)) return false;
-
-    const chars = pan.split('');
-    // Third character indicates entity type
-    const entityTypes = ['C', 'P', 'H', 'F', 'C', 'T', 'A', 'J', 'G', 'L'];
-    if (!entityTypes.includes(chars[2])) return false;
-
-    return true;
+    // Delegates to the single validator. The copy that used to live here
+    // checked index 2 (the third letter) instead of index 3 (the entity-type
+    // character), so it both rejected valid PANs whose third letter was not in
+    // its list and accepted invalid entity types entirely.
+    return validatePAN(pan);
   }
 
   // Luhn algorithm for credit cards

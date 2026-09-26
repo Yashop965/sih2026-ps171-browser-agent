@@ -1,6 +1,6 @@
 /**
  * Advanced Privacy & Security Unit Tests (Issue #11)
- * 
+ *
  * Tests for:
  * 1. Password field auto-blacklisting (types & name/id/label patterns)
  * 2. Outbound payload security scanner (scanOutboundPayload)
@@ -58,7 +58,7 @@ describe('Issue #11 - Advanced Privacy & Password Blacklisting', () => {
         url: 'https://example.com',
         title: 'Safe Page',
         interactiveElements: [{ id: 1, role: 'button', label: 'Submit' }],
-        detectedPII: [{ type: 'EMAIL', confidence: 0.95, verified: true }]
+        detectedPII: [{ type: 'EMAIL', confidence: 0.95, verified: true }],
       };
       const result = scanOutboundPayload(safePayload);
       assert(result.safe === true);
@@ -68,9 +68,7 @@ describe('Issue #11 - Advanced Privacy & Password Blacklisting', () => {
     it('should block transmission if payload contains unredacted password values', () => {
       const unsafePayload = {
         url: 'https://example.com',
-        interactiveElements: [
-          { id: 1, role: 'textbox', value: 'my_secret_password_123' }
-        ]
+        interactiveElements: [{ id: 1, role: 'textbox', value: 'my_secret_password_123' }],
       };
       const result = scanOutboundPayload(unsafePayload);
       expect(result.safe).toBe(false);
@@ -78,10 +76,18 @@ describe('Issue #11 - Advanced Privacy & Password Blacklisting', () => {
     });
 
     it('should block transmission if payload contains raw verified 12-digit Aadhaar', () => {
-      // 12-digit number passing Verhoeff checksum: 100000000009
+      // 100000000004 passes the canonical Verhoeff check digit.
+      //
+      // The fixture here used to be 100000000009, described in the comment as
+      // "12-digit number passing Verhoeff checksum". It does NOT - it only ever
+      // passed against the broken `p` table in src/lib/pii/validators.ts, which
+      // accepted roughly one real Aadhaar in ten (#162, #175). A fixture chosen
+      // because the implementation agreed with it cannot detect an
+      // implementation defect, so it is replaced with one verified against the
+      // algorithm rather than against this codebase.
       const unsafePayload = {
         url: 'https://example.com',
-        text: 'Aadhaar: 100000000009'
+        text: 'Aadhaar: 100000000004',
       };
       const result = scanOutboundPayload(unsafePayload);
       expect(result.safe).toBe(false);
@@ -105,7 +111,7 @@ describe('Issue #11 - Advanced Privacy & Password Blacklisting', () => {
       const manager = new PIIManager();
       const detections = await manager.scanDocumentAsync();
 
-      const faceDetections = detections.filter(d => d.type === 'FACE');
+      const faceDetections = detections.filter((d) => d.type === 'FACE');
       expect(faceDetections.length).toBeGreaterThan(0);
       expect(faceDetections[0].metadata?.fallback).toBe(true);
     });

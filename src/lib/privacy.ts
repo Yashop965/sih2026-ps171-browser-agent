@@ -5,6 +5,7 @@
  */
 
 import type { PrivacyEvent, PIIType } from '../types';
+import { validateAadhaar, validatePAN as validatePANShared } from './pii/validators';
 
 export interface PIIDetection {
   type: string;
@@ -27,7 +28,7 @@ const PATTERNS: Record<string, { regex: RegExp; confidence: number }> = {
     confidence: 0.7,
   },
   IFSC: {
-    regex: /\b([A-Z]{4}0[A-Z0-9]{7})\b/g,
+    regex: /\b([A-Z]{4}0[A-Z0-9]{6})\b/g, // 11 chars, not 12 (#163, #168)
     confidence: 0.85,
   },
   PHONE: {
@@ -165,7 +166,10 @@ function maskValue(value: string, type: string): string {
       return `${digits.slice(0, 4)} **** **** ${digits.slice(-4)}`;
     }
     case 'IFSC':
-      return value.replace(/([A-Z]{4})0([A-Z0-9]{7})/, '$1********');
+      // 11 characters, not 12: 4 letters + '0' + 6 alphanumerics. The old
+      // {7} meant this mask never matched a real IFSC, so IFSC values were
+      // left in place by the redactor (#163, #168).
+      return value.replace(/([A-Z]{4}0[A-Z0-9]{6})/, '$1********');
     case 'PHONE':
       return value.replace(/(\+\d{2}|\d{2}) (\d{5}) (\d{5})/, '$1 $2 *****');
     case 'EMAIL': {
@@ -220,44 +224,18 @@ export function createPrivacyEvent(
 }
 
 // Internal validators for scanner
+// Aadhaar check digit. The Verhoeff implementation lives in
+// src/lib/pii/validators.ts - it used to be duplicated here with a wrong `p`
+// table, which rejected ~90% of real Aadhaar numbers (#162, #175).
 function verhoeffCheck(digits: string): boolean {
-  if (digits.length !== 12 || !/^\d{12}$/.test(digits)) return false;
-  const d = [
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-    [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
-    [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-    [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
-    [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
-    [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
-    [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
-    [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
-    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
-  ];
-  const p = [
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-    [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
-    [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-    [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
-    [5, 0, 9, 8, 7, 4, 3, 2, 1, 6],
-    [6, 0, 8, 7, 5, 2, 1, 3, 4, 9],
-    [7, 0, 5, 6, 8, 3, 4, 2, 9, 1],
-    [8, 0, 3, 4, 5, 9, 6, 1, 2, 7],
-    [9, 0, 2, 1, 3, 8, 7, 4, 6, 5],
-  ];
-  let checksum = 0;
-  const reversed = digits.split('').reverse().map(Number);
-  for (let i = 0; i < reversed.length - 1; i++) {
-    checksum = d[checksum][p[i % 8][reversed[i]]];
-  }
-  return checksum === reversed[reversed.length - 1];
+  return validateAadhaar(digits);
 }
 
+// Delegates to the single validator. The copy that used to live here checked
+// index 2 (the third letter) instead of index 3 (the entity-type character),
+// so it both rejected valid PANs and accepted invalid entity types.
 function validatePAN(pan: string): boolean {
-  if (!/^[A-Z]{5}\d{4}[A-Z]{1}$/.test(pan)) return false;
-  const entityTypes = ['C', 'P', 'H', 'F', 'C', 'T', 'A', 'J', 'G', 'L'];
-  return entityTypes.includes(pan[2]);
+  return validatePANShared(pan);
 }
 
 function luhnCheck(number: string): boolean {

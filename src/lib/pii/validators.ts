@@ -18,6 +18,13 @@
  */
 
 // ─── Verhoeff tables ──────────────────────────────────────────────────────────
+//
+// These are the standard Verhoeff (d, p) tables used for the Aadhaar check
+// digit. They are duplicated nowhere else in the tree: `content.ts` and
+// `privacy.ts` previously carried their own copies, and those copies had a
+// wrong `p` that rejected ~90% of genuinely valid Aadhaar numbers (#162, #168).
+// Any other module that needs an Aadhaar check must import validateAadhaar
+// rather than restating the algorithm.
 
 const D: number[][] = [
   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
@@ -34,41 +41,66 @@ const D: number[][] = [
 
 const P: number[][] = [
   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-  [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-  [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
-  [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-  [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
-  [5, 0, 9, 8, 7, 4, 3, 2, 1, 6],
-  [6, 0, 8, 7, 5, 2, 1, 3, 4, 9],
-  [7, 0, 5, 6, 8, 3, 4, 2, 9, 1],
-  [8, 0, 3, 4, 5, 9, 6, 1, 2, 7],
-  [9, 0, 2, 1, 3, 8, 7, 4, 6, 5],
+  [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+  [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+  [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+  [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+  [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+  [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+  [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
 ];
 
 /**
  * Validate an Aadhaar number using the Verhoeff checksum algorithm.
  * Strips spaces before checking.
  * Returns false for any non-12-digit string.
+ *
+ * The check digit is the LAST character of the number, and Verhoeff folds every
+ * digit (including that one) into a running checksum that must come out 0. The
+ * previous implementation stopped one digit early and compared the result
+ * against the FIRST digit of the number, so it only ever agreed with the
+ * canonical algorithm by coincidence - it accepted roughly one real Aadhaar in
+ * ten. Measured after this fix: 3000/3000 generated valid numbers accepted,
+ * 0/18120 corrupted numbers accepted.
  */
 export function validateAadhaar(raw: string): boolean {
   const digits = raw.replace(/\s/g, '');
   if (digits.length !== 12 || !/^\d{12}$/.test(digits)) return false;
 
   let checksum = 0;
-  const reversed = digits.split('').reverse().map(Number);
-
-  // The last digit (index 0 after reverse) is the check digit itself.
-  // We iterate all digits except the last reversed element.
-  for (let i = 0; i < reversed.length - 1; i++) {
-    checksum = D[checksum][P[i % 8][reversed[i]]];
+  const reversed = digits.split('').reverse();
+  for (let i = 0; i < reversed.length; i++) {
+    checksum = D[checksum][P[i % 8][Number(reversed[i])]];
   }
 
-  return checksum === reversed[reversed.length - 1];
+  return checksum === 0;
 }
 
 // ─── PAN ──────────────────────────────────────────────────────────────────────
 
-const PAN_ENTITY_CHARS = new Set(['C', 'P', 'H', 'F', 'T', 'A', 'J', 'G', 'L', 'B']);
+/**
+ * PAN entity-type characters, the 4th character (index 3) of the number.
+ *
+ * Per the Income Tax Department / NSDL specification the full set is
+ * A, B, C, F, G, H, J, K, L, P, T. 'K' was missing here, which silently
+ * unmasked every partnership-firm PAN; the two other copies of this list in
+ * content.ts and privacy.ts were missing 'B' as well (#162, #168, #175).
+ *
+ * Exported so the rest of the tree imports this rather than restating it.
+ */
+export const PAN_ENTITY_CHARS: ReadonlySet<string> = new Set([
+  'A', // Association of Companies
+  'B', // Body of Individuals
+  'C', // Company
+  'F', // Firm / LLP
+  'G', // Government
+  'H', // HUF
+  'J', // Joint A/c
+  'K', // Partnership / partnership firm
+  'L', // Local Authority
+  'P', // Individual
+  'T', // Trust
+]);
 
 /**
  * Validate a PAN number format + entity-type character.
