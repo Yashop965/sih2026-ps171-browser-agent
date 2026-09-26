@@ -1233,24 +1233,42 @@ export default defineBackground({
         // calling sendResponse). Bridge them into the callback style used by
         // every other case so the whole switch has ONE return contract - which
         // is also what the onMessage type requires.
+        //
+        // The `.catch` is NOT optional. Once we return `true` the message
+        // channel is held open, so a rejected handler with no catch would
+        // leave the caller waiting forever. On `main` these returned their
+        // promise to Chrome, which resolved the caller with undefined and set
+        // runtime.lastError. Four of the five have no internal try/catch and
+        // can reject (handleStartSession awaits browser.tabs.query), so they
+        // would hang rather than report. Same failure shape as #174.
         case 'CAPTURE_SCREENSHOT':
-          captureScreenshot(message, sender).then(sendResponse);
+          captureScreenshot(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
           return true;
 
         case 'START_SESSION':
-          handleStartSession(message, sender).then(sendResponse);
+          handleStartSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
           return true;
 
         case 'UPDATE_SESSION':
-          handleUpdateSession(message, sender).then(sendResponse);
+          handleUpdateSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
           return true;
 
         case 'COMPLETE_SESSION':
-          handleCompleteSession(message, sender).then(sendResponse);
+          handleCompleteSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
           return true;
 
         case 'GET_SESSION':
-          handleGetSession(message, sender).then(sendResponse);
+          handleGetSession(message, sender)
+            .then(sendResponse)
+            .catch((err) => sendResponse({ error: String(err) }));
           return true;
 
         case 'START_TASK':
