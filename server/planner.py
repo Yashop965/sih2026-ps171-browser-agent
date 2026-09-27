@@ -558,6 +558,29 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
                 "NAVIGATE action missing url"
             )
 
+        # #192: a RELATIVE url is equally unusable, and the prompt telling the
+        # model "MUST be absolute" is a request, not a check. The service
+        # worker has no page context, so a relative target resolves onto a
+        # placeholder host and the navigation does nothing.
+        #
+        # This matters more than it looks: a navigate failure sets the run
+        # status to 'failed' in agentRunner, which ends the whole task. So a
+        # relative url does not waste a step - it kills the run. Catching it
+        # here degrades to the same safe fallback a missing url already uses.
+        if raw_type == "NAVIGATE" and url:
+            candidate = url.strip()
+            # Protocol-relative (//host/path) and absolute both carry their
+            # own authority and are fine. Anything else is relative.
+            has_authority = "://" in candidate or candidate.startswith("//")
+            if not has_authority:
+                logger.warning(
+                    "NAVIGATE url is relative (%s) - falling back", candidate[:80]
+                )
+                return self._fallback_action(
+                    interactive_elements,
+                    f"NAVIGATE url must be absolute, got {candidate[:80]!r}",
+                )
+
         # KEY: optional. If a targetId is present it must be a real element
         # (the executor's resolve() would throw on a stale/unknown id); if it
         # is absent the key lands on the focused element / body, which is a

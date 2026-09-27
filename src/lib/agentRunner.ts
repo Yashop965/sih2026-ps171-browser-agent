@@ -399,8 +399,15 @@ export interface AgentRunnerDeps {
   extract: () => Promise<ExtractResult>;
   /** Execute one planner action on the target tab. */
   execute: (action: AgentActionLike) => Promise<ExecuteResult>;
-  /** Move the target tab to a URL (background tabs.update + wait-for-load). */
-  navigate: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Move the target tab to a URL (background tabs.update + wait-for-load).
+   *
+   * `recoverable` distinguishes "the browser could not do this" from "this
+   * instruction was wrong". A recoverable failure - a refused scheme, a
+   * relative url the service worker cannot resolve - leaves the run alive so
+   * the planner can be told and try again. Everything else ends the run.
+   */
+  navigate: (url: string) => Promise<{ ok: boolean; error?: string; recoverable?: boolean }>;
   /** POST the /plan request. Must return the parsed JSON (or null when aborted). */
   fetchPlan: (payload: unknown, signal?: AbortSignal) => Promise<any>;
   /** Injectable sleep (tests use a 0-delay stub). */
@@ -1500,6 +1507,18 @@ export class AgentRunner {
         this.scrollGuard.noteOtherAction();
         this.recentActionHistory = [];
         await d.delay(600);
+      } else if (r.recoverable) {
+        // #192: a REFUSED url is a bad instruction, not a broken browser. The
+        // planner can be told and will try again, so ending the run here
+        // throws away a task that was one malformed url away from finishing.
+        // The refusal itself is a security control and is unaffected - this
+        // only changes what happens to the RUN afterwards.
+        this.log(`⚠️ Navigate refused (${r.error ?? 'unknown'}) - re-planning`);
+        this.scrollGuard.noteOtherAction();
+        // A refused navigation is a step, so the goal backstop should still
+        // count it - otherwise a run can skip its final check by looping on a
+        // url the planner keeps getting wrong.
+        this.actionsSinceGoalCheck += 1;
       } else {
         this.log(`❌ Navigate failed: ${r.error ?? 'unknown'}`);
         this.state.status = 'failed';
