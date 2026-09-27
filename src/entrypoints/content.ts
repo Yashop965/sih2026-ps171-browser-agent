@@ -44,10 +44,13 @@ type AgentRequest =
   | { type: 'PING' }
   | { type: 'capturePage' }
   | { type: 'HIGHLIGHT'; selector: string }
-  | { type: 'VISION_EXTRACT' } // New: DOM + Vision extraction
-  | { type: 'VISION_OCR' } // #100: on-device OCR confirm
+  // #176: VISION_EXTRACT / VISION_OCR / VISION_STATUS were removed from this
+  // union along with their handlers. They were never sent to a tab, and the
+  // handlers they reached could only ever report the idle default. Kept out of
+  // `isAgentRequest` too, so a stale sender is rejected at the guard rather
+  // than accepted and falling through to a bare `return` (which answers
+  // `undefined` and reads as a lost message).
   | { type: 'CURSOR_THINKING'; on: boolean } // #132: agent-cursor breathing while the planner LLM is thinking
-  | { type: 'VISION_STATUS' } // #136: on-device VLM live-indicator status
   | { type: 'HARVEST_FIELDS' } // #141: label/value pairs from this tab for cross-tab handoff
   | { type: 'VISION_GROUND'; boxes: GroundBox[]; query?: string }; // #115: bridge Florence-2 boxes -> DOM nodes
 
@@ -60,10 +63,7 @@ function isAgentRequest(msg: unknown): msg is AgentRequest {
     t === 'PING' ||
     t === 'capturePage' ||
     t === 'HIGHLIGHT' ||
-    t === 'VISION_EXTRACT' ||
-    t === 'VISION_OCR' ||
     t === 'CURSOR_THINKING' ||
-    t === 'VISION_STATUS' ||
     t === 'HARVEST_FIELDS' ||
     t === 'VISION_GROUND'
   );

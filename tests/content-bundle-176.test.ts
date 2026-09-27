@@ -30,6 +30,24 @@ describe('the content script does not pull in the VLM', () => {
     }
   });
 
+  it('rejects the removed types at the request guard', () => {
+    // Found in review: the handlers were gone but isAgentRequest still
+    // returned true for these types, so a stale sender would be ACCEPTED and
+    // then fall through to a bare `return` - answering `undefined`, which a
+    // caller cannot distinguish from a lost message. The union and the guard
+    // have to agree with the handlers.
+    const guard = content.slice(content.indexOf('function isAgentRequest'));
+    for (const t of ['VISION_EXTRACT', 'VISION_OCR', 'VISION_STATUS']) {
+      expect(guard, `${t} still passes the guard`).not.toContain(`'${t}'`);
+    }
+  });
+
+  it('still accepts VISION_GROUND, which the offscreen host really sends', () => {
+    // The one VISION_* type that is live. The grounding fallback sends it on
+    // every near-empty-DOM page, so removing it would be a real regression.
+    expect(content).toContain("message.type === 'VISION_GROUND'");
+  });
+
   it('keeps no removed helper', () => {
     for (const fn of [
       'extractWithVision',
