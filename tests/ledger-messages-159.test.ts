@@ -13,11 +13,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import {
-  handleLedgerMessage,
-  isLedgerMessage,
-  LEDGER_MESSAGE_TYPES,
-} from '../src/lib/ledgerMessages';
+import { handleLedgerMessage, LEDGER_MESSAGE_TYPES } from '../src/lib/ledgerMessages';
 
 function makeLedgers() {
   const privacy = { getEntries: vi.fn(() => [{ id: 1 }]), clear: vi.fn() };
@@ -98,9 +94,18 @@ describe('non-ledger messages are not claimed', () => {
     }
   );
 
-  it('isLedgerMessage agrees with the dispatch', () => {
-    for (const t of LEDGER_MESSAGE_TYPES) expect(isLedgerMessage(t)).toBe(true);
-    expect(isLedgerMessage('EXTRACT')).toBe(false);
+  it('every listed type is actually handled, and nothing else is', () => {
+    // Replaces an `isLedgerMessage()` predicate test, which compared the array
+    // against itself via the array and so could not fail. Here the list is
+    // checked against the real dispatch, and the response must be defined -
+    // `undefined` is the dispatch's "not a ledger message" answer.
+    for (const t of LEDGER_MESSAGE_TYPES) {
+      const L = makeLedgers();
+      const res = handleLedgerMessage({ type: t }, L.reader, L.clearable);
+      expect(res, `${t} fell through to the default case`).toBeDefined();
+    }
+    const L = makeLedgers();
+    expect(handleLedgerMessage({ type: 'EXTRACT' }, L.reader, L.clearable)).toBeUndefined();
   });
 });
 

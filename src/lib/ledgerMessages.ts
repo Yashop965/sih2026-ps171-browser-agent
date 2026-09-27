@@ -36,7 +36,15 @@ export interface LedgerClearable {
   clear(): void;
 }
 
-export type LedgerMessageResponse = unknown;
+/**
+ * What a ledger case can answer with: the entries themselves, or
+ * `{ success: true }` for CLEAR_LEDGER.
+ *
+ * Deliberately `unknown` - the two ledger classes return different entry
+ * shapes and this module must not pretend otherwise. Not exported: callers
+ * only pass the value to `sendResponse`, which accepts it as-is.
+ */
+type LedgerMessageResponse = unknown;
 
 /**
  * The three ledger cases, as one dispatch.
@@ -69,13 +77,16 @@ export function handleLedgerMessage(
   }
 }
 
-/** The message types this module owns. */
+/**
+ * The message types this module owns.
+ *
+ * NOT exported as a runtime predicate: `handleLedgerMessage` dispatches with a
+ * `switch`, so an `isLedgerMessage()` helper would be a second source of truth
+ * for the same list, free to drift. The array is the single declaration and the
+ * tests read it from here.
+ */
 export const LEDGER_MESSAGE_TYPES = [
   'GET_PRIVACY_LEDGER',
   'GET_AUDIT_LOG',
   'CLEAR_LEDGER',
 ] as const;
-
-export function isLedgerMessage(type: string): boolean {
-  return (LEDGER_MESSAGE_TYPES as readonly string[]).includes(type);
-}
