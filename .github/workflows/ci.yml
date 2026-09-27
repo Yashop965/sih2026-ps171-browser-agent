@@ -78,8 +78,7 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Now BLOCKING, and green as of #178: `npm audit --omit=dev` reports 0
-    # findings.
+    # Now BLOCKING, and green as of #178 (production tree) and #183 (full tree).
     #
     # It used to run `npm audit --production` and exit non-zero on any
     # high-severity finding from `sharp` (a transitive native image dep of
@@ -89,13 +88,13 @@ jobs:
     # never reaches the browser bundle: a clean 23.92 MB production build
     # contains zero references to sharp, libvips or libheif.
     #
-    # Scoped to --omit=dev on purpose. The full tree still reports 11 findings
-    # (4 critical, 5 high) that all arrive transitively through `wxt` and its
-    # Firefox/`web-ext` dev tooling - `shell-quote`, `tar`, `adm-zip`, `giget`,
-    # `node-notifier`, `uuid`. None of them appear in the shipped extension
-    # either, and forcing those would mean replacing the build tool itself.
-    # They are dev-only, never executed on a user's machine by the extension,
-    # and are tracked separately for an upstream wxt fix.
+    # The 11 findings this step used to be scoped away from are now ZERO, and
+    # not by upgrading `wxt` - every fix npm offered was a breaking major of
+    # the build tool itself. They are cleared by `overrides` on the leaf
+    # packages: tar ^7.5.22, shell-quote ^1.10.0, tmp ^0.2.7, uuid ^14.0.2,
+    # adm-zip ^0.6.1 - the same lever #178 used for `sharp`. Four of the
+    # eleven (`giget`, `fx-runner`, `web-ext-run`, `firefox-profile`) are
+    # wxt's own pinned ranges and clear transitively from those leaf fixes.
     steps:
     - uses: actions/checkout@v4
 
@@ -108,8 +107,13 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: npm audit (production)
-      run: npm audit --omit=dev
+    # FULL tree, not the production subset: 0 findings as of #183.
+    #
+    # Scoping this to the production subset is what let the #183 findings sit
+    # unnoticed, and it would not even have caught `sharp` - which is
+    # transitive to a PRODUCTION package via @huggingface/transformers.
+    - name: npm audit (full tree)
+      run: npm audit
 
     - name: Python safety
       run: |
