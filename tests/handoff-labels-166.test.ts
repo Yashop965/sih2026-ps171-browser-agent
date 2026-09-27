@@ -64,17 +64,24 @@ describe('#166 structured PII in a label is masked', () => {
   });
 });
 
-describe('#166 KNOWN GAP — prose labels are not masked', () => {
-  // These are the issue's own headline examples. They still cross. The tests
-  // are written to DOCUMENT that, not to assert it is fixed - if one starts
-  // failing because someone fixed the upstream harvest, that is good news and
-  // the docstring should be updated in the same change.
-  it('a person name in a prose label still reaches the planner (documented gap)', () => {
+describe('#166 KNOWN GAP — narrowed by #189, not eliminated', () => {
+  // These were the issue's own headline examples. #189 fixed the leak UPSTREAM
+  // in `harvestFields`, so `Ravi Sharma` never becomes a label to mask. What
+  // remains is a genuinely undecidable case, documented here rather than
+  // papered over: a bare name in a well-formed label/value row.
+  //
+  // `maskLabel` is unchanged and still has no NAME rule — adding one is the
+  // false-positive machine #189 explicitly declined. These tests now pin the
+  // RESIDUAL risk at the masking layer, where it belongs.
+  it('maskLabel still passes prose through — #189 fixes this upstream', () => {
     const out = sent('Issued to Ravi Sharma on 12-03-2024');
     expect(out).toBe('Issued to Ravi Sharma on 12-03-2024');
   });
 
-  it('a bare name label also still reaches the planner (documented gap)', () => {
+  it('the residual case is a bare name, which harvestFields can no longer gate', () => {
+    // <th>Ravi Sharma</th><td>Account Holder</td> is structurally identical
+    // to <th>Account holder</th><td>Ravi Sharma</td>. There is no signal that
+    // separates them, so this crosses. Documented, not fixed.
     expect(sent('Ravi Sharma')).toBe('Ravi Sharma');
   });
 

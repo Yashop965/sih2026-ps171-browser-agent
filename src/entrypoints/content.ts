@@ -132,6 +132,65 @@ export default defineContentScript({
      */
 
     /**
+     * #189: is this a FIELD LABEL paired with a FIELD VALUE, or page prose?
+     *
+     * Shapes 1 (`<dt>/<dd>`) and 3 (`<th>/<td>`) constrained the label not at
+     * all, so on a page that is a *statement* rather than a *form* - a
+     * compliance report, an account summary, a KYC status page - its content
+     * rows became the handoff and its prose became labels. A person's name
+     * then crossed to `/plan`, because a name is not a structured PII type
+     * and `maskLabel` has no rule for one.
+     *
+     * There is deliberately NO person-name detector here. A name is two
+     * capitalised words, which also matches every product title and company
+     * name; a false positive costs the planner the field identity the handoff
+     * exists to provide. An earlier attempt gated on connective words
+     * (`to`/`of`/`for`/`issued`) and was reverted precisely because it
+     * false-positived on `Date of birth` and `Date of issue` - real labels the
+     * planner needs. Do not re-derive that version.
+     *
+     * So the gate removes PROSE, on two independent signals:
+     *
+     *   1. LABEL is label-shaped - short, few words, no sentence punctuation.
+     *      This is the assumption shape 4 already made, now applied to all
+     *      four shapes so the policy cannot drift between them.
+     *   2. VALUE is value-shaped - bounded, and not a sentence or a clause of
+     *      legalese. A statement row reads "Active, subject to verification.";
+     *      a form field reads "Active".
+     *
+     * Signal 2 is what closes rows whose VALUE is prose - the common
+     * statement-page case, where the value is a clause ("Active, subject to
+     * verification.") rather than a field value.
+     *
+     * KNOWN LIMIT, by design: a BARE name in a well-formed row
+     * (`<th>Ravi Sharma</th><td>Account Holder</td>`) still crosses. It is
+     * indistinguishable from `Account holder` by every structural signal
+     * available here, and closing it would mean guessing names - the
+     * false-positive machine this deliberately avoids.
+     */
+    function looksLikeFieldPair(label: string, value: string): boolean {
+      const l = label.trim().replace(/\s+/g, ' ');
+      const v = value.trim().replace(/\s+/g, ' ');
+
+      // 1. label-shaped
+      if (!l || l.length > 40) return false;
+      if (l.split(' ').length > 5) return false;
+      if (/[.,;!?]/.test(l)) return false;
+
+      // 2. value-shaped
+      if (!v || v.length > 200) return false;
+      if (v.split(' ').length > 12) return false;
+      if (/[.:;]$/.test(v)) return false;
+      if (
+        /subject to|as on|as of|hereby|unless |the following|in accordance|notwithstanding|provided that|entitled to/i.test(
+          v
+        )
+      )
+        return false;
+
+      return true;
+    }
+    /**
      * #141: cross-tab handoff harvest. Pull the page's labeled value
      * pairs (definition lists, label→input, two-cell table rows,
      * name/value lists) so the SW can carry them to a later tab as
@@ -147,6 +206,12 @@ export default defineContentScript({
         const l = label.trim().replace(/\s+/g, ' ');
         const v = value.trim().replace(/\s+/g, ' ');
         if (!v || v.length > 200) return;
+        // #189: reject prose labels at the single choke point every shape
+        // funnels through, rather than patching each shape. Shapes 1 and 3
+        // (dt/dd, th/td) were the leak; shape 4 already filtered and shape 2
+        // is a real form label by construction, so applying the gate to all
+        // four is safe and cannot drift between them.
+        if (!looksLikeFieldPair(l, v)) return;
         const key = l + '→' + v;
         if (seen.has(key)) return;
         seen.add(key);
