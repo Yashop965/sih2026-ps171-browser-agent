@@ -48,6 +48,14 @@ export interface NavUrlResult {
   url?: string;
   /** Why it was refused. Present only when !ok. */
   error?: string;
+  /**
+   * The target was relative and needed a real base to resolve against.
+   *
+   * When this is true the caller's `url` is a placeholder that will NOT
+   * resolve - see `base`. Present so the caller can either supply a base and
+   * retry, or report a precise reason instead of a generic failure.
+   */
+  needsBase?: boolean;
 }
 
 /** Schemes the extension will navigate a tab to. Everything else is refused. */
@@ -61,7 +69,7 @@ const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
  */
 const RELATIVE_BASE = 'http://relative-target.invalid';
 
-export function resolveNavUrl(target: unknown): NavUrlResult {
+export function resolveNavUrl(target: unknown, base?: string): NavUrlResult {
   // A missing or non-string target is a model bug, not a URL. Refuse it
   // explicitly rather than letting `new URL(undefined, base)` coerce to the
   // string "undefined" and navigate somewhere surprising.
@@ -69,9 +77,22 @@ export function resolveNavUrl(target: unknown): NavUrlResult {
     return { ok: false, error: 'invalid url' };
   }
 
+  // A base is only trusted if it is itself an absolute http(s) URL. Anything
+  // else - including a non-string - falls back to the placeholder, so a bad
+  // base can never widen what is reachable.
+  let baseHref = RELATIVE_BASE;
+  if (typeof base === 'string' && base.trim()) {
+    try {
+      const b = new URL(base);
+      if (ALLOWED_PROTOCOLS.has(b.protocol)) baseHref = b.href;
+    } catch {
+      // Not a usable base - keep the placeholder.
+    }
+  }
+
   let parsed: URL;
   try {
-    parsed = new URL(target, RELATIVE_BASE);
+    parsed = new URL(target, baseHref);
   } catch {
     return { ok: false, error: 'invalid url' };
   }
@@ -82,5 +103,16 @@ export function resolveNavUrl(target: unknown): NavUrlResult {
     return { ok: false, error: `refused protocol: ${parsed.protocol}` };
   }
 
-  return { ok: true, url: parsed.href };
+  // If the target carried its own authority (absolute, or protocol-relative)
+  // the base was ignored, and there is nothing to warn about. If it did not,
+  // the result only works because we supplied a real base; if we fell back to
+  // the placeholder, say so, because that URL will not load.
+  const targetHasAuthority = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target) || target.startsWith('//');
+  const usedPlaceholder = baseHref === RELATIVE_BASE;
+
+  return {
+    ok: true,
+    url: parsed.href,
+    needsBase: !targetHasAuthority && usedPlaceholder,
+  };
 }

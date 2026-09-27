@@ -756,6 +756,25 @@ export default defineBackground({
     // number or object through to the URL layer.
     const navigateChannel = async (url: unknown): Promise<{ ok: boolean; error?: string }> => {
       try {
+        // #192: resolve the tab FIRST, because a relative target needs a real
+        // base and the tab's current url is the only real base available in a
+        // service worker.
+        //
+        // This reorder has one side effect worth naming, which the review of
+        // #191 caught: `driveTab` is not pure. When `currentTargetTab` is set
+        // but its tab is gone or no longer a web page, driveTab clears
+        // `currentTargetTab` and falls back to the active tab. So a REFUSED
+        // url (javascript:, a relative url with no usable base) now clears
+        // that state, where previously the refusal happened first and left it
+        // alone.
+        //
+        // That is the safer of the two behaviours: the pinned tab is already
+        // dead, and leaving a stale id set is what makes a later
+        // tabs.query fallback drift a run onto the wrong tab. The next
+        // driveTab call re-establishes the target from the active tab anyway.
+        const tabId = await driveTab();
+        if (tabId === undefined) return { ok: false, error: 'No web tab found' };
+
         // #159: the same policy the NAVIGATE_TAB handler uses, now shared
         // rather than duplicated. This copy had drifted in the same two ways:
         // the `http://invalid` placeholder base, and - the real one - no
@@ -765,11 +784,33 @@ export default defineBackground({
         // This is the path that ACTUALLY carries a planner NAVIGATE action
         // (the runner calls d.navigate), so extracting only the NAVIGATE_TAB
         // handler would have left the live one on the old behaviour.
-        const nav = resolveNavUrl(url);
+        //
+        // `base` is the tab's current url, read fresh: a relative target the
+        // planner emitted ("/profile") resolves against the page the agent is
+        // actually on. Without it the target lands on the .invalid placeholder
+        // and the navigation silently fails.
+        const currentUrl = await browser.tabs
+          .get(tabId)
+          .then((t) => t.url)
+          .catch(() => undefined);
+        const nav = resolveNavUrl(url, currentUrl);
         if (!nav.ok || !nav.url) return { ok: false, error: nav.error ?? 'invalid url' };
+
+        // Relative target and no usable base - the resolved url points at the
+        // placeholder host and will not load. Say so precisely, because
+        // "invalid url" would send the planner looking for a syntax problem
+        // that is not there.
+        if (nav.needsBase) {
+          return {
+            ok: false,
+            error:
+              currentUrl === undefined
+                ? 'relative url but the current page url is unknown - use an absolute url'
+                : 'relative url could not be resolved - use an absolute url',
+          };
+        }
+
         const target = nav.url;
-        const tabId = await driveTab();
-        if (tabId === undefined) return { ok: false, error: 'No web tab found' };
         await browser.tabs.update(tabId, { url: target });
         await waitForTabLoad(tabId, 10_000);
         // #141: a navigation inside the task re-asserts the target so a later
@@ -1310,9 +1351,29 @@ export default defineBackground({
               // test could reach without standing up a whole service worker
               // with a fake browser.tabs, and it guards the only path that
               // navigates a tab without going through the content script.
-              const nav = resolveNavUrl(target);
+              //
+              // #192: the base is this tab's current url, so a relative target
+              // resolves against the page being navigated. Review of #191 found
+              // this handler was still calling resolveNavUrl with no base, so a
+              // relative url here still landed on the .invalid placeholder and
+              // "navigated" to nowhere.
+              const currentUrl = await browser.tabs
+                .get(tabId)
+                .then((t) => t.url)
+                .catch(() => undefined);
+              const nav = resolveNavUrl(target, currentUrl);
               if (!nav.ok || !nav.url) {
                 sendResponse({ ok: false, error: nav.error ?? 'invalid url' });
+                return;
+              }
+              if (nav.needsBase) {
+                sendResponse({
+                  ok: false,
+                  error:
+                    currentUrl === undefined
+                      ? 'relative url but the current page url is unknown - use an absolute url'
+                      : 'relative url could not be resolved - use an absolute url',
+                });
                 return;
               }
               const url = nav.url;
