@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { sanitizedPageUrl } from '../lib/dom';
 import { resolveNavUrl } from '../lib/navUrl';
+import { handleLedgerMessage } from '../lib/ledgerMessages';
 import { storageGet, storageGetMany, storageSet, STORAGE_KEYS } from '../lib/storage';
 import type { Runtime } from 'wxt/browser';
 import { PrivacyAuditLedger } from '../lib/pii/audit';
@@ -68,6 +69,12 @@ export default defineBackground({
 
     const privacyLedger = new PrivacyLedger([], persistPrivacyLedger);
     const auditLedger = new PrivacyAuditLedger([], persistAuditLedger);
+    // #159 step 1: the boundary object for the extracted ledger handlers
+    // (lib/ledgerMessages). Structural, not a new shared interface on the two
+    // ledger classes - they have no reason to know about each other, and
+    // coupling the privacy code to serve a refactor would be the wrong trade.
+    // Both classes structurally satisfy LedgerReader & LedgerClearable.
+    const ledgers = { privacy: privacyLedger, audit: auditLedger };
     const agentState = new AgentState();
 
     // ─── Issue #75: MV3 service-worker keepalive for long ops ────────────────
@@ -1410,18 +1417,15 @@ export default defineBackground({
           })();
           return true;
 
+        // #159 step 1: the three ledger cases, extracted to lib/ledgerMessages
+        // so they are testable without a service worker. `return true` is
+        // still returned by the caller below - once a listener returns true the
+        // channel is held open for sendResponse, and dropping it would make the
+        // popup's fetch hang rather than fail.
         case 'GET_PRIVACY_LEDGER':
-          sendResponse(privacyLedger.getEntries());
-          return true;
-
         case 'GET_AUDIT_LOG':
-          sendResponse(auditLedger.getEntries());
-          return true;
-
         case 'CLEAR_LEDGER':
-          privacyLedger.clear();
-          auditLedger.clear();
-          sendResponse({ success: true });
+          sendResponse(handleLedgerMessage(message, ledgers, ledgers));
           return true;
 
         // These five handlers are async-style (they return a value rather than
