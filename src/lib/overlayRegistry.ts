@@ -65,28 +65,6 @@ export function registerOverlayRoot(target: Element | string): void {
 }
 
 /**
- * Remove a registration. Only needed by a future overlay that tears itself
- * down and is re-created; kept so the registry is not a write-only list.
- */
-export function unregisterOverlayRoot(target: Element | string): void {
-  if (typeof target === 'string') {
-    overlayRootIds.delete(target);
-    return;
-  }
-  overlayRootElements.delete(target);
-}
-
-/** Test seam: is this id currently registered? */
-export function isRegisteredOverlayId(id: string): boolean {
-  return overlayRootIds.has(id);
-}
-
-/** Test seam: reset the registry between cases. */
-export function resetOverlayRoots(): void {
-  overlayRootIds.clear();
-}
-
-/**
  * Is `node`, or any ancestor it can reach, an extension-owned overlay?
  *
  * Walks three kinds of edge, because the extension's UI uses all of them:

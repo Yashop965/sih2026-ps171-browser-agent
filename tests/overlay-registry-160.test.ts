@@ -15,12 +15,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import {
-  registerOverlayRoot,
-  unregisterOverlayRoot,
-  isOwnOverlayNode,
-  isRegisteredOverlayId,
-} from '../src/lib/overlayRegistry';
+import { registerOverlayRoot, isOwnOverlayNode } from '../src/lib/overlayRegistry';
 
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -68,13 +63,18 @@ describe('isOwnOverlayNode recognises the extension’s own UI', () => {
     expect(isOwnOverlayNode(child)).toBe(true);
   });
 
-  it('unregistering stops the match', () => {
+  it('registration is idempotent, and does not cross-contaminate', () => {
+    // A nudge control that re-registers on every show cycle must not throw or
+    // duplicate. (The module deliberately has NO unregister: overlays in this
+    // extension are registered for the lifetime of the page, and a
+    // write-only registry is smaller than one that lies about supporting
+    // removal - that is the #158 lesson applied to new code.)
     const host = document.createElement('div');
     host.id = '__agent-nudge';
     document.body.appendChild(host);
     registerOverlayRoot('__agent-nudge');
-    unregisterOverlayRoot('__agent-nudge');
-    expect(isOwnOverlayNode(host)).toBe(false);
+    registerOverlayRoot('__agent-nudge');
+    expect(isOwnOverlayNode(host)).toBe(true);
   });
 });
 
@@ -134,9 +134,12 @@ describe('the shipped overlays are registered', () => {
   // importing them would pass against an empty registry and prove nothing -
   // which is exactly what the first version of this test did (2 failures).
   it('registers the cursor host when agentCursor is loaded', async () => {
-    expect(isRegisteredOverlayId('__agent-cursor')).toBe(false);
+    const host = document.createElement('div');
+    host.id = '__agent-cursor';
+    document.body.appendChild(host);
+    expect(isOwnOverlayNode(host)).toBe(false);
     await import('../src/lib/agentCursor');
-    expect(isRegisteredOverlayId('__agent-cursor')).toBe(true);
+    expect(isOwnOverlayNode(host)).toBe(true);
   });
 
   it('registers the highlight box id as a plain id', () => {
@@ -152,8 +155,11 @@ describe('the shipped overlays are registered', () => {
     // The constant really is the id the registry will be given.
     expect(content).toMatch(/const HIGHLIGHT_ID = '__agent-highlight'/);
     // And that id is registrable through the public API.
+    const box = document.createElement('div');
+    box.id = '__agent-highlight';
+    document.body.appendChild(box);
     registerOverlayRoot('__agent-highlight');
-    expect(isRegisteredOverlayId('__agent-highlight')).toBe(true);
+    expect(isOwnOverlayNode(box)).toBe(true);
   });
 });
 
