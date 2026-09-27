@@ -35,11 +35,3 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
 };
 
 export type ProviderKey = keyof typeof PROVIDERS;
-
-export function getDefaultProvider(): ProviderKey {
-  return 'custom';
-}
-
-export function getProvider(key: ProviderKey): ProviderConfig {
-  return PROVIDERS[key] || PROVIDERS.custom;
-}

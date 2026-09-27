@@ -30,67 +30,11 @@ export function getAvailableBackends(): string[] {
 }
 
 /**
- * Convert canvas to base64 data URL
- */
-export async function canvasToDataURL(canvas: HTMLCanvasElement): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      const dataURL = canvas.toDataURL('image/png');
-      resolve(dataURL);
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-/**
  * Capture visible tab as canvas (to be called from background context)
  */
 export async function captureVisibleTab(_windowId?: number): Promise<HTMLCanvasElement> {
   // This needs to be called from background script context
   throw new Error('Use browser.tabs.captureVisibleTab from background context');
-}
-
-/**
- * Create a temporary canvas from an image element
- */
-export function imageToCanvas(image: HTMLImageElement): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
-
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Failed to get canvas context');
-
-  ctx.drawImage(image, 0, 0);
-
-  return canvas;
-}
-
-/**
- * Resize canvas to fit max dimensions
- */
-export function resizeCanvas(canvas: HTMLCanvasElement, maxDim: number): HTMLCanvasElement {
-  const { width, height } = canvas;
-
-  if (width <= maxDim && height <= maxDim) {
-    return canvas;
-  }
-
-  const scale = maxDim / Math.max(width, height);
-  const newWidth = Math.round(width * scale);
-  const newHeight = Math.round(height * scale);
-
-  const newCanvas = document.createElement('canvas');
-  newCanvas.width = newWidth;
-  newCanvas.height = newHeight;
-
-  const ctx = newCanvas.getContext('2d');
-  if (!ctx) throw new Error('Failed to get canvas context');
-
-  ctx.drawImage(canvas, 0, 0, newWidth, newHeight);
-
-  return newCanvas;
 }
 
 /**

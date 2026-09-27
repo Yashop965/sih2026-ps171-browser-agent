@@ -4,7 +4,6 @@
  * PII detection, redaction helpers, and client-side outbound payload scanner.
  */
 
-import type { PrivacyEvent, PIIType } from '../types';
 import { validateAadhaar, validatePAN as validatePANShared } from './pii/validators';
 
 export interface PIIDetection {
@@ -201,26 +200,6 @@ export function isPasswordField(element: Element): boolean {
     SENSITIVE_PATTERN.test(ariaLabel) ||
     SENSITIVE_PATTERN.test(placeholder)
   );
-}
-
-/**
- * Generate privacy event from detection
- */
-export function createPrivacyEvent(
-  type: PIIType,
-  value: string,
-  confidence: number,
-  selector?: string
-): PrivacyEvent {
-  return {
-    id: Math.random().toString(36).substring(2, 9),
-    timestamp: new Date(),
-    type: 'detected',
-    category: type,
-    detail: `${type}: ${maskValue(value, type)}`,
-    confidence,
-    selector: selector || '',
-  };
 }
 
 // Internal validators for scanner

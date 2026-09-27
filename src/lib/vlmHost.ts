@@ -157,15 +157,6 @@ export function vlmHostOcr(dataUrl: string, timeoutMs = 300_000): Promise<VlmHos
   return vlmHostSend({ type: 'VLM_HOST_OCR', dataUrl }, timeoutMs, { create: true });
 }
 
-/** Object-detection grounding of a captured screenshot (optional query). */
-export function vlmHostDetect(
-  dataUrl: string,
-  query?: string,
-  timeoutMs = 300_000
-): Promise<VlmHostReply> {
-  return vlmHostSend({ type: 'VLM_HOST_DETECT', dataUrl, query }, timeoutMs, { create: true });
-}
-
 /**
  * #115: Florence-2 PHRASE GROUNDING (<PG>) of a captured screenshot. Given a
  * query like "find: search box, submit button, menu", returns the model's
@@ -180,11 +171,6 @@ export function vlmHostGround(
   timeoutMs = 300_000
 ): Promise<VlmHostReply> {
   return vlmHostSend({ type: 'VLM_HOST_GROUND', dataUrl, query }, timeoutMs, { create: true });
-}
-
-/** Prewarm: load/initialize the model (first call may download ~150MB q4). */
-export function vlmHostInit(timeoutMs = 300_000): Promise<VlmHostReply> {
-  return vlmHostSend({ type: 'VLM_HOST_INIT' }, timeoutMs, { create: true });
 }
 
 /**

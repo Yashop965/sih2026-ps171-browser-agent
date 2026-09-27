@@ -457,7 +457,6 @@ ps171-browser-agent/
 │   │   ├── loopDetection.ts  # Loop/repeat detection module
 │   │   ├── portRetry.ts      # withPortRetry (transient content-port drops)
 │   │   ├── providerConfig.ts # LLM provider selection + fallback
-│   │   ├── profiler.ts       # Resource/latency profiling
 │   │   ├── dom.ts            # DOM extraction helpers
 │   │   ├── privacy.ts        # PII orchestration
 │   │   ├── pii/              # PII pipeline: detector, redactor, firewall,
