@@ -40,6 +40,34 @@ export default defineConfig({
       // planner.
       '<all_urls>',
     ],
+    // #204: the on-device VLM cannot compile WebAssembly under MV3's default
+    // extension_pages CSP. With no `content_security_policy` declared, Chrome
+    // applies `script-src 'self'; object-src 'self'`, and that forbids WASM
+    // instantiation outright:
+    //
+    //   WebAssembly.instantiate(): Compiling or instantiating WebAssembly
+    //   module violates the following Content Security policy directive
+    //   because neither 'wasm-eval' nor 'unsafe-eval' is an allowed source of
+    //   script in "script-src 'self'".
+    //
+    // So every Florence-2 load died at backend init even once the ORT runtime
+    // was loading same-origin (#141). This is the other half of that fix, and
+    // the reason on-device vision has never worked end to end.
+    //
+    // Why this is a narrow, deliberate loosening:
+    //   - `'wasm-unsafe-eval'` permits COMPILING WebAssembly. It does NOT
+    //     permit `eval()` or `new Function()`, which stay blocked. The
+    //     'unsafe-eval' source is deliberately absent.
+    //   - It is scoped to `extension_pages` only, so the CSP applied to
+    //     content scripts and web pages is untouched.
+    //   - The .wasm bytes come from the extension's own package
+    //     (public/vlm/ort/, same-origin, no web_accessible_resources per #151),
+    //     so this does not widen any network egress path.
+    //   - It is the minimum required for onnxruntime-web. There is no
+    //     alternative source that enables WASM without eval.
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+    },
   },
   srcDir: 'src',
   outDir: 'dist',

@@ -28,6 +28,53 @@
 // empty ONNX sibling list and fails with "no matching files".)
 const MODEL_ID = 'onnx-community/Florence-2-base-ft';
 
+/**
+ * Resolve a path inside the extension's own package, as an absolute URL.
+ *
+ * Returns `undefined` when this code is NOT running inside the extension (a
+ * plain page, a test, a Node process) so callers can distinguish "no
+ * extension context" from "extension with no assets" - the two need different
+ * handling and must never be collapsed into a silent skip.
+ *
+ * #204: `chrome.runtime.getURL` is the obvious API and it is UNAVAILABLE in a
+ * dedicated module Worker - the exact context `vlm-host-worker.js` runs the
+ * pipeline in. Probed live inside that worker:
+ *
+ *     { inWorker: true, hasChromeObj: false, hasRuntime: false, hasGetURL: false }
+ *
+ * So the API-based lookup silently produced `undefined`, the caller's
+ * `if (baseUrl)` branch never ran, and onnxruntime-web fell back to its
+ * jsdelivr CDN default - which MV3's `script-src 'self'` CSP then blocked.
+ *
+ * A worker's own script URL is already a `chrome-extension://` origin, so
+ * `self.location.origin` carries the extension id directly. That works in every
+ * context this module can run in (worker, offscreen document, service worker,
+ * popup) with no extension API and no try/catch.
+ */
+export function extensionAssetBaseUrl(assetPath: string): string | undefined {
+  const clean = assetPath.replace(/^\/+/, '');
+  try {
+    const g = globalThis as unknown as {
+      browser?: { runtime?: { getURL?: (p: string) => string } };
+      chrome?: { runtime?: { getURL?: (p: string) => string } };
+      location?: { origin?: string; href?: string };
+    };
+    // Preferred when present (page contexts), but never relied on.
+    const runtime = (g.browser ?? g.chrome)?.runtime;
+    if (typeof runtime?.getURL === 'function') {
+      return runtime.getURL(clean);
+    }
+    // Worker / service-worker / document fallback: the origin IS the package.
+    const origin = g.location?.origin;
+    if (origin && /^chrome-extension:\/\/|^moz-extension:\/\//.test(origin)) {
+      return `${origin.replace(/\/+$/, '')}/${clean}`;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface BoundingBox {
   x: number;
   y: number;
@@ -205,7 +252,7 @@ class Florence2Pipeline {
         // rather than casting - an unused env field is not worth an `any`.
 
         // #141: load the onnxruntime-web runtime from the EXTENSION's own
-        // origin instead of the jsdelivr CDN. The content script's MV3 CSP is
+        // origin instead of the jsdelivr CDN. MV3's default CSP is
         // `script-src 'self'`, so a cross-origin dynamic `import()` of
         // https://cdn.jsdelivr.net/.../ort-wasm-simd-threaded.jsep.mjs is
         // blocked -> onnxruntime-web's backend init fails with
@@ -216,26 +263,34 @@ class Florence2Pipeline {
         // jsep .wasm both load from inside the extension. Set BEFORE the
         // first from_pretrained so transformers.js's lazy CDN-defaulting
         // (which only fires when wasmPaths is unset) does not overwrite us.
-        try {
-          const g: any = globalThis;
-          const extApi: any = g.browser ?? g.chrome;
-          const baseUrl = extApi?.runtime?.getURL ? extApi.runtime.getURL('vlm/ort/') : undefined;
-          if (baseUrl) {
-            const ortWasm: any = (env as any).backends?.onnx?.wasm;
-            if (ortWasm) {
-              // `mjs` overrides the loader module transformers.js dynamically
-              // imports (the CSP-blocked one); `wasm` is where ORT fetches the
-              // jsep .wasm binary. Both ship inside the extension.
-              ortWasm.wasmPaths = {
-                mjs: `${baseUrl}ort-wasm-simd-threaded.jsep.mjs`,
-                wasm: `${baseUrl}ort-wasm-simd-threaded.jsep.wasm`,
-              };
-            }
+        //
+        // #204: the extension API is NOT available in the context that actually
+        // runs this. `vlm-host-worker.js` is a dedicated module Worker, and
+        // there `chrome` is undefined entirely - probed live:
+        //   { inWorker: true, hasChromeObj: false, hasRuntime: false, hasGetURL: false }
+        // The old `g.browser ?? g.chrome` therefore yielded undefined, `baseUrl`
+        // was undefined, and the whole `if (baseUrl)` block was SILENTLY
+        // SKIPPED - so transformers.js kept its CDN default and every load
+        // failed with "no available backend found". A try/catch hid nothing;
+        // there was no error, just a skipped branch.
+        //
+        // The fix is that a worker does not need the extension API at all: its
+        // own script URL is already a chrome-extension:// origin, so
+        // `self.location.origin` IS the extension id. Deriving from that works
+        // in every context this module can run in - worker, offscreen document,
+        // service worker - and needs no `chrome` global.
+        const baseUrl = extensionAssetBaseUrl('vlm/ort/');
+        if (baseUrl) {
+          const ortWasm: any = (env as any).backends?.onnx?.wasm;
+          if (ortWasm) {
+            // `mjs` overrides the loader module transformers.js dynamically
+            // imports (the CSP-blocked one); `wasm` is where ORT fetches the
+            // jsep .wasm binary. Both ship inside the extension.
+            ortWasm.wasmPaths = {
+              mjs: `${baseUrl}ort-wasm-simd-threaded.jsep.mjs`,
+              wasm: `${baseUrl}ort-wasm-simd-threaded.jsep.wasm`,
+            };
           }
-        } catch {
-          // If env.backends.onnx isn't shaped as expected, leave the
-          // transformers.js default in place — a load failure is still
-          // honestly reported by status() via lastLoadError.
         }
 
         try {
