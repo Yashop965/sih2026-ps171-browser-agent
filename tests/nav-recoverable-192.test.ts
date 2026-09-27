@@ -70,9 +70,13 @@ describe('a recoverable navigation failure does not end the run', () => {
 });
 
 describe('only url-policy refusals are marked recoverable', () => {
+  // Read from lib/navChannel.ts since #159 step 2 moved the planner
+  // navigation path out of background.ts, leaving only a wiring adapter.
+  const navChannel = readFileSync('src/lib/navChannel.ts', 'utf-8');
+  const i = navChannel.indexOf('export async function navigateChannel');
+  const body = navChannel.slice(i, navChannel.indexOf('\n}', i));
+
   it('marks the two policy refusals', () => {
-    const i = bg.indexOf('const navigateChannel');
-    const body = bg.slice(i, bg.indexOf('\n    };', i));
     // Field order is Prettier's choice and differs between the two returns
     // (one is a single line, one is wrapped), so match the object as a whole
     // rather than assuming `recoverable` comes before or after `error`.
@@ -85,8 +89,6 @@ describe('only url-policy refusals are marked recoverable', () => {
   });
 
   it('leaves environment failures fatal', () => {
-    const i = bg.indexOf('const navigateChannel');
-    const body = bg.slice(i, bg.indexOf('\n    };', i));
     // No web tab, and the catch-all, must NOT claim to be recoverable.
     expect(body).toContain("return { ok: false, error: 'No web tab found' };");
     expect(body).not.toMatch(/No web tab found'[^\n]*recoverable/);

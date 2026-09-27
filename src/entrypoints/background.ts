@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { sanitizedPageUrl } from '../lib/dom';
 import { resolveNavUrl } from '../lib/navUrl';
+import { navigateChannel as navChannel } from '../lib/navChannel';
 import { handleLedgerMessage } from '../lib/ledgerMessages';
 import { storageGet, storageGetMany, storageSet, STORAGE_KEYS } from '../lib/storage';
 import type { Runtime } from 'wxt/browser';
@@ -765,92 +766,21 @@ export default defineBackground({
     // A missing web tab, a thrown error, and a failed load are all real
     // failures of the environment, not a bad instruction, so they stay fatal -
     // a run with no tab cannot continue no matter what the planner is told.
-    const navigateChannel = async (
-      url: unknown
-    ): Promise<{ ok: boolean; error?: string; recoverable?: boolean }> => {
-      try {
-        // #192: resolve the tab FIRST, because a relative target needs a real
-        // base and the tab's current url is the only real base available in a
-        // service worker.
-        //
-        // This reorder has one side effect worth naming, which the review of
-        // #191 caught: `driveTab` is not pure. When `currentTargetTab` is set
-        // but its tab is gone or no longer a web page, driveTab clears
-        // `currentTargetTab` and falls back to the active tab. So a REFUSED
-        // url (javascript:, a relative url with no usable base) now clears
-        // that state, where previously the refusal happened first and left it
-        // alone.
-        //
-        // That is the safer of the two behaviours: the pinned tab is already
-        // dead, and leaving a stale id set is what makes a later
-        // tabs.query fallback drift a run onto the wrong tab. The next
-        // driveTab call re-establishes the target from the active tab anyway.
-        const tabId = await driveTab();
-        if (tabId === undefined) return { ok: false, error: 'No web tab found' };
-
-        // #159: the same policy the NAVIGATE_TAB handler uses, now shared
-        // rather than duplicated. This copy had drifted in the same two ways:
-        // the `http://invalid` placeholder base, and - the real one - no
-        // non-string guard, so `new URL(42, base)` navigated to
-        // `http://invalid/42`. resolveNavUrl refuses those.
-        //
-        // This is the path that ACTUALLY carries a planner NAVIGATE action
-        // (the runner calls d.navigate), so extracting only the NAVIGATE_TAB
-        // handler would have left the live one on the old behaviour.
-        //
-        // `base` is the tab's current url, read fresh: a relative target the
-        // planner emitted ("/profile") resolves against the page the agent is
-        // actually on. Without it the target lands on the .invalid placeholder
-        // and the navigation silently fails.
-        const currentUrl = await browser.tabs
-          .get(tabId)
-          .then((t) => t.url)
-          .catch(() => undefined);
-        const nav = resolveNavUrl(url, currentUrl);
-        if (!nav.ok || !nav.url) {
-          // #192: recoverable - the url was refused, not the browser broken.
-          // The planner is told and can re-plan. See agentRunner's NAVIGATE
-          // branch: without this flag the whole run ends on a bad url.
-          return { ok: false, error: nav.error ?? 'invalid url', recoverable: true };
-        }
-
-        // Relative target and no usable base - the resolved url points at the
-        // placeholder host and will not load. Say so precisely, because
-        // "invalid url" would send the planner looking for a syntax problem
-        // that is not there.
-        if (nav.needsBase) {
-          return {
-            ok: false,
-            recoverable: true,
-            error:
-              currentUrl === undefined
-                ? 'relative url but the current page url is unknown - use an absolute url'
-                : 'relative url could not be resolved - use an absolute url',
-          };
-        }
-
-        const target = nav.url;
-        await browser.tabs.update(tabId, { url: target });
-        await waitForTabLoad(tabId, 10_000);
-        // #141: a navigation inside the task re-asserts the target so a later
-        // tabs.query fallback can't drift the run onto another tab.
-        const moved = await browser.tabs.get(tabId).catch(() => null);
-        currentTargetTab = { tabId, windowId: moved?.windowId ?? 0 };
-        privacyLedger.log({
-          timestamp: Date.now(),
-          tabId,
-          url: target,
-          type: 'EXECUTION',
-          selector: 'NAVIGATE',
-          confidence: 1,
-          verified: true,
-          action: 'SUCCESS',
-        });
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e) };
-      }
-    };
+    // #159 step 2: the planner navigation path now lives in lib/navChannel.ts,
+    // directly testable without a service worker. This adapter keeps the
+    // closure's three shared values (driveTab, the pinned target, the privacy
+    // ledger) wired in - notably it passes `currentTargetTab` as a SETTER, not
+    // a copy, because a copy would silently stop re-asserting the target and
+    // let a run drift onto the wrong tab (#141).
+    const navigateChannel = (url: unknown) =>
+      navChannel(url, {
+        driveTab,
+        logExecution: (entry) => privacyLedger.log(entry),
+        onTargetChanged: (target) => {
+          currentTargetTab = target;
+        },
+        waitForTabLoad,
+      });
 
     // #132: nudge the agent-cursor into "breathing" mode around the LLM wait,
     // so the multi-second planner round-trip reads as the agent *thinking*

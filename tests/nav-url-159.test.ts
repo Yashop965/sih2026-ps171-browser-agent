@@ -114,6 +114,11 @@ describe('#159 review: no duplicated copy of the policy survives', () => {
   // is not a file: URL, so readFileSync(URL) throws "The URL must be of
   // scheme file". Vitest runs from the repo root.
   const bg = readFileSync('src/entrypoints/background.ts', 'utf-8');
+  // Since #159 step 2 the planner navigation path lives in lib/navChannel.ts;
+  // background.ts keeps only the wiring adapter and the NAVIGATE_TAB handler.
+  // The ordering / base / needsBase guarantees are asserted against the module
+  // that now owns them, and separately against the handler still in this file.
+  const navChannel = readFileSync('src/lib/navChannel.ts', 'utf-8');
 
   it('no longer inlines a URL parse against a placeholder base', () => {
     // The smell: `new URL(x, 'http://invalid')` inlined in a handler.
@@ -121,19 +126,34 @@ describe('#159 review: no duplicated copy of the policy survives', () => {
   });
 
   it('routes BOTH navigation call sites through resolveNavUrl', () => {
-    const uses = bg.match(/resolveNavUrl\(/g) ?? [];
-    // 1 = navigateChannel, 1 = the NAVIGATE_TAB handler. The import line reads
-    // `from '../lib/navUrl'` and so does not match `resolveNavUrl(`.
-    // (The first version of this test asserted >= 3 on a miscount that
-    // included the import - it failed, correctly.)
+    // The two call sites live in DIFFERENT files since #159 step 2: the
+    // planner path moved to lib/navChannel.ts, the NAVIGATE_TAB message
+    // handler stayed here. Counted across both, because a third inline copy is
+    // the exact thing this test exists to prevent.
+    //
+    // The import lines read `from '../lib/navUrl'` / `from './navUrl'` and so
+    // do not match `resolveNavUrl(`.
+    const uses = (bg + navChannel).match(/resolveNavUrl\(/g) ?? [];
     expect(uses.length).toBe(2);
   });
 
   it('does not claim the type is string when nothing enforces it', () => {
     // Both sites were typed `url: string` while only truthiness-checking an
-    // LLM-supplied value upstream. The type is now `unknown`.
+    // LLM-supplied value upstream. The type is now `unknown` - on the handler
+    // here, and on the extracted `navigateChannel(url: unknown, ...)` in
+    // navChannel.ts.
     expect(bg).not.toMatch(/NAVIGATE_TAB'; url: string/);
     expect(bg).not.toMatch(/navigateChannel = async \(url: string\)/);
+    expect(navChannel).toMatch(/navigateChannel\(url: unknown/);
+  });
+
+  it('leaves no URL policy inlined in the adapter', () => {
+    // The adapter's whole job is wiring. If navigation policy creeps back into
+    // background.ts it will drift from navChannel.ts - which is precisely what
+    // #190's review caught when two copies diverged.
+    const adapter = bg.slice(bg.indexOf('const navigateChannel'));
+    expect(adapter.slice(0, 400)).not.toMatch(/new URL\(/);
+    expect(adapter.slice(0, 400)).not.toMatch(/needsBase/);
   });
 });
 
