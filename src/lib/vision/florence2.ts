@@ -28,6 +28,53 @@
 // empty ONNX sibling list and fails with "no matching files".)
 const MODEL_ID = 'onnx-community/Florence-2-base-ft';
 
+/**
+ * Resolve a path inside the extension's own package, as an absolute URL.
+ *
+ * Returns `undefined` when this code is NOT running inside the extension (a
+ * plain page, a test, a Node process) so callers can distinguish "no
+ * extension context" from "extension with no assets" - the two need different
+ * handling and must never be collapsed into a silent skip.
+ *
+ * #204: `chrome.runtime.getURL` is the obvious API and it is UNAVAILABLE in a
+ * dedicated module Worker - the exact context `vlm-host-worker.js` runs the
+ * pipeline in. Probed live inside that worker:
+ *
+ *     { inWorker: true, hasChromeObj: false, hasRuntime: false, hasGetURL: false }
+ *
+ * So the API-based lookup silently produced `undefined`, the caller's
+ * `if (baseUrl)` branch never ran, and onnxruntime-web fell back to its
+ * jsdelivr CDN default - which MV3's `script-src 'self'` CSP then blocked.
+ *
+ * A worker's own script URL is already a `chrome-extension://` origin, so
+ * `self.location.origin` carries the extension id directly. That works in every
+ * context this module can run in (worker, offscreen document, service worker,
+ * popup) with no extension API and no try/catch.
+ */
+export function extensionAssetBaseUrl(assetPath: string): string | undefined {
+  const clean = assetPath.replace(/^\/+/, '');
+  try {
+    const g = globalThis as unknown as {
+      browser?: { runtime?: { getURL?: (p: string) => string } };
+      chrome?: { runtime?: { getURL?: (p: string) => string } };
+      location?: { origin?: string; href?: string };
+    };
+    // Preferred when present (page contexts), but never relied on.
+    const runtime = (g.browser ?? g.chrome)?.runtime;
+    if (typeof runtime?.getURL === 'function') {
+      return runtime.getURL(clean);
+    }
+    // Worker / service-worker / document fallback: the origin IS the package.
+    const origin = g.location?.origin;
+    if (origin && /^chrome-extension:\/\/|^moz-extension:\/\//.test(origin)) {
+      return `${origin.replace(/\/+$/, '')}/${clean}`;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface BoundingBox {
   x: number;
   y: number;
@@ -72,9 +119,134 @@ export interface VisionStatus {
   loadFailedAt?: number;
 }
 
+export function extractText(result: unknown, task: string): string | undefined {
+  if (!result) return undefined;
+
+  // #204: `post_process_generation` for Florence-2 returns the TASK TOKEN as
+  // the top-level key with the text directly as its value:
+  //   { '<OCR>': 'the recognised text' }
+  //   { '<CAP>': 'a caption' }
+  // Verified live against a real Wikipedia screenshot. The generated text was
+  // correct all along, but `extractText` only ever looked at `result.text` and
+  // `result[...].text` - neither exists on this shape - so the worker reported
+  // "empty ocr" and discarded a good reading. Confirmed key set: ['<OCR>'].
+  if (typeof result === 'object' && result !== null) {
+    for (const [key, value] of Object.entries(result as Record<string, unknown>)) {
+      if (!key.startsWith('<') || !key.endsWith('>')) continue;
+      // Value is the text itself.
+      if (typeof value === 'string' && value.trim()) return value;
+      // Some versions nest it: { '<OCR>': { text, words } }.
+      if (value && typeof value === 'object') {
+        const inner = extractText(value, task);
+        if (inner) return inner;
+      }
+    }
+  }
+
+  if (task === 'ocr') {
+    // OCR may return {text: string} or {words: [...]}
+    if (typeof result === 'object' && result !== null) {
+      const obj = result as Record<string, unknown>;
+      if (typeof obj.text === 'string') return obj.text as string;
+      if (Array.isArray(obj.words)) {
+        return (obj.words as Array<{ word: string }>).map((w) => w.word).join(' ');
+      }
+    }
+  }
+
+  if (task === 'caption' || task === 'question-answering') {
+    // Returns {generated_text: string} or {answer: string}
+    if (typeof result === 'object' && result !== null) {
+      const obj = result as Record<string, unknown>;
+      return (obj.generated_text as string) || (obj.answer as string);
+    }
+  }
+
+  return undefined;
+}
+
+export function extractBoxes(result: unknown, _task: string): BoundingBox[] | undefined {
+  if (!result) return undefined;
+
+  // Handle array of {x0,y0,x1,y1} objects (common Florence-2 format)
+  if (Array.isArray(result)) {
+    const parsedBoxes: BoundingBox[] = [];
+    result.forEach((item: any, i: number) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const x0 = item.x0 ?? item.xmin;
+        const y0 = item.y0 ?? item.ymin;
+        const x1 = item.x1 ?? item.xmax;
+        const y1 = item.y1 ?? item.ymax;
+        if (x0 !== undefined && y0 !== undefined && x1 !== undefined && y1 !== undefined) {
+          parsedBoxes.push({
+            x: Number(x0),
+            y: Number(y0),
+            width: Number(x1) - Number(x0),
+            height: Number(y1) - Number(y0),
+            label: (item.label as string) || (item.text as string) || `Item ${i + 1}`,
+            score: (item.score as number) || (item.confidence as number) || 0.5,
+          });
+          return;
+        }
+      }
+      // Handle array [x0,y0,x1,y1] format
+      if (Array.isArray(item) && item.length >= 4) {
+        parsedBoxes.push({
+          x: Number(item[0]),
+          y: Number(item[1]),
+          width: Number(item[2]) - Number(item[0]),
+          height: Number(item[3]) - Number(item[1]),
+          label: `Item ${i + 1}`,
+          score: 0.5,
+        });
+      }
+    });
+    return parsedBoxes;
+  }
+
+  // Handle object with bboxes property.
+  // transformers.js 3.8.1 post_process_generation returns the parsed answer
+  // NESTED under the task key: { '<PG>': { labels, bboxes } } (and '<OD>'
+  // for object-detection). So `result.bboxes` is undefined - the real
+  // container is one level down. Find it whether or not it's nested.
+  if (typeof result === 'object' && result !== null) {
+    const obj = result as Record<string, unknown>;
+    const hasBoxes = (v: unknown): v is Record<string, unknown> =>
+      typeof v === 'object' && v !== null && Array.isArray((v as Record<string, unknown>).bboxes);
+    const container: Record<string, unknown> | undefined = hasBoxes(obj)
+      ? obj
+      : Object.values(obj).find(hasBoxes);
+    if (container) {
+      const labels = container.labels as string[] | undefined;
+      const scores = container.scores as number[] | undefined;
+      return (container.bboxes as Array<number[] | Record<string, number>>).map((bbox, i) => ({
+        x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
+        y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
+        width:
+          (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) -
+          (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
+        height:
+          (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) -
+          (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
+        label: labels?.[i] || `Item ${i + 1}`,
+        score: scores?.[i] || 0.5,
+      }));
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract text from Florence-2 output.
+ */
+
 class Florence2Pipeline {
   private model: any = null;
   private processor: any = null;
+  // #204: transformers.js `RawImage`, captured at load. The processor's
+  // preprocess() will not accept a data-URL string or a bare ImageBitmap.
+  private rawImageCtor: any = null;
   private initialized = false;
   private usingWebGPU = false;
   private loadPromise: Promise<void> | null = null;
@@ -194,7 +366,7 @@ class Florence2Pipeline {
 
     this.loadPromise = (async () => {
       try {
-        const { env, Florence2ForConditionalGeneration, AutoProcessor } =
+        const { env, Florence2ForConditionalGeneration, AutoProcessor, RawImage } =
           await import('@huggingface/transformers');
 
         // Configure environment
@@ -205,7 +377,7 @@ class Florence2Pipeline {
         // rather than casting - an unused env field is not worth an `any`.
 
         // #141: load the onnxruntime-web runtime from the EXTENSION's own
-        // origin instead of the jsdelivr CDN. The content script's MV3 CSP is
+        // origin instead of the jsdelivr CDN. MV3's default CSP is
         // `script-src 'self'`, so a cross-origin dynamic `import()` of
         // https://cdn.jsdelivr.net/.../ort-wasm-simd-threaded.jsep.mjs is
         // blocked -> onnxruntime-web's backend init fails with
@@ -216,26 +388,34 @@ class Florence2Pipeline {
         // jsep .wasm both load from inside the extension. Set BEFORE the
         // first from_pretrained so transformers.js's lazy CDN-defaulting
         // (which only fires when wasmPaths is unset) does not overwrite us.
-        try {
-          const g: any = globalThis;
-          const extApi: any = g.browser ?? g.chrome;
-          const baseUrl = extApi?.runtime?.getURL ? extApi.runtime.getURL('vlm/ort/') : undefined;
-          if (baseUrl) {
-            const ortWasm: any = (env as any).backends?.onnx?.wasm;
-            if (ortWasm) {
-              // `mjs` overrides the loader module transformers.js dynamically
-              // imports (the CSP-blocked one); `wasm` is where ORT fetches the
-              // jsep .wasm binary. Both ship inside the extension.
-              ortWasm.wasmPaths = {
-                mjs: `${baseUrl}ort-wasm-simd-threaded.jsep.mjs`,
-                wasm: `${baseUrl}ort-wasm-simd-threaded.jsep.wasm`,
-              };
-            }
+        //
+        // #204: the extension API is NOT available in the context that actually
+        // runs this. `vlm-host-worker.js` is a dedicated module Worker, and
+        // there `chrome` is undefined entirely - probed live:
+        //   { inWorker: true, hasChromeObj: false, hasRuntime: false, hasGetURL: false }
+        // The old `g.browser ?? g.chrome` therefore yielded undefined, `baseUrl`
+        // was undefined, and the whole `if (baseUrl)` block was SILENTLY
+        // SKIPPED - so transformers.js kept its CDN default and every load
+        // failed with "no available backend found". A try/catch hid nothing;
+        // there was no error, just a skipped branch.
+        //
+        // The fix is that a worker does not need the extension API at all: its
+        // own script URL is already a chrome-extension:// origin, so
+        // `self.location.origin` IS the extension id. Deriving from that works
+        // in every context this module can run in - worker, offscreen document,
+        // service worker - and needs no `chrome` global.
+        const baseUrl = extensionAssetBaseUrl('vlm/ort/');
+        if (baseUrl) {
+          const ortWasm: any = (env as any).backends?.onnx?.wasm;
+          if (ortWasm) {
+            // `mjs` overrides the loader module transformers.js dynamically
+            // imports (the CSP-blocked one); `wasm` is where ORT fetches the
+            // jsep .wasm binary. Both ship inside the extension.
+            ortWasm.wasmPaths = {
+              mjs: `${baseUrl}ort-wasm-simd-threaded.jsep.mjs`,
+              wasm: `${baseUrl}ort-wasm-simd-threaded.jsep.wasm`,
+            };
           }
-        } catch {
-          // If env.backends.onnx isn't shaped as expected, leave the
-          // transformers.js default in place — a load failure is still
-          // honestly reported by status() via lastLoadError.
         }
 
         try {
@@ -249,6 +429,12 @@ class Florence2Pipeline {
             dtype: config.dtype,
           });
           this.processor = await AutoProcessor.from_pretrained(config.modelId);
+          // #204: the processor's preprocess() requires a RawImage. It does not
+          // accept a data-URL string or a bare ImageBitmap - both fail inside
+          // transformers.js with `undefined is not iterable` / `y.rgb is not a
+          // function`. RawImage.read() accepts a Blob, which is what the worker
+          // already has after `fetch(dataUrl).blob()`.
+          this.rawImageCtor = RawImage;
 
           this.initialized = true;
           // A successful (re-)load clears the recorded failure so status()
@@ -343,8 +529,8 @@ class Florence2Pipeline {
       return {
         type: this.mapTaskToResultType(options.task),
         data: result,
-        boundingBoxes: this.extractBoxes(result, options.task),
-        text: this.extractText(result, options.task),
+        boundingBoxes: extractBoxes(result, options.task),
+        text: extractText(result, options.task),
         processingTime,
       };
     } catch (error) {
@@ -372,13 +558,74 @@ class Florence2Pipeline {
     // Florence expects an image with a .size ([h, w]) for <OD> box scaling.
     const img: any = image;
     if (img && !img.size && img.width) img.size = [img.height, img.width];
+
+    // #204: the processor requires a `RawImage`. Passing the raw input fails
+    // inside transformers.js `preprocess`, live and reproducible:
+    //   data-URL string -> TypeError: undefined is not iterable
+    //   ImageBitmap      -> TypeError: y.rgb is not a function
+    // `RawImage.read()` handles every shape this pipeline accepts, including a
+    // Blob and a data-URL string, so normalise to it here rather than making
+    // each caller get it right.
+    const input = await this.toRawImage(image);
+    // Box scaling needs the ORIGINAL pixel dimensions. RawImage carries them,
+    // so prefer those over the caller's `.size` hack when available.
+    const raw: any = input;
+    const size: [number, number] | undefined =
+      raw && typeof raw.height === 'number' && typeof raw.width === 'number'
+        ? [raw.height, raw.width]
+        : img?.size;
+
     const prompts = this.processor.construct_prompts(query ? `${task} ${query}` : task);
-    const inputs = await this.processor(img, prompts);
+    const inputs = await this.processor(input, prompts);
     const generated_ids = await this.model.generate({ ...inputs, max_new_tokens: 128 });
     const generated_text = this.processor.batch_decode(generated_ids, {
       skip_special_tokens: false,
     })[0];
-    return this.processor.post_process_generation(generated_text, task, img.size);
+    return this.processor.post_process_generation(generated_text, task, size);
+  }
+
+  /**
+   * #204: normalise any accepted image input to a transformers.js `RawImage`.
+   *
+   * Returns the input unchanged if the constructor is unavailable, so a future
+   * transformers.js that accepts raw input still works rather than throwing on
+   * a missing helper.
+   */
+  private async toRawImage(
+    image: HTMLCanvasElement | HTMLImageElement | ImageBitmap | string
+  ): Promise<unknown> {
+    if (!this.rawImageCtor) return image;
+    // Already a RawImage.
+    if (image && typeof image === 'object' && 'data' in (image as object)) return image;
+    try {
+      if (typeof image === 'string') {
+        // data: URL (what the SW captures) -> Blob -> RawImage
+        const blob = await (await fetch(image)).blob();
+        return await this.rawImageCtor.read(blob);
+      }
+      // ImageBitmap is not a Blob, so draw it to a canvas and hand THAT over -
+      // `RawImage.read` accepts an OffscreenCanvas/HTMLCanvasElement directly.
+      if (typeof (image as ImageBitmap)?.close === 'function') {
+        const bitmap = image as ImageBitmap;
+        const canvas =
+          typeof OffscreenCanvas !== 'undefined'
+            ? new OffscreenCanvas(bitmap.width, bitmap.height)
+            : Object.assign(document.createElement('canvas'), {
+                width: bitmap.width,
+                height: bitmap.height,
+              });
+        const ctx = canvas.getContext('2d') as
+          OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+        if (!ctx) throw new Error('2D context unavailable for ImageBitmap');
+        ctx.drawImage(bitmap, 0, 0);
+        return this.rawImageCtor.fromCanvas(canvas as never);
+      }
+      return await this.rawImageCtor.read(image as unknown as Blob);
+    } catch (e) {
+      // Fall back to the original input: a processor that does accept it will
+      // still work, and one that does not will report its own error.
+      return image;
+    }
   }
 
   private async runObjectDetection(
@@ -421,106 +668,6 @@ class Florence2Pipeline {
    * Extract bounding boxes from Florence-2 output.
    * Florence-2 returns coordinates as [x0, y0, x1, y1] or array of such arrays.
    */
-  private extractBoxes(result: unknown, _task: string): BoundingBox[] | undefined {
-    if (!result) return undefined;
-
-    // Handle array of {x0,y0,x1,y1} objects (common Florence-2 format)
-    if (Array.isArray(result)) {
-      const parsedBoxes: BoundingBox[] = [];
-      result.forEach((item: any, i: number) => {
-        if (item && typeof item === 'object' && !Array.isArray(item)) {
-          const x0 = item.x0 ?? item.xmin;
-          const y0 = item.y0 ?? item.ymin;
-          const x1 = item.x1 ?? item.xmax;
-          const y1 = item.y1 ?? item.ymax;
-          if (x0 !== undefined && y0 !== undefined && x1 !== undefined && y1 !== undefined) {
-            parsedBoxes.push({
-              x: Number(x0),
-              y: Number(y0),
-              width: Number(x1) - Number(x0),
-              height: Number(y1) - Number(y0),
-              label: (item.label as string) || (item.text as string) || `Item ${i + 1}`,
-              score: (item.score as number) || (item.confidence as number) || 0.5,
-            });
-            return;
-          }
-        }
-        // Handle array [x0,y0,x1,y1] format
-        if (Array.isArray(item) && item.length >= 4) {
-          parsedBoxes.push({
-            x: Number(item[0]),
-            y: Number(item[1]),
-            width: Number(item[2]) - Number(item[0]),
-            height: Number(item[3]) - Number(item[1]),
-            label: `Item ${i + 1}`,
-            score: 0.5,
-          });
-        }
-      });
-      return parsedBoxes;
-    }
-
-    // Handle object with bboxes property.
-    // transformers.js 3.8.1 post_process_generation returns the parsed answer
-    // NESTED under the task key: { '<PG>': { labels, bboxes } } (and '<OD>'
-    // for object-detection). So `result.bboxes` is undefined - the real
-    // container is one level down. Find it whether or not it's nested.
-    if (typeof result === 'object' && result !== null) {
-      const obj = result as Record<string, unknown>;
-      const hasBoxes = (v: unknown): v is Record<string, unknown> =>
-        typeof v === 'object' && v !== null && Array.isArray((v as Record<string, unknown>).bboxes);
-      const container: Record<string, unknown> | undefined = hasBoxes(obj)
-        ? obj
-        : Object.values(obj).find(hasBoxes);
-      if (container) {
-        const labels = container.labels as string[] | undefined;
-        const scores = container.scores as number[] | undefined;
-        return (container.bboxes as Array<number[] | Record<string, number>>).map((bbox, i) => ({
-          x: Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0),
-          y: Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0),
-          width:
-            (Array.isArray(bbox) ? (bbox[2] ?? 0) : (bbox.xmax ?? 0)) -
-            (Array.isArray(bbox) ? (bbox[0] ?? 0) : (bbox.xmin ?? 0)),
-          height:
-            (Array.isArray(bbox) ? (bbox[3] ?? 0) : (bbox.ymax ?? 0)) -
-            (Array.isArray(bbox) ? (bbox[1] ?? 0) : (bbox.ymin ?? 0)),
-          label: labels?.[i] || `Item ${i + 1}`,
-          score: scores?.[i] || 0.5,
-        }));
-      }
-    }
-
-    return undefined;
-  }
-
-  /**
-   * Extract text from Florence-2 output.
-   */
-  private extractText(result: unknown, task: string): string | undefined {
-    if (!result) return undefined;
-
-    if (task === 'ocr') {
-      // OCR may return {text: string} or {words: [...]}
-      if (typeof result === 'object' && result !== null) {
-        const obj = result as Record<string, unknown>;
-        if (typeof obj.text === 'string') return obj.text as string;
-        if (Array.isArray(obj.words)) {
-          return (obj.words as Array<{ word: string }>).map((w) => w.word).join(' ');
-        }
-      }
-    }
-
-    if (task === 'caption' || task === 'question-answering') {
-      // Returns {generated_text: string} or {answer: string}
-      if (typeof result === 'object' && result !== null) {
-        const obj = result as Record<string, unknown>;
-        return (obj.generated_text as string) || (obj.answer as string);
-      }
-    }
-
-    return undefined;
-  }
-
   private mapTaskToResultType(task: string): VisionResult['type'] {
     switch (task) {
       case 'object-detection':

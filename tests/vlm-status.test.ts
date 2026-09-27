@@ -27,6 +27,17 @@ vi.mock('@huggingface/transformers', () => ({
   env: { allowLocalModels: false, useBrowserCache: true, logLevel: 'error' },
   Florence2ForConditionalGeneration: { from_pretrained: modelLoad },
   AutoProcessor: { from_pretrained: procLoad },
+  // #204: the loader captures RawImage at load time so `preprocess` receives
+  // the type it actually accepts. The mock only needs the constructor to
+  // exist - these tests never run inference, only assert status() transitions.
+  RawImage: class {
+    static async read() {
+      return { data: new Uint8ClampedArray(), width: 1, height: 1, channels: 3 };
+    }
+    static fromCanvas() {
+      return { data: new Uint8ClampedArray(), width: 1, height: 1, channels: 3 };
+    }
+  },
 }));
 
 import { visionPipeline } from '../src/lib/vision/florence2';
