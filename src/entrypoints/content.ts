@@ -9,10 +9,23 @@ import {
   getElementById,
 } from '../lib/dom';
 import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/actions';
-import { visionPipeline } from '../lib/vision/florence2';
 import { bridgeGroundBoxes, type GroundBox } from '../lib/visionGround';
 import { startThinkingPulse, stopThinkingPulse } from '../lib/agentCursor';
 import { validateAadhaar, validatePAN } from '../lib/pii/validators';
+// #176: the in-content Florence-2 pipeline is GONE, and that is the point of
+// this removal. Nothing ever sent VISION_EXTRACT / VISION_OCR /
+// VISION_STATUS to a tab - the only VISION_* send in the codebase forwarded a
+// message no one sends, and all real OCR/grounding goes through the offscreen
+// host (vlmHostOcr / vlmHostGround / vlmHostStatus).
+//
+// Importing src/lib/vision/florence2 as a VALUE cost 904 KB of
+// @huggingface/transformers in content.js even with every caller deleted: the
+// bundler inlines the dynamic import because the class is reachable. There is
+// no import of it here at all now - not even a type-only one, because nothing
+// in this file names its types.
+//
+// florence2.ts stays: vlm-host-worker.ts still uses it, and that bundle
+// legitimately needs the model.
 
 /**
  * Content Script - DOM Capture + PII Redaction + Action Execution
@@ -98,72 +111,6 @@ export default defineContentScript({
      * Extract DOM elements + run vision inference if DOM has few elements.
      * Falls back to DOM-only when vision is unavailable.
      */
-    async function extractWithVision(): Promise<{
-      ok: boolean;
-      elements: any[];
-      context: any;
-      vision?: {
-        used: boolean;
-        boxes?: Array<{ x: number; y: number; width: number; height: number; label: string }>;
-        error?: string;
-      };
-    }> {
-      const domElements = extract();
-      const context = getPageContext();
-
-      // If DOM found enough elements, no need for vision
-      if (domElements.length >= 3) {
-        return { ok: true, elements: domElements, context, vision: { used: false } };
-      }
-
-      // Request screenshot from background script
-      try {
-        const screenshotResult: any = await browser.runtime.sendMessage({
-          type: 'CAPTURE_SCREENSHOT',
-        });
-        if (!screenshotResult?.dataUrl) {
-          console.warn('[vision] Failed to capture screenshot, using DOM-only');
-          return { ok: true, elements: domElements, context, vision: { used: false } };
-        }
-
-        // Initialize vision pipeline if not already done
-        if (!visionPipeline.isInitialized()) {
-          try {
-            await visionPipeline.initialize();
-          } catch (initErr) {
-            console.warn('[vision] Failed to initialize vision pipeline:', initErr);
-            return { ok: true, elements: domElements, context, vision: { used: false } };
-          }
-        }
-
-        // Run OCR to detect text elements
-        const visionResult = await visionPipeline.processImage(screenshotResult.dataUrl, {
-          task: 'ocr',
-        });
-
-        // Merge vision boxes with DOM elements
-        const mergedElements = mergeVisionWithDOM(domElements, visionResult);
-
-        return {
-          ok: true,
-          elements: mergedElements,
-          context,
-          vision: {
-            used: true,
-            boxes: visionResult.boundingBoxes?.map((b) => ({
-              x: b.x,
-              y: b.y,
-              width: b.width,
-              height: b.height,
-              label: b.label || '',
-            })),
-          },
-        };
-      } catch (visionErr) {
-        console.warn('[vision] Vision extraction failed, using DOM-only:', visionErr);
-        return { ok: true, elements: domElements, context, vision: { used: false } };
-      }
-    }
 
     /**
      * Issue #100 confirm path: OCR the visible screen and return ONLY the
@@ -175,49 +122,6 @@ export default defineContentScript({
      * ok:false (rather than throwing) lets the caller degrade cleanly to
      * the deterministic backstop when the model is unavailable.
      */
-    async function ocrVisibleScreen(): Promise<{
-      ok: boolean;
-      text?: string;
-      error?: string;
-    }> {
-      try {
-        const screenshotResult: any = await browser.runtime.sendMessage({
-          type: 'CAPTURE_SCREENSHOT',
-        });
-        if (!screenshotResult?.dataUrl) {
-          visionPipeline.recordOcr(false, 'no screenshot');
-          return { ok: false, error: 'no screenshot' };
-        }
-        if (!visionPipeline.isInitialized()) {
-          try {
-            await visionPipeline.initialize();
-          } catch (initErr) {
-            visionPipeline.recordOcr(false, 'init failed');
-            return { ok: false, error: 'vision init failed: ' + String(initErr) };
-          }
-        }
-        const result = await visionPipeline.processImage(screenshotResult.dataUrl, {
-          task: 'ocr',
-        });
-        const text = result?.text ?? (result?.data as any)?.text ?? '';
-        if (!text) {
-          visionPipeline.recordOcr(false, 'empty ocr');
-          return { ok: false, error: 'empty ocr' };
-        }
-        visionPipeline.recordOcr(true, 'ok');
-        return { ok: true, text };
-      } catch (e) {
-        visionPipeline.recordOcr(false, String(e));
-        return { ok: false, error: String(e) };
-      }
-    }
-
-    // #136: the popup's VLM live indicator polls this. Pure status (no PII,
-    // no pixels): is the on-device model ready / loading / unavailable,
-    // and what did the last OCR check conclude?
-    function getVisionStatus() {
-      return visionPipeline.status();
-    }
 
     /**
      * #141: cross-tab handoff harvest. Pull the page's labeled value
@@ -294,29 +198,6 @@ export default defineContentScript({
      * Merge vision-detected bounding boxes with DOM-extracted elements.
      * Adds vision boxes as synthetic elements when DOM is insufficient.
      */
-    function mergeVisionWithDOM(domElements: any[], visionResult: any): any[] {
-      if (!visionResult?.boundingBoxes?.length) {
-        return domElements;
-      }
-
-      const visionElements = visionResult.boundingBoxes.map((box: any, i: number) => ({
-        id: domElements.length + i + 1,
-        stableId: `vision_${i}`,
-        tag: 'vision-box',
-        type: null,
-        role: 'text',
-        label: box.label || `Element ${i + 1}`,
-        x: box.x,
-        y: box.y,
-        width: box.width,
-        height: box.height,
-        interactive: false,
-        isVisionBox: true,
-      }));
-
-      // Combine DOM elements with vision boxes
-      return [...domElements, ...visionElements];
-    }
 
     // Capture interactive elements for action targeting
     function captureInteractiveElements(): InteractiveElement[] {
@@ -464,20 +345,6 @@ export default defineContentScript({
         return Promise.resolve(captureDOM());
       }
 
-      if (message.type === 'VISION_EXTRACT') {
-        return Promise.resolve(extractWithVision());
-      }
-
-      if (message.type === 'VISION_OCR') {
-        // Issue #100 confirm path: OCR the currently-visible screen and
-        // return just the text. The screenshot is captured by the SW
-        // and stays on-device; we run Florence-2 OCR locally and send
-        // back plain OCR text (never the raw pixels, never a PII-heavy
-        // DOM). If the model isn't ready / can't init, we report ok:false
-        // so the caller falls back to the deterministic backstop.
-        return Promise.resolve(ocrVisibleScreen());
-      }
-
       if (message.type === 'HIGHLIGHT') {
         return Promise.resolve(highlight(message.selector));
       }
@@ -495,12 +362,6 @@ export default defineContentScript({
           /* presentation layer - never fatal */
         }
         return Promise.resolve({ ok: true });
-      }
-
-      if (message.type === 'VISION_STATUS') {
-        // #136: return the on-device VLM pipeline status for the popup
-        // live indicator. Pure status - no pixels, no PII.
-        return Promise.resolve({ ok: true, status: getVisionStatus() });
       }
 
       if (message.type === 'HARVEST_FIELDS') {
@@ -555,10 +416,8 @@ export default defineContentScript({
         execute: executeWithRetry,
         context: getPageContext,
         captureDOM,
-        extractWithVision,
         highlight,
         piiDetector,
-        visionPipeline,
       };
     }
   },
