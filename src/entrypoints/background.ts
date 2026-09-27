@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser';
 import { sanitizedPageUrl } from '../lib/dom';
 import { resolveNavUrl } from '../lib/navUrl';
 import { navigateChannel as navChannel } from '../lib/navChannel';
+import { switchTab, forwardToContentScript, isNavigationDisconnect } from '../lib/executeChannel';
 import { handleLedgerMessage } from '../lib/ledgerMessages';
 import { storageGet, storageGetMany, storageSet, STORAGE_KEYS } from '../lib/storage';
 import type { Runtime } from 'wxt/browser';
@@ -632,130 +633,50 @@ export default defineBackground({
       }
     };
 
+    // #159 step 3: the execute path now lives in lib/executeChannel.ts, which
+    // is the first part of this file with DIRECT tests - the #141 suites cover
+    // the runner that calls it and the server that parses it, but the hop
+    // itself was unreachable.
+    //
+    // The two closures are built once, not per call: `currentTargetTab` is
+    // written through onTargetChanged (a copy would stop re-asserting the
+    // target and let a run drift onto the wrong tab - the #141 bug), and the
+    // session bookkeeping stays best-effort exactly as it was inline.
     const executeChannel = async (action: any): Promise<any> => {
-      // #141 P1: SWITCH_TAB - hop the agent's target to another open web tab.
-      // Harvests the LEAVING tab's labeled values into the task handoff first
-      // (on device; the planner later sees only <FIELD_N> tokens), activates
-      // the target, and waits for it to be usable. One tab driven at a time.
       if (action?.type === 'SWITCH_TAB') {
-        const from = await driveTab();
-        if (from !== undefined) await harvestTabIntoHandoff(from);
-        let next: number | undefined;
-        if (typeof action.tabId === 'number') {
-          try {
-            const t = await browser.tabs.get(action.tabId);
-            if (t?.url && (t.url.startsWith('http://') || t.url.startsWith('https://')))
-              next = t.id;
-          } catch {
-            next = undefined;
-          }
-        }
-        if (next === undefined && typeof action.urlHint === 'string' && action.urlHint) {
-          const hint = action.urlHint.toLowerCase();
-          const tabs = await openTabsProvider();
-          const hit =
-            tabs.find((t) => t.url.toLowerCase().includes(hint)) ||
-            tabs.find((t) => t.title.toLowerCase().includes(hint));
-          next = hit?.tabId;
-        }
-        if (next === undefined) {
-          // No explicit target: settle on the active web tab (a no-op hop if
-          // already there - never a failure, so a planner that emits a bare
-          // SWITCH_TAB just re-grounds the run).
-          next = from;
-        }
-        if (next === undefined) return { ok: false, error: 'no web tab to switch to' };
-        try {
-          await browser.tabs.update(next, { active: true });
-          const target = await browser.tabs.get(next);
-          currentTargetTab = { tabId: next, windowId: target?.windowId ?? 0 };
-          // #144 P3: watch the LEAVING tab passively (registered AFTER the
-          // target repoint - so the leaving tab, which was just the focus
-          // tab, is a valid watch target, and a no-op hop (from === next)
-          // never watches the tab the agent is about to drive). A later
-          // change on it re-perceives the handoff without driving it.
-          if (from !== undefined && from !== next) {
-            await registerWatchedSource(from, next);
-          }
-          // #141: track the tab's own session - SessionManager was built for
-          // multi-site tasks; the runner's task session (tabId -1) stays the
-          // loop's budget owner, these are the per-tab views. Update the
-          // active one if the task already visited this tab, otherwise open
-          // a fresh one. Bookkeeping only - a failure here never fails the hop.
-          try {
-            const existing = sessionManager.getSessionForTab(next);
-            if (existing) {
-              await sessionManager.updateSession(existing.sessionId, target?.url || '');
-            } else {
-              await sessionManager.startSession(
-                next,
-                target?.windowId ?? 0,
-                target?.url || '',
-                `cross-tab hop in task: ${'(' + (target?.title || 'untitled') + ')'}`
-              );
+        return switchTab(action, {
+          driveTab,
+          harvestIntoHandoff: harvestTabIntoHandoff,
+          openTabs: openTabsProvider,
+          onTargetChanged: (target) => {
+            currentTargetTab = target;
+          },
+          registerWatchedSource,
+          trackTabSession: async (tabId, tab) => {
+            try {
+              const existing = sessionManager.getSessionForTab(tabId);
+              if (existing) {
+                await sessionManager.updateSession(existing.sessionId, tab.url || '');
+              } else {
+                await sessionManager.startSession(
+                  tabId,
+                  tab.windowId ?? 0,
+                  tab.url || '',
+                  `cross-tab hop in task: ${'(' + (tab.title || 'untitled') + ')'}`
+                );
+              }
+            } catch {
+              /* session bookkeeping is best-effort */
             }
-          } catch {
-            /* session bookkeeping is best-effort */
-          }
-          // A background tab is not mid-navigation, but give its content
-          // script a beat so the next EXTRACT finds the port attached.
-          await waitForTabLoad(next, 3_000);
-          privacyLedger.log({
-            timestamp: Date.now(),
-            tabId: next,
-            url: target?.url || '',
-            type: 'EXECUTION',
-            selector: 'SWITCH_TAB',
-            confidence: 1,
-            verified: true,
-            action: 'SUCCESS',
-          });
-          return { ok: true, note: 'tab switched - will re-extract the new tab' };
-        } catch (e) {
-          return { ok: false, error: String(e) };
-        }
-      }
-
-      const tabId = await driveTab();
-      if (tabId === undefined) return { ok: false, error: 'No web tab found' };
-      try {
-        const result: any = await browser.tabs.sendMessage(tabId, { type: 'EXECUTE', action });
-        privacyLedger.log({
-          timestamp: Date.now(),
-          tabId,
-          url: '',
-          type: 'EXECUTION',
-          selector: action?.targetId?.toString() || '',
-          confidence: 1,
-          verified: result?.ok === true,
-          action: result?.ok ? 'SUCCESS' : 'FAILURE',
-          error: result?.error,
+          },
+          waitForTabLoad,
+          logExecution: (entry) => privacyLedger.log(entry),
         });
-        return result;
-      } catch (e) {
-        const msg = String(e);
-        // A click/submit that NAVIGATES the tab disconnects the content port
-        // before it can reply (#86). The action likely worked - the next
-        // EXTRACT re-plans on the new page. Do NOT report it as a failure.
-        const navigated =
-          /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(
-            msg
-          );
-        if (navigated) {
-          privacyLedger.log({
-            timestamp: Date.now(),
-            tabId,
-            url: '',
-            type: 'EXECUTION',
-            selector: action?.targetId?.toString() || '',
-            confidence: 1,
-            verified: true,
-            action: 'SUCCESS',
-          });
-          return { ok: true, note: 'page navigated - will re-extract the new page' };
-        }
-        return { ok: false, error: msg };
       }
+      return forwardToContentScript(action, {
+        driveTab,
+        logExecution: (entry) => privacyLedger.log(entry),
+      });
     };
 
     // `url: unknown` because the runner passes whatever the planner emitted and
@@ -1254,10 +1175,12 @@ export default defineBackground({
               // (the page moved on) - do not report that as a failure, or the
               // planner will think the click failed and retry-loop. The next
               // EXTRACT will see the new page and re-plan correctly.
-              const navigated =
-                /disconnect|Receiving end does not exist|Could not establish connection|No recipient|closed/i.test(
-                  msg
-                );
+              // #159 step 3: this was a SECOND copy of the port-error policy
+              // that lib/executeChannel.ts now owns. Two copies of a heuristic
+              // is how they drift - tightening the extracted one would have
+              // left this one still calling "the dropdown is closed" a
+              // successful navigation. One policy, both call sites.
+              const navigated = isNavigationDisconnect(msg);
               if (navigated) {
                 privacyLedger.log({
                   timestamp: Date.now(),
