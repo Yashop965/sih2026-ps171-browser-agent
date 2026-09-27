@@ -89,11 +89,39 @@ describe('a refused NAVIGATE leaves the run alive', () => {
     expect(state.status).toBe('failed');
   });
 
-  it('a refused navigation still counts toward the goal check', async () => {
+  it('counts a refused navigation as a step toward the goal check', async () => {
     // Otherwise a planner that keeps emitting a bad url loops forever and
     // never reaches its final check.
     const { ctx } = await runNavigateBranch({ ok: false, recoverable: true, error: 'x' });
     expect(ctx.actionsSinceGoalCheck).toBe(1);
+  });
+
+  it('cannot loop forever: currentStep is bumped at the top of every iteration', () => {
+    // The recoverable branch deliberately does NOT end the run, so the only
+    // thing bounding a planner that keeps emitting a bad url is the step cap.
+    //
+    // `currentStep++` sits at the top of the main loop, before any action is
+    // executed, so a refused navigation consumes a step exactly like a
+    // successful one. Verified by reading the loop, not assumed - this is the
+    // question that decides whether `recoverable` is safe at all.
+    const inc = src.indexOf('currentStep++');
+    const guard = src.indexOf('if (currentStep >= maxSteps)');
+    expect(inc).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(-1);
+    // The cap is checked before the increment, each iteration.
+    expect(guard).toBeLessThan(inc);
+
+    // And the cap is finite. `let maxSteps = 15` is the default; it is later
+    // narrowed by `Math.min(sessionMax, calculated, 100)`, so 100 is the
+    // ceiling. Asserted because "the cap exists" is not the same claim as
+    // "the cap is a finite number" - a cap of Infinity would loop forever.
+    const decl = src.match(/let maxSteps = (\d+)/);
+    expect(decl, 'maxSteps has no numeric default').not.toBeNull();
+    expect(Number(decl![1])).toBeGreaterThan(0);
+    expect(Number(decl![1])).toBeLessThanOrEqual(100);
+    // And it is explicitly clamped, so a large session cannot raise it
+    // without bound.
+    expect(src).toMatch(/maxSteps = Math\.min\([^)]*100\)/);
   });
 
   it('a successful navigation clears recentActionHistory', async () => {
