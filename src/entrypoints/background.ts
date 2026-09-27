@@ -754,7 +754,13 @@ export default defineBackground({
     // only truthiness-checks it (`action.type === 'NAVIGATE' && action.url`).
     // Typing it `string` would assert a guarantee nothing enforces, and let a
     // number or object through to the URL layer.
-    const navigateChannel = async (url: unknown): Promise<{ ok: boolean; error?: string }> => {
+    // `recoverable` is set ONLY on the url-policy refusals in the body below.
+    // A missing web tab, a thrown error, and a failed load are all real
+    // failures of the environment, not a bad instruction, so they stay fatal -
+    // a run with no tab cannot continue no matter what the planner is told.
+    const navigateChannel = async (
+      url: unknown
+    ): Promise<{ ok: boolean; error?: string; recoverable?: boolean }> => {
       try {
         // #192: resolve the tab FIRST, because a relative target needs a real
         // base and the tab's current url is the only real base available in a
@@ -794,7 +800,12 @@ export default defineBackground({
           .then((t) => t.url)
           .catch(() => undefined);
         const nav = resolveNavUrl(url, currentUrl);
-        if (!nav.ok || !nav.url) return { ok: false, error: nav.error ?? 'invalid url' };
+        if (!nav.ok || !nav.url) {
+          // #192: recoverable - the url was refused, not the browser broken.
+          // The planner is told and can re-plan. See agentRunner's NAVIGATE
+          // branch: without this flag the whole run ends on a bad url.
+          return { ok: false, error: nav.error ?? 'invalid url', recoverable: true };
+        }
 
         // Relative target and no usable base - the resolved url points at the
         // placeholder host and will not load. Say so precisely, because
@@ -803,6 +814,7 @@ export default defineBackground({
         if (nav.needsBase) {
           return {
             ok: false,
+            recoverable: true,
             error:
               currentUrl === undefined
                 ? 'relative url but the current page url is unknown - use an absolute url'
