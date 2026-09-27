@@ -71,7 +71,17 @@ export interface NavigateDeps {
    * effect. Returns undefined when no web tab is available.
    */
   driveTab: () => Promise<number | undefined>;
-  /** Log a successful navigation to the privacy ledger. */
+  /**
+   * Log a successful navigation to the privacy ledger.
+   *
+   * No `timestamp` here on purpose. The pre-extraction code passed
+   * `timestamp: Date.now()` computed AFTER `waitForTabLoad`, and
+   * `PrivacyLedger.log()` already defaults the field to `Date.now()` at the
+   * moment it is called. So passing it or omitting it lands on the same
+   * instant - the only difference would be a few microseconds, and a ledger
+   * that claims a time the ledger did not itself observe is worse than one
+   * that stamps itself.
+   */
   logExecution: (entry: {
     tabId: number;
     url: string;
