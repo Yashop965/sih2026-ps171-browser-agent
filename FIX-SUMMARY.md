@@ -1,4 +1,5 @@
 # Action Execution Fix — September 1, 2026
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Problem
 The agent was stuck in a scroll loop, never filling the form fields.

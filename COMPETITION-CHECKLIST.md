@@ -1,4 +1,5 @@
 # Competition Day Checklist — SIH2026 PS171
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Pre-Competition (Night Before)
 

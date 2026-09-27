@@ -1,4 +1,5 @@
 # SIH2026 Video Research - What's Available
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Research Findings: Tools & Skills for YC-Style Video Production
 

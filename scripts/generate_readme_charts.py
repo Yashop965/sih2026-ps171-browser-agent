@@ -18,17 +18,25 @@ TRACK = "#e2e8f0"
 # ---------------------------------------------------------------- chart 1
 ROW_H = 34
 LABEL_W = 210
-# vitest tests-per-module (top 15 + other). Verified against the live
-# 438/438 run (2026-09-24, cursor v5.3 — agent-cursor suite grew 18 -> 35).
+# vitest tests-per-module (top 15 + other). MEASURED, not hand-maintained:
+# `npx vitest run --reporter=json --outputFile=json.tmp`, then sum
+# assertionResults per test file. Verified against the live 967/967 run
+# (2026-09-28, HEAD 88bcfdb).
+#
+# When refreshing: rerun that command and replace this table. The `other`
+# row is derived, so it self-corrects as long as the total matches.
+TOTAL = 967
+FILES = 63
 top = [
-    ("pii-sanitizer", 63), ("pii-recall-precision", 37), ("agent-cursor", 35),
-    ("agent-runner", 30), ("pii-detector", 24), ("firefox-compatibility", 21),
-    ("session-manager", 21), ("loop-detection", 15), ("user-profile", 13),
-    ("vision-utilities", 12), ("context", 11), ("dom-extraction", 11),
-    ("vision-confirm", 11), ("actions-resilience", 10), ("goal-backstop", 10),
+    ("pii-sanitizer", 63), ("firewall-164", 42), ("pii-recall-precision", 37),
+    ("agent-runner", 36), ("nav-url-159", 36), ("agent-cursor", 35),
+    ("validators-175", 34), ("context-uri-170-165", 33), ("nav-relative-192", 31),
+    ("execute-channel-159", 29), ("phone-handoff-166-169", 26), ("pii-detector", 24),
+    ("nav-channel-159", 22), ("passive-watch-144", 22), ("dead-code-158", 21),
 ]
-other = 438 - sum(v for _, v in top)
-rows = top + [("other (19 files)", other)]
+assert sum(v for _, v in top) <= TOTAL, "top-15 exceeds the measured total"
+other = TOTAL - sum(v for _, v in top)
+rows = top + [(f"other ({FILES - len(top)} files)", other)]
 maxv = max(v for _, v in rows)
 
 def bar_chart(title, subtitle, data, value_color, bar_w_scale=3.4, w=760, row_h=34):
@@ -50,7 +58,7 @@ def bar_chart(title, subtitle, data, value_color, bar_w_scale=3.4, w=760, row_h=
 
 svg1 = bar_chart(
     "Unit test coverage by module (vitest)",
-    "438/438 passing · 34 test files · verified 2026-09-24 (cursor v5.3)",
+    f"{TOTAL}/{TOTAL} passing · {FILES} test files · verified 2026-09-28 (HEAD 88bcfdb)",
     [(n, v) for n, v in rows], GREEN,
 )
 open(os.path.join(OUT, "tests-by-module.svg"), "w").write(svg1)

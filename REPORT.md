@@ -1,4 +1,5 @@
 # SIH 2026 · PS171 — Browser Agent
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 ## Technical Approach & Project Report
 
 > **⏱ Submission snapshot (2026-09-02):** 240 tests · 1.21 MB build. The repo has since grown well past

@@ -1,4 +1,5 @@
 # PR Summary: Final Session Improvements (Sep 2, 2026)
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Overview
 This PR documents the final round of improvements made before the demo video recording. All code changes have been committed to main.

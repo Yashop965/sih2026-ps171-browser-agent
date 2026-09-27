@@ -5,13 +5,13 @@
 **Hackathon:** Smart India Hackathon 2026 (College Internal Round)  
 **Original deadline:** September 2, 2026 (production hardening continues post-submission)
 
-![vitest: 543/543](https://img.shields.io/badge/vitest-543%2F543%20passing-22c55e?style=for-the-badge)
-![pytest: 87/87](https://img.shields.io/badge/pytest-87%2F87%20passing-22c55e?style=for-the-badge)
-![build: ~24 MB](https://img.shields.io/badge/build-%7E24%20MB%20chrome-mv3%20(ORT%20wasm%20included)-6366f1?style=for-the-badge)
+![vitest: 967/967](https://img.shields.io/badge/vitest-967%2F967%20passing-22c55e?style=for-the-badge)
+![pytest: 148/148](https://img.shields.io/badge/pytest-148%2F148%20passing-22c55e?style=for-the-badge)
+![build: 23.02 MB](https://img.shields.io/badge/build-23.02%20MB%20chrome-mv3%20(ORT%20wasm%20included)-6366f1?style=for-the-badge)
 ![PII off-device: 0](https://img.shields.io/badge/PII%20off-device-0%20leaks-ef4444?style=for-the-badge)
 
-> **Current state (verified 2026-09-26):** `main` clean · **543/543** vitest +
-> **87/87** pytest passing · Chrome MV3 build **~24 MB** (includes the on-device
+> **Current state (verified 2026-09-28):** `main` clean · **967/967** vitest +
+> **148/148** pytest passing · Chrome MV3 build **23.02 MB** (includes the on-device
 > Florence-2 model stack: 907 KB worker bundle + ORT wasm/loader) · 0 PII
 > off-device · **cross-tab orchestrator P1–P4 shipped** (sequenced multi-tab
 > handoff, outbound-send human gate, passive watch, VLM offscreen host) ·
@@ -97,25 +97,25 @@ Most AI agent pipelines run server-side, requiring users to send full screenshot
 
 ## 📊 Live Dashboard
 
-*Every number below was re-verified on 2026-09-22 by running the suites — not copy-pasted from a stale report. Charts are inline SVG (`media/charts/`), regenerated any time via `python scripts/generate_readme_charts.py`.*
+*Every number below was re-verified on 2026-09-28 by running the suites — not copy-pasted from a stale report. Charts are inline SVG (`media/charts/`), regenerated any time via `python scripts/generate_readme_charts.py`.*
 
 ### Health
 
 | Metric | Value | Since |
 |---|---|---|
-| **Vitest unit tests** | **438 / 438 passing** · 34 files | cursor v5.3 work |
-| **Python server tests** | **74 / 74 passing** · 9 files | PR #127 |
-| **Chrome MV3 build** | **1.33 MB** (Firefox MV2 same tree) | PR #137 |
+| **Vitest unit tests** | **967 / 967 passing** · 63 files | 2026-09-28 |
+| **Python server tests** | **148 / 148 passing** · 15 files | 2026-09-28 |
+| **Chrome MV3 build** | **23.02 MB** — content script 121 KB; the rest is the ORT wasm + on-device Florence-2 stack, which is the feature | 2026-09-28 |
 | **PII off-device leaks** | **0** (raw PII never leaves the machine; last-line firewall on egress) | audit C1–C3 |
 | **Live 3-hop E2E** | **Wikipedia ×3, 6/6 checklist, DONE** on the fast planner model (~7 s/step) | PR #133 |
 | **Planner model** | **zero-reasoning `agnes-3.0-flash`** — ~4× faster than the CoT default, no degraded calls | PR #133 |
-| **Repo** | **243 commits · 64 PRs · 66 issues closed** | today |
-| **Codebase** | **~12.4 k LOC** client TS + **~6.8 k LOC** server Python | today |
+| **Repo** | **264 commits · 86 PRs merged · 104 issues closed** | 2026-09-28 |
+| **Codebase** | **~16.9 k LOC** client TS + **~2.8 k LOC** server Python | 2026-09-28 |
 
 <details>
-<summary>📈 Test coverage by module (438 tests, top 15 + rest) — click to expand</summary>
+<summary>📈 Test coverage by module (967 tests, top 15 + rest) — click to expand</summary>
 
-![Unit test coverage by module (438 passing, 34 files)](media/charts/tests-by-module.svg)
+![Unit test coverage by module (967 passing, 63 files)](media/charts/tests-by-module.svg)
 
 </details>
 

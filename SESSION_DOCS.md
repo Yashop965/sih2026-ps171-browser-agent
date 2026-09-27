@@ -1,8 +1,10 @@
 # SIH2026 PS171 - Session Documentation
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 > **⏱ Snapshot (Sep 15 build state).** The repo has since shipped the live
-> autonomy re-run + planner checklist (Sep 17): now **303/303 tests / 1.22 MB**.
-> See `docs/SESSION-2026-09-16.md` and `docs/SESSION-2026-09-17.md`.
+> VLM host, the cross-tab orchestrator and the audit-remediation batches.
+> This doc previously read "now 303/303 tests / 1.22 MB", a figure that has
+> itself since been superseded. Current numbers: [`README.md`](README.md).
 
 **Date:** September 15, 2026  
 **Session Duration:** ~4 hours  

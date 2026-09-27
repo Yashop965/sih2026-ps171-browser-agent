@@ -1,4 +1,5 @@
 # Screenshot Capture Guide for SIH2026 PS171 Video
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Quick Method: Use Browser Tool
 

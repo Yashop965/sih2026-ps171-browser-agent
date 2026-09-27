@@ -1,4 +1,5 @@
 # Content Script Troubleshooting
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Problem: "Could not establish connection. Receiving end does not exist"
 
