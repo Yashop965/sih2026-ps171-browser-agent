@@ -23,24 +23,42 @@ Three independent controls, each of which alone is a meaningful barrier:
 
 import os
 import hmac
+import re
 from typing import Optional
 from fastapi import HTTPException, Request
 
-# Origins allowed to call the API from a browser context. The extension's
-# service worker sends no Origin header, so this only gates ordinary web pages.
-DEFAULT_ALLOWED_ORIGINS = [
-    "chrome-extension://localhost",
-    "moz-extension://localhost",
+# Origins allowed to call the API from a browser context.
+#
+# Chrome and Firefox do NOT derive a stable extension id a server can guess:
+# an unpacked extension's id is a hash of its install PATH, so it differs per
+# machine and per directory. The previous hardcoded
+# ["chrome-extension://localhost", ...] therefore 403'd the real extension in
+# every ordinary unpacked install - verified live: the SW's own fetch to
+# /plan returned `{"detail":"Origin not allowed"}` while the planner was
+# healthy and curl succeeded.
+#
+# The scheme itself is the security boundary here, not the id. A hostile web
+# page is always `https:`/`http:` and can never present a
+# `chrome-extension://` or `moz-extension://` origin to a fetch it makes
+# itself. So matching the scheme admits the extension regardless of where it is
+# installed, and still rejects every web page - which is the entire threat this
+# control exists for (issue #172).
+#
+# An operator who wants a tighter list can still set SERVER_ALLOWED_ORIGINS to
+# exact origins; that replaces the defaults wholesale.
+DEFAULT_ALLOWED_ORIGIN_PATTERNS = [
+    r"chrome-extension://[a-z]{32}",
+    r"moz-extension://[a-z0-9-]+",
 ]
 
 TOKEN_HEADER = "X-Agent-Token"
 
 
 def configured_origins() -> list[str]:
-    """Origins from SERVER_ALLOWED_ORIGINS, else the defaults."""
+    """Exact origins from SERVER_ALLOWED_ORIGINS, else the scheme defaults."""
     raw = os.getenv("SERVER_ALLOWED_ORIGINS", "")
     parsed = [o.strip() for o in raw.split(",") if o.strip()]
-    return parsed or list(DEFAULT_ALLOWED_ORIGINS)
+    return parsed or list(DEFAULT_ALLOWED_ORIGIN_PATTERNS)
 
 
 def expected_token() -> Optional[str]:
@@ -98,12 +116,16 @@ def require_api_token(request: Request) -> None:
 
 
 def origin_is_allowed(origin: Optional[str]) -> bool:
-    """
-    Allow requests with no Origin (extension service worker, curl, tests).
+    """Allow requests with no Origin (curl, tests); gate everything else.
 
     A browser always sends Origin on cross-origin fetches, so its absence means
-    this is not a hostile web page. Anything present must be on the allowlist.
+    this is not a hostile web page. Anything present must match the allowlist.
+
+    Each entry is treated as a regex, not a literal, so the defaults can match
+    any extension id while an operator-supplied exact origin still works
+    (a literal string is a valid regex that matches itself). `fullmatch` keeps
+    a pattern from matching a longer hostile origin by prefix.
     """
     if not origin:
         return True
-    return origin in configured_origins()
+    return any(re.fullmatch(p, origin) for p in configured_origins())
