@@ -1,4 +1,5 @@
 # SIH2026 PS171 - Final Submission Package
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 > **⏱ This is the 2026-09-02 submission snapshot** (240 tests / 1.21 MB). The repo has since
 > grown well past that (current gates: **543/543 vitest + 87/87 pytest, ~24 MB build** — post-deadline

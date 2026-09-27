@@ -1,4 +1,5 @@
 # 🎬 SIH2026 PS171 - Video Production Guide
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Complete Video Pipeline for SIH Submission
 

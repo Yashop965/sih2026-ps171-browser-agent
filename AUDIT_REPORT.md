@@ -1,4 +1,5 @@
 # Codebase Audit Report — ps171-browser-agent
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 **Date:** 2026-09-10  
 **Scope:** `src/lib/actions.ts`, `src/lib/dom.ts`, `src/entrypoints/content.ts`, `src/entrypoints/background.ts`, `src/lib/sessionManager.ts`, `src/lib/pii/sanitizer.ts`, `src/lib/pii/firewall.ts`, `src/hooks/useSystemResources.ts`  
 **Result:** 182 tests passing, 1.21 MB build. Production readiness gaps found in 4 categories.

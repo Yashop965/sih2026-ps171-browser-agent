@@ -1,4 +1,5 @@
 # Firefox Compatibility Testing Report
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 ## Summary
 

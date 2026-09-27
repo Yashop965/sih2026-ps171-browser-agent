@@ -1,4 +1,5 @@
 # SIH2026 PS171 - Final Status Report
+> **Snapshot — not current.** Historical point-in-time report. **Current numbers: see [`README.md`](README.md).**
 
 > **Current state (2026-09-26):** gates **543/543 vitest + 87/87 pytest, ~24 MB build**
 > (post-deadline hardening: autonomy #84–#86, checklist #99, port-retry #105,
