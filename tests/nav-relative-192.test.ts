@@ -120,8 +120,16 @@ describe('#192 review: the ordering and the prompt', () => {
     // driveTab must come BEFORE resolveNavUrl in navigateChannel. If the url
     // were resolved first there would be no tab, and therefore no base, and
     // the fix would silently do nothing.
+    //
+    // Scoped to the body of navigateChannel - it ends at the first line that
+    // is exactly `    };` (four spaces, closing the arrow function). Searching
+    // for a following `const` name is fragile: the first version looked for
+    // `const executeChannel`, which is defined BEFORE this one, so the search
+    // returned -1 and the slice silently covered the wrong region.
     const i = bg.indexOf('const navigateChannel');
-    const body = bg.slice(i, i + 2000);
+    const end = bg.indexOf('\n    };', i);
+    expect(end).toBeGreaterThan(i);
+    const body = bg.slice(i, end);
     const driveAt = body.indexOf('driveTab()');
     const resolveAt = body.indexOf('resolveNavUrl(url');
     expect(driveAt).toBeGreaterThan(-1);
@@ -144,6 +152,25 @@ describe('#192 review: the ordering and the prompt', () => {
     // not there. Both branches must name the real problem.
     expect(bg).toContain('relative url but the current page url is unknown');
     expect(bg).toContain('relative url could not be resolved');
+  });
+
+  it('gives the NAVIGATE_TAB handler a base too', () => {
+    // Review of #191: the handler was still calling resolveNavUrl with NO
+    // base and ignoring needsBase, so a relative url there "navigated" to the
+    // placeholder host. Fixed in the same change; this guards it.
+    const i = bg.indexOf("case 'NAVIGATE_TAB'");
+    const body = bg.slice(i, i + 3000);
+    const flat = body.replace(/\s+/g, ' ');
+    expect(flat).toMatch(/resolveNavUrl\(target, currentUrl\)/);
+    expect(body).toContain('nav.needsBase');
+  });
+
+  it('both navigation paths handle needsBase', () => {
+    // Two call sites, two places that must refuse rather than navigate to the
+    // placeholder. Counted so a third copy cannot appear unnoticed.
+    const flat = bg.replace(/\s+/g, ' ');
+    const needsBaseChecks = flat.match(/if \(nav\.needsBase\)/g) ?? [];
+    expect(needsBaseChecks.length).toBe(2);
   });
 
   it('the planner prompt now requires an absolute url', () => {

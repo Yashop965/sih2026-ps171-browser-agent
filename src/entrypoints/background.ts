@@ -758,8 +758,20 @@ export default defineBackground({
       try {
         // #192: resolve the tab FIRST, because a relative target needs a real
         // base and the tab's current url is the only real base available in a
-        // service worker. `driveTab` had no side effect on ordering - it only
-        // picks a tab id - so hoisting it above the url check is safe.
+        // service worker.
+        //
+        // This reorder has one side effect worth naming, which the review of
+        // #191 caught: `driveTab` is not pure. When `currentTargetTab` is set
+        // but its tab is gone or no longer a web page, driveTab clears
+        // `currentTargetTab` and falls back to the active tab. So a REFUSED
+        // url (javascript:, a relative url with no usable base) now clears
+        // that state, where previously the refusal happened first and left it
+        // alone.
+        //
+        // That is the safer of the two behaviours: the pinned tab is already
+        // dead, and leaving a stale id set is what makes a later
+        // tabs.query fallback drift a run onto the wrong tab. The next
+        // driveTab call re-establishes the target from the active tab anyway.
         const tabId = await driveTab();
         if (tabId === undefined) return { ok: false, error: 'No web tab found' };
 
@@ -1339,9 +1351,29 @@ export default defineBackground({
               // test could reach without standing up a whole service worker
               // with a fake browser.tabs, and it guards the only path that
               // navigates a tab without going through the content script.
-              const nav = resolveNavUrl(target);
+              //
+              // #192: the base is this tab's current url, so a relative target
+              // resolves against the page being navigated. Review of #191 found
+              // this handler was still calling resolveNavUrl with no base, so a
+              // relative url here still landed on the .invalid placeholder and
+              // "navigated" to nowhere.
+              const currentUrl = await browser.tabs
+                .get(tabId)
+                .then((t) => t.url)
+                .catch(() => undefined);
+              const nav = resolveNavUrl(target, currentUrl);
               if (!nav.ok || !nav.url) {
                 sendResponse({ ok: false, error: nav.error ?? 'invalid url' });
+                return;
+              }
+              if (nav.needsBase) {
+                sendResponse({
+                  ok: false,
+                  error:
+                    currentUrl === undefined
+                      ? 'relative url but the current page url is unknown - use an absolute url'
+                      : 'relative url could not be resolved - use an absolute url',
+                });
                 return;
               }
               const url = nav.url;
