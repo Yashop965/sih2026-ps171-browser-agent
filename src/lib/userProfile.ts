@@ -23,7 +23,7 @@ export type ProfileKey = 'name' | 'email' | 'phone' | 'address' | 'company' | 'c
 export type UserProfile = Partial<Record<ProfileKey, string>>;
 
 /** Storage key (browser.storage.local) — matches the sih_* convention. */
-export const PROFILE_STORAGE_KEY = 'sih_user_profile';
+const PROFILE_STORAGE_KEY = 'sih_user_profile';
 
 /**
  * Stable, non-reversible tokens. The LLM sees only the token; the executor

@@ -455,7 +455,7 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
   - Batch processing
   - Memory pool management
   
-- [x] **Latency Profiling** (`src/lib/profiler.ts`)
+- [ ] **Latency Profiling** — *not implemented; the unused `profiler.ts` scaffold was removed in #158*
   - Performance mark/measure API
   - Inference timing breakdown
   - Bottleneck identification
@@ -504,7 +504,7 @@ This ensures Firefox compatibility (WASM) while maximizing performance on Chromi
   - GPU tensor allocation
   - Compute shader optimization
   - Memory pool management
-- [x] **Latency Profiling** (`src/lib/profiler.ts`)
+- [ ] **Latency Profiling** — *not implemented; the unused `profiler.ts` scaffold was removed in #158*
   - Performance mark/measure API
   - Inference timing breakdown
   - Bottleneck identification

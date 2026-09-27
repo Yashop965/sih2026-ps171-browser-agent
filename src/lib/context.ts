@@ -13,7 +13,6 @@
  * server unless the user explicitly triggers an action that touches the data.
  */
 
-import { browser } from 'wxt/browser';
 import { storageGet, storageSet, storageRemove } from './storage';
 
 // ─── Public Types ────────────────────────────────────────────────────────────
@@ -506,20 +505,3 @@ export class SessionTracker {
 }
 
 // ─── Init / Cleanup ──────────────────────────────────────────────────────────
-
-/**
- * Call once on background startup to register the tab-closed listener and
- * run a one-time cleanup pass.
- */
-export async function initContextSystem(): Promise<void> {
-  // Prune stale completed sessions on every start-up.
-  const removed = await SessionTracker.getInstance().pruneStaleSessions();
-  if (removed > 0) {
-    console.log(`[context] Pruned ${removed} stale session(s)`);
-  }
-
-  // Listen for tab closures so we can mark orphaned sessions as aborted.
-  browser.tabs.onRemoved.addListener(async (tabId) => {
-    await SessionTracker.getInstance().onTabClosed(tabId);
-  });
-}

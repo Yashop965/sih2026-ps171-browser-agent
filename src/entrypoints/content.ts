@@ -12,6 +12,7 @@ import { executeWithRetry, executeWithResilience, circuitBreaker } from '../lib/
 import { bridgeGroundBoxes, type GroundBox } from '../lib/visionGround';
 import { startThinkingPulse, stopThinkingPulse } from '../lib/agentCursor';
 import { validateAadhaar, validatePAN } from '../lib/pii/validators';
+import { registerOverlayRoot } from '../lib/overlayRegistry';
 // #176: the in-content Florence-2 pipeline is GONE, and that is the point of
 // this removal. Nothing ever sent VISION_EXTRACT / VISION_OCR /
 // VISION_STATUS to a tab - the only VISION_* send in the codebase forwarded a
@@ -71,6 +72,13 @@ function isAgentRequest(msg: unknown): msg is AgentRequest {
 
 const HIGHLIGHT_ID = '__agent-highlight';
 const HIGHLIGHT_MS = 2500;
+
+// #160: the highlight box is `pointer-events: none`, so elementFromPoint skips
+// it and the occlusion guard can never be confused by it - same as the cursor.
+// Registered anyway, and for the same reason: the guard should know about our
+// own UI by contract, not by each overlay happening to remember to opt out of
+// pointer events. An interactive overlay WILL break that coincidence.
+registerOverlayRoot(HIGHLIGHT_ID);
 
 export default defineContentScript({
   matches: ['<all_urls>'],

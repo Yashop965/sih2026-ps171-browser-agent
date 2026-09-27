@@ -30,9 +30,10 @@ This document tracks individual contributions for the Smart India Hackathon 2026
   - Clean TypeScript implementation (no `: any` types)
 - **Commit:** Multiple commits in PR #26
 
-#### 3. Latency Profiler (Issue #16, PR #27)
-- **Files:** `src/lib/profiler.ts`, `src/hooks/useProfiler.ts`, `src/components/LatencyHUD.tsx`
-- **Deliverables:**
+#### 3. Latency Profiler (Issue #16, PR #27) — NOT SHIPPED
+- **Claimed files:** `src/lib/profiler.ts`, `src/hooks/useProfiler.ts`, `src/components/LatencyHUD.tsx`
+- **Actual state:** only `profiler.ts` ever existed; the hook and the HUD were never built, and nothing ever imported the module. The unused scaffold was deleted in #158, so this deliverable is **not** in the product.
+- **Deliverables (claimed in PR #27, never delivered):**
   - PerformanceMark interface for timing operations
   - React hook for live performance metrics
   - HUD component showing per-step latency

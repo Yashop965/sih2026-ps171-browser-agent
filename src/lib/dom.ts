@@ -367,7 +367,7 @@ export const EXTRACT_CAP = 250;
 // the last extract() call. 0 until extract() has run (and while the page has
 // fewer than the cap).
 let lastOmitted = 0;
-export function getOmittedCount(): number {
+function getOmittedCount(): number {
   return lastOmitted;
 }
 

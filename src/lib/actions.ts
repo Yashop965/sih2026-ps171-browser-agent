@@ -9,6 +9,7 @@ import {
   verifyElementFreshness,
 } from './dom';
 import { showCursor, hideCursor, pulseCursor, type CursorActionKind } from './agentCursor';
+import { isOwnOverlayNode } from './overlayRegistry';
 
 export interface Action {
   type: 'CLICK' | 'TYPE' | 'SCROLL' | 'SELECT' | 'NAVIGATE' | 'WAIT' | 'KEY' | 'DONE';
@@ -127,6 +128,20 @@ function isCovered(el: Element): boolean {
     return false;
   }
   if (hit === null || hit === undefined) return false;
+  // #160: the node on top is one of the extension's own overlays. This is the
+  // only case where "something is on top" is not the user's problem to solve -
+  // a nudge/stop control is pointer-events:auto by design, so it genuinely
+  // occludes, and without this the agent refuses to fill a field the user can
+  // plainly see. Everything else stays fail-closed.
+  //
+  // This sits AFTER the `hit === null` bail, which is deliberate and load-
+  // bearing: isOwnOverlayNode(null) is false, so hoisting the call above it
+  // would be dead code. It also sits after the indeterminate cases (no
+  // elementFromPoint, zero rect, a throwing hit-test), all of which mean
+  // "cannot tell" and must keep returning false rather than reaching the
+  // registry. Mutation-tested: removing this line fails the suite; hoisting it
+  // does not, and should not - the two are equivalent.
+  if (isOwnOverlayNode(hit)) return false;
   // Covered when the topmost node at the center is NOT inside this element.
   // An ancestor hit counts as covered: if an ancestor paints on top at that
   // pixel, this element is behind it (clicking the ancestor is the safe

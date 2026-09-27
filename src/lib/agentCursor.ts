@@ -40,6 +40,7 @@
 // exercised in the live browser.
 
 import { gsap } from 'gsap';
+import { registerOverlayRoot } from './overlayRegistry';
 
 export type CursorActionKind = 'CLICK' | 'TYPE' | 'SELECT' | 'KEY';
 
@@ -52,6 +53,15 @@ export interface CursorPosition {
 }
 
 const CURSOR_ID = '__agent-cursor';
+
+// #160: register the cursor host as an extension-owned overlay root, so the
+// occlusion guard in actions.ts can tell "our UI is on top" from "the page is
+// in the way" if a future overlay is ever interactive. Today this is
+// belt-and-braces - the host and every child are `pointer-events: none`, so
+// elementFromPoint skips the whole subtree and the guard can never be
+// confused by the cursor. Registering by ID (not by element) because the host
+// is created lazily and re-created on every showCursor cycle.
+registerOverlayRoot(CURSOR_ID);
 
 // v3: clean, saturated focus colors for the target halo (action kind).
 const KIND_COLORS: Record<CursorActionKind, string> = {
