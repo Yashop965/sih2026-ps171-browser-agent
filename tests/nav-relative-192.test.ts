@@ -114,6 +114,9 @@ describe('a hostile or unusable base cannot widen what is reachable', () => {
 
 describe('#192 review: the ordering and the prompt', () => {
   const bg = readFileSync('src/entrypoints/background.ts', 'utf-8');
+  // Since #159 step 2 the planner navigation path lives in lib/navChannel.ts;
+  // background.ts keeps only the wiring adapter and the NAVIGATE_TAB handler.
+  const navChannel = readFileSync('src/lib/navChannel.ts', 'utf-8');
   const planner = readFileSync('server/planner.py', 'utf-8');
 
   it('resolves the tab before the url, so a real base exists', () => {
@@ -121,16 +124,19 @@ describe('#192 review: the ordering and the prompt', () => {
     // were resolved first there would be no tab, and therefore no base, and
     // the fix would silently do nothing.
     //
-    // Scoped to the body of navigateChannel - it ends at the first line that
-    // is exactly `    };` (four spaces, closing the arrow function). Searching
-    // for a following `const` name is fragile: the first version looked for
+    // Scoped to the function body - it ends at the first line that is exactly
+    // `}` at column 0 (the module-level function's closing brace). Searching
+    // for a following `const` name is fragile: an earlier version looked for
     // `const executeChannel`, which is defined BEFORE this one, so the search
     // returned -1 and the slice silently covered the wrong region.
-    const i = bg.indexOf('const navigateChannel');
-    const end = bg.indexOf('\n    };', i);
+    //
+    // Read from lib/navChannel.ts since #159 step 2; the adapter left in
+    // background.ts is wiring only and has no ordering to preserve.
+    const i = navChannel.indexOf('export async function navigateChannel');
+    const end = navChannel.indexOf('\n}', i);
     expect(end).toBeGreaterThan(i);
-    const body = bg.slice(i, end);
-    const driveAt = body.indexOf('driveTab()');
+    const body = navChannel.slice(i, end);
+    const driveAt = body.indexOf('deps.driveTab()');
     const resolveAt = body.indexOf('resolveNavUrl(url');
     expect(driveAt).toBeGreaterThan(-1);
     expect(resolveAt).toBeGreaterThan(-1);
@@ -142,14 +148,17 @@ describe('#192 review: the ordering and the prompt', () => {
     // dot-tolerant: Prettier wraps this chain as
     //   browser.tabs\n    .get(tabId)\n    .then(...)
     // so a strict `browser.tabs.get` never matches the formatted source.
-    const flat = bg.replace(/\s+/g, ' ');
+    const flat = navChannel.replace(/\s+/g, ' ');
     expect(flat).toMatch(/browser\.tabs\s*\.\s*get\(tabId\)\s*\.\s*then\(\(t\) => t\.url\)/);
     expect(flat).toMatch(/resolveNavUrl\(url, currentUrl\)/);
   });
 
   it('reports a precise reason instead of the generic "invalid url"', () => {
     // "invalid url" would send the planner looking for a syntax error that is
-    // not there. Both branches must name the real problem.
+    // not there. Both branches must name the real problem. One branch is in
+    // the extracted module, the other in the message handler still inline.
+    expect(navChannel).toContain('relative url but the current page url is unknown');
+    expect(navChannel).toContain('relative url could not be resolved');
     expect(bg).toContain('relative url but the current page url is unknown');
     expect(bg).toContain('relative url could not be resolved');
   });
@@ -166,9 +175,11 @@ describe('#192 review: the ordering and the prompt', () => {
   });
 
   it('both navigation paths handle needsBase', () => {
-    // Two call sites, two places that must refuse rather than navigate to the
-    // placeholder. Counted so a third copy cannot appear unnoticed.
-    const flat = bg.replace(/\s+/g, ' ');
+    // Two call sites in TWO files, each of which must refuse rather than
+    // navigate to the placeholder. Counted across both so a third copy cannot
+    // appear unnoticed - a duplicated needsBase check is the #191 bug waiting
+    // to come back.
+    const flat = (bg + navChannel).replace(/\s+/g, ' ');
     const needsBaseChecks = flat.match(/if \(nav\.needsBase\)/g) ?? [];
     expect(needsBaseChecks.length).toBe(2);
   });
