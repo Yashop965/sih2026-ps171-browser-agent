@@ -134,7 +134,14 @@ def test_allowlisted_origin_is_accepted(monkeypatch):
     r = client.post(
         "/plan",
         json={},
-        headers={"X-Agent-Token": "s3cret", "Origin": "chrome-extension://localhost"},
+        headers={
+            "X-Agent-Token": "s3cret",
+            # A REAL unpacked extension id, not a guessable one. Chrome derives
+            # this from the install path, so it is different on every machine -
+            # which is exactly why the old hardcoded `chrome-extension://localhost`
+            # allowlist rejected the real extension with 403 Origin not allowed.
+            "Origin": "chrome-extension://npflaobdhllbgleohljinimffoolfpng",
+        },
     )
     assert r.status_code != 403
 
@@ -147,6 +154,53 @@ def test_origin_allowlist_is_configurable(monkeypatch):
     assert sec.origin_is_allowed("https://x.test")
     assert not sec.origin_is_allowed("https://evil.example")
 
+
+def test_real_unpacked_extension_origin_is_allowed(monkeypatch):
+    """The regression this file exists for: a REAL extension id must pass.
+
+    Chrome derives an unpacked extension id from its install PATH, so it is
+    different per machine and per directory. The previous policy hardcoded
+    ["chrome-extension://localhost", ...] and returned 403
+    "Origin not allowed" to the actual service worker - found live, with the
+    planner healthy and curl succeeding.
+    """
+    monkeypatch.delenv("SERVER_ALLOWED_ORIGINS", raising=False)
+    sec = _load_security()
+    for ext_id in (
+        "npflaobdhllbgleohljinimffoolfpng",
+        "abcdefghijklmnopabcdefghijklmnop",
+        "ponmlkjihgfedcbaponmlkjihgfedcba",
+    ):
+        assert sec.origin_is_allowed(f"chrome-extension://{ext_id}")
+    assert sec.origin_is_allowed("moz-extension://abc123-def-456")
+
+
+def test_web_pages_still_cannot_drive_the_planner(monkeypatch):
+    """Widening to the extension SCHEME must not admit any web page.
+
+    This is the whole point of control #2 in issue #172: a hostile page the
+    user visited must not be able to POST to /plan.
+    """
+    monkeypatch.delenv("SERVER_ALLOWED_ORIGINS", raising=False)
+    sec = _load_security()
+    for hostile in (
+        "https://evil.example",
+        "http://localhost:3000",
+        "https://chrome-extension://abc",
+        "chrome-extension://not-a-32-char-id",
+        "null",
+    ):
+        assert not sec.origin_is_allowed(hostile), hostile
+
+
+def test_operator_can_still_pin_exact_origins(monkeypatch):
+    """SERVER_ALLOWED_ORIGINS replaces the defaults, as an escape hatch."""
+    monkeypatch.setenv(
+        "SERVER_ALLOWED_ORIGINS", "chrome-extension://npflaobdhllbgleohljinimffoolfpng"
+    )
+    sec = _load_security()
+    assert sec.origin_is_allowed("chrome-extension://npflaobdhllbgleohljinimffoolfpng")
+    assert not sec.origin_is_allowed("chrome-extension://someotherid")
 
 def test_absent_origin_is_allowed(monkeypatch):
     """Extension SW, curl and tests send no Origin. A browser always does."""
