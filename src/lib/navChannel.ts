@@ -39,6 +39,9 @@
 
 import { browser } from 'wxt/browser';
 import { resolveNavUrl } from './navUrl';
+// #206: the arrival-time harvest policy, extracted so the WHEN is testable
+// without a browser. The WHAT (tokens + masked labels only) stays in tabHandoff.
+import { shouldHarvestOnArrival } from './harvestTiming';
 
 /** The shape `background.ts` keeps for its pinned per-run target tab. */
 interface PinnedTarget {
@@ -96,6 +99,24 @@ export interface NavigateDeps {
    * tabs.query fallback cannot drift the run onto another tab (#141).
    */
   onTargetChanged: (target: PinnedTarget) => void;
+  /**
+   * #206: harvest the page we just ARRIVED on.
+   *
+   * Before this, a page was only harvested on departure (switchTab harvests
+   * the tab it leaves). That left the source page's own values out of the
+   * handoff for any task that stayed on it — observed live as a 0/12 run with
+   * `need to fill 0 fields`. Reading a value and then typing it somewhere else
+   * happens while the agent is still ON the page, so arrival is the moment that
+   * matters.
+   *
+   * Called after the load settles and after the target is re-asserted, and
+   * best-effort: a harvest failure must never fail a navigation that worked.
+   *
+   * The #141 firewall is untouched. This populates the SW-local handoff only;
+   * `handoffForPlanner` still sends the planner tokens + masked labels, and
+   * `resolveHandoffValue` still swaps in the real value on-device at write time.
+   */
+  onNavigated?: (tabId: number, url: string) => Promise<void> | void;
   /**
    * Wait for the tab to finish loading. Injected rather than imported so this
    * module has no dependency on the service worker's own internals.
@@ -176,6 +197,24 @@ export async function navigateChannel(url: unknown, deps: NavigateDeps): Promise
     // tabs.query fallback can't drift the run onto another tab.
     const moved = await browser.tabs.get(tabId).catch(() => null);
     deps.onTargetChanged({ tabId, windowId: moved?.windowId ?? 0 });
+    // #206: harvest the page we ARRIVED on, after the load settled and after
+    // the pinned target is re-asserted. Before the load it would read the old
+    // document; before onTargetChanged it could read the wrong tab.
+    //
+    // Best-effort by construction: a page that yields no fields, a content
+    // script that does not answer, or a thrown error must all leave a
+    // successful navigation successful.
+    if (deps.onNavigated) {
+      try {
+        const arrivedUrl = moved?.url ?? target;
+        if (shouldHarvestOnArrival({ tabId, url: arrivedUrl }).harvest) {
+          await deps.onNavigated(tabId, arrivedUrl);
+        }
+      } catch {
+        // Swallowed on purpose - see above. The harvest is an enrichment, not
+        // a precondition for the navigation having worked.
+      }
+    }
     deps.logExecution({
       tabId,
       url: target,
