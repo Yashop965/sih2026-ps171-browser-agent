@@ -700,6 +700,18 @@ export default defineBackground({
         onTargetChanged: (target) => {
           currentTargetTab = target;
         },
+        // #206: harvest the page we just ARRIVED on, into the same handoff the
+        // departing-tab harvest uses, so a page the agent reads and then acts
+        // from contributes its values. Before this the only harvest was on
+        // departure, and a task that stayed on its source page (the common
+        // case for read-then-fill) had an empty handoff for the whole run.
+        //
+        // `harvestTabIntoHandoff` re-reads the tab's own url for `sourceUrl`,
+        // so the second argument is not needed here - but the signature keeps
+        // the arrival url available if the source attribution ever needs it.
+        onNavigated: async (tabId: number) => {
+          await harvestTabIntoHandoff(tabId);
+        },
         waitForTabLoad,
       });
 
@@ -832,6 +844,32 @@ export default defineBackground({
       // previous task's harvested values (a fresh run must not type values
       // it never read this task).
       resetCrossTabState();
+      // #206: harvest the page the task STARTS on.
+      //
+      // This is the case the live 0/12 run hit. The agent began on the data
+      // page and stayed there; the only harvest trigger was departure
+      // (switchTab) and the arriving one did not exist yet, so the handoff
+      // was empty for the entire run - the planner saw 2 nav links, sized
+      // itself with `need to fill 0 fields`, and had no value to copy.
+      //
+      // Read-then-fill starts here, on the source page. Departure harvesting
+      // cannot cover it, because the agent may never leave.
+      //
+      // AWAITED, not fire-and-forget. An earlier version used `void (async
+      // () => ...)` to keep the first /plan fast, and the live run proved that
+      // wrong: the harvest lost the race to step 1's plan request, so the
+      // planner still received an empty handoff and still logged `need to fill
+      // 0 fields`. The read is a single content-script message on a page the
+      // agent is already looking at - far cheaper than the planner round-trip it
+      // precedes, and the one thing that must land before the planner is asked
+      // what to do. Same reasoning as the awaited arrival harvest in
+      // navigateChannel: a floating promise here reproduces the exact bug.
+      try {
+        const [active] = await browser.tabs.query({ active: true, currentWindow: true });
+        if (active?.id !== undefined) await harvestTabIntoHandoff(active.id);
+      } catch {
+        /* best-effort: a page that cannot be read just yields no fields */
+      }
       // #115: remember the task text for the VLM grounding query
       // specialization (planner-visible text; not new PII). Cleared when
       // the run ends below.
