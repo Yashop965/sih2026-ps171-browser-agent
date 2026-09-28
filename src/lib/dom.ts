@@ -389,6 +389,14 @@ export function extract(): ExtractedElement[] {
 
   const results: ExtractedElement[] = [];
   let nextId = 1;
+  // #205: occurrence counter for colliding base ids, so a content-invariant id
+  // is actually unique within one extract. Keyed by the BASE id, so the ordinal
+  // counts only elements that would otherwise have shared an id - NOT all
+  // same-tag siblings. That distinction is load-bearing: an ordinal among all
+  // same-kind siblings would renumber a control whenever an unrelated control of
+  // the same kind is inserted earlier on the page, which reintroduces exactly
+  // the positional instability this id scheme exists to remove.
+  const baseIdCounts = new Map<string, number>();
   // Masked scope text is shared per scope element: dozens of controls in
   // one form read the same text, so read+mask it once per scope.
   const scopeCache = new Map<Element, string>();
@@ -404,17 +412,37 @@ export function extract(): ExtractedElement[] {
     // same element got a *different* stableId after any scroll. That
     // broke the "already filled" tracking across scroll/re-extract, which
     // is exactly what a scroll-to-reveal form walk needs. Now the id is
-    // built from what the element *is* (tag + name/for + role + label +
-    // its ordinal among same-kind siblings), never where it is on screen.
+    // built from what the element *is* (tag + name/for + role + label),
+    // never where it is on screen.
+    //
+    // #205: the ordinal this comment used to claim is now actually computed -
+    // but scoped to elements sharing the same BASE id, not to all same-kind
+    // siblings. The distinction is load-bearing: a same-kind-sibling ordinal
+    // would renumber a control whenever an unrelated control of that kind is
+    // inserted earlier on the page, reintroducing the positional instability
+    // the stable id exists to remove. Base-scoped also means a unique id is
+    // unchanged, so only genuinely-colliding ids gain a suffix.
     const nameAttr = el.getAttribute?.('name') || '';
     const forAttr = el.getAttribute?.('for') || '';
     const kind = el.tagName.toLowerCase();
-    const stableId = [
+    // #205: the base id is what the element IS; the ordinal disambiguates
+    // elements that share it. Measured: 7 controls (2x "Add row", 2x "Save",
+    // 3 unlabelled inputs) produced only 3 distinct ids without this, and the
+    // registry is last-write-wins, so the shadowed controls were unreachable.
+    const baseId = [
       kind,
       nameAttr || forAttr,
       getRole(el),
       label.replace(/\s+/g, '_').slice(0, 30) || 'unnamed',
     ].join('|');
+    const occurrence = baseIdCounts.get(baseId) ?? 0;
+    baseIdCounts.set(baseId, occurrence + 1);
+    // Only append the ordinal when it is actually needed. A unique id keeps its
+    // exact previous value, so every id that was already unambiguous - the
+    // overwhelming majority - is byte-identical to what it was before #205.
+    // That keeps this change from invalidating in-flight handoffs and history
+    // that reference a stableId.
+    const stableId = occurrence === 0 ? baseId : `${baseId}#${occurrence}`;
 
     registry.set(id, el);
     stableIdRegistry.set(stableId, el);
