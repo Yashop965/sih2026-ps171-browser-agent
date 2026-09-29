@@ -813,7 +813,22 @@ export default defineBackground({
           id: i.id,
           description: i.description,
         }));
-        const verdict = visionConfirm(ocrText, items);
+        // #208: fetch the page's checkbox state so an action-phrased goal
+        // ("tick the terms of service") can be proven from the DOM. Best
+        // effort and cheap - one message, no OCR. When it fails, every action
+        // goal falls back to "unverifiable", which is exactly the verdict it
+        // had before this change; it never becomes "assumed satisfied".
+        let checkboxState: Record<string, boolean> | undefined;
+        try {
+          const st = await withPortRetry(
+            async () => await browser.tabs.sendMessage(tabId, { type: 'CHECKBOX_STATE' }),
+            (v: any) => v === undefined
+          );
+          if (st.ok && st.value?.state) checkboxState = st.value.state;
+        } catch {
+          /* no DOM state - action goals stay unverifiable, which is safe */
+        }
+        const verdict = visionConfirm(ocrText, items, checkboxState);
         // Only confirm when EVERY open goal is matched; a partial match keeps
         // the deterministic loop running.
         return { confirmed: verdict.confirmed, detail: verdict.detail };

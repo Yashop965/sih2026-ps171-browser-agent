@@ -53,6 +53,7 @@ type AgentRequest =
   // `undefined` and reads as a lost message).
   | { type: 'CURSOR_THINKING'; on: boolean } // #132: agent-cursor breathing while the planner LLM is thinking
   | { type: 'HARVEST_FIELDS' } // #141: label/value pairs from this tab for cross-tab handoff
+  | { type: 'CHECKBOX_STATE' } // #208: DOM checkbox state, so an action goal can be proven
   | { type: 'VISION_GROUND'; boxes: GroundBox[]; query?: string }; // #115: bridge Florence-2 boxes -> DOM nodes
 
 function isAgentRequest(msg: unknown): msg is AgentRequest {
@@ -66,6 +67,13 @@ function isAgentRequest(msg: unknown): msg is AgentRequest {
     t === 'HIGHLIGHT' ||
     t === 'CURSOR_THINKING' ||
     t === 'HARVEST_FIELDS' ||
+    // #208: required, or the handler below is unreachable. The `AgentRequest`
+    // union and this guard are two independent lists of the same thing, and
+    // adding a type to one does not add it to the other - which is exactly how
+    // CHECKBOX_STATE answered `null` on a page that demonstrably had a
+    // checkbox: the guard returned false and the listener fell through to a bare
+    // `return`, so the channel reported `undefined` as a lost message.
+    t === 'CHECKBOX_STATE' ||
     t === 'VISION_GROUND'
   );
 }
@@ -199,6 +207,66 @@ export default defineContentScript({
      * write time. Passwords are never harvested. Capped at 50 fields,
      * 200 chars per value (dense pages stay bounded).
      */
+    /**
+     * #208: every checkbox/radio on the page, keyed by a name the goal text is
+     * likely to share with it.
+     *
+     * Name candidates, in order, so the most identifying wins: `name`, `id`,
+     * `aria-label`, then the text of the `<label for=...>` that points at it. A
+     * control with none of those contributes under `checkbox-N` rather than
+     * being dropped, because a dropped one reads as "not present" and would
+     * fail a goal that was actually satisfied.
+     *
+     * Values are booleans only. This is state, not content - which is exactly
+     * what the confirm path needs to prove a goal like "tick the terms of
+     * service" that OCR can never see.
+     */
+    /**
+     * Escape an attribute value for use inside a quoted selector.
+     *
+     * #208: `CSS.escape` is NOT reliably available here - it is absent in the
+     * extension's isolated world, where a ReferenceError thrown from inside the
+     * `readCheckboxState` try/catch was swallowed and the whole page reported as
+     * having no checkboxes. A local escape avoids depending on it, and the
+     * selector it builds is our own (an element id, not user input).
+     */
+    function attrSelectorEscape(value: string): string {
+      return value.replace(/["\\]/g, '\\$&');
+    }
+
+    function readCheckboxState(): Record<string, boolean> {
+      const out: Record<string, boolean> = {};
+      try {
+        const boxes = Array.from(
+          document.querySelectorAll<HTMLInputElement>('input[type="checkbox"], input[type="radio"]')
+        );
+        let anon = 0;
+        for (const el of boxes) {
+          const name =
+            el.getAttribute('name') ||
+            el.id ||
+            el.getAttribute('aria-label') ||
+            (el.id
+              ? (document.querySelector(`label[for="${attrSelectorEscape(el.id)}"]`)?.textContent ??
+                '')
+              : '') ||
+            el.closest('label')?.textContent ||
+            '';
+          const key = name.trim().replace(/\s+/g, ' ').slice(0, 40) || `checkbox-${anon++}`;
+          // First writer wins: duplicate labels would otherwise let a later
+          // unchecked box overwrite an earlier checked one.
+          if (!(key in out)) out[key] = !!el.checked;
+        }
+      } catch (e) {
+        // #208: log rather than swallow. A silent {} is indistinguishable from a
+        // page with no checkboxes, which is precisely how a `CSS.escape`
+        // ReferenceError in this function hid for a whole run and made the
+        // confirm path report "not verifiable" with no clue why.
+        console.warn('[PII-Agent] CHECKBOX_STATE read failed', e);
+      }
+      return out;
+    }
+
     function harvestFields(): Array<{ label: string; value: string }> {
       const out: Array<{ label: string; value: string }> = [];
       const seen = new Set<string>();
@@ -442,6 +510,18 @@ export default defineContentScript({
         // handoff. Best-effort, capped; the SW turns them into
         // <FIELD_N> tokens. A chrome:// or broken page yields [].
         return Promise.resolve({ ok: true, fields: harvestFields() });
+      }
+
+      if (message.type === 'CHECKBOX_STATE') {
+        // #208: the DOM state of this page's checkboxes/radios, keyed by a
+        // name drawn from id / name / aria-label / the associated label text.
+        //
+        // The OCR confirm path can never prove a goal like "tick the terms of
+        // service" - a ticked checkbox changes state but puts no text on
+        // screen. `checked` is the fact itself, read on device; nothing here
+        // ever leaves the page except booleans and a control name, and the
+        // name is masked by the caller before it reaches the LLM.
+        return Promise.resolve({ ok: true, state: readCheckboxState() });
       }
 
       if (message.type === 'VISION_GROUND') {
