@@ -97,7 +97,17 @@ function findElement(
   targetId: number | string | undefined
 ): ElementLike | undefined {
   if (elements && targetId !== undefined) {
-    return elements.find((el) => String(el.id) === String(targetId));
+    const key = String(targetId);
+    // #205: the planner may now emit a content-invariant stableId, which the
+    // executor resolves through the stableId registry. Matching only on `id`
+    // would find nothing, and the gate's whole job is to decide whether an
+    // action is a send - "no element" fails open into "cannot classify", which
+    // is the wrong direction for an outbound-send gate. Match the positional id
+    // first (unchanged behaviour), then the stable one.
+    return (
+      elements.find((el) => String(el.id) === key) ??
+      elements.find((el) => el.stableId !== undefined && String(el.stableId) === key)
+    );
   }
   return undefined;
 }

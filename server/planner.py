@@ -11,7 +11,7 @@ Responsible for:
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union
 from pydantic import BaseModel, Field
 import json
 import re
@@ -28,7 +28,14 @@ logger = logging.getLogger("sih_agent_planner")
 
 class ActionSchema(BaseModel):
     type: str  # CLICK, TYPE, SCROLL, SELECT, NAVIGATE, WAIT, KEY, DONE, SWITCH_TAB
-    targetId: Optional[int] = None
+    # #205: a content-invariant element id is a STRING, and it must survive to
+    # the extension - the executor looks it up by identity rather than by
+    # position, which is what stops a re-render from turning a chosen id into
+    # a different element. This was Optional[int], so pydantic coerced every
+    # stableId back to a positional integer before it left the server and the
+    # whole mechanism was a no-op (verified live against /plan).
+    # Numeric ids are still accepted and still work.
+    targetId: Optional[Union[int, str]] = None
     value: Optional[str] = None
     scrollDirection: Optional[str] = None  # up, down, left, right
     scrollAmount: Optional[int] = None
@@ -444,22 +451,54 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
             # throw and drop the target entirely (target-less actions -> the
             # agent drifting into WAIT loops). Resolve strings explicitly:
             # numeric strings -> int, stableIds -> the element's numeric id.
+            #
+            # #205: a stableId used to be mapped back to the POSITIONAL id here,
+            # which threw away the one thing that makes it useful. The extractor
+            # issues positional ids per snapshot, so the int we substituted could
+            # point at a different element by the time the LLM round-trip
+            # finished and the page re-rendered - and `isConnected` plus the #118
+            # semantic guard both pass, because they check that the element is
+            # unchanged, not that it is the one the planner chose. That made the
+            # entire mechanism a no-op: verified live, /plan returned
+            # `targetId: 1` whether a stableId was supplied or not.
+            #
+            # So a KNOWN stableId now passes through unchanged. The executor's
+            # `resolve()` already branches on the id type and looks a string up in
+            # the stableId registry, so the whole path can carry it; the server
+            # was the only thing preventing it.
+            #
+            # An UNKNOWN stableId is still dropped: the executor has no entry for
+            # it, and a target that cannot be resolved must not masquerade as one
+            # that can.
             if isinstance(target_id, str):
                 s = target_id.strip()
                 if s.isdigit():
                     target_id = int(s)
                 else:
-                    stable_to_id = {
-                        str(el.get("stableId")): el.get("id")
+                    known_stable_ids = {
+                        str(el.get("stableId"))
                         for el in interactive_elements
                         if el.get("stableId")
                     }
-                    target_id = stable_to_id.get(s)
-                    if target_id is None:
-                        logger.warning(
-                            f"targetId '{s}' is not a numeric id nor a known "
-                            f"stableId; dropping the target"
-                        )
+                    if s in known_stable_ids:
+                        # Pass through as the stable id - resolved by identity.
+                        target_id = s
+                    else:
+                        # Legacy path: a planner that names an id we do not
+                        # recognise as a stableId may still be pointing at the
+                        # positional one, or at nothing. Try the positional
+                        # lookup for compatibility, then give up.
+                        stable_to_id = {
+                            str(el.get("stableId")): el.get("id")
+                            for el in interactive_elements
+                            if el.get("stableId")
+                        }
+                        target_id = stable_to_id.get(s)
+                        if target_id is None:
+                            logger.warning(
+                                f"targetId '{s}' is not a numeric id nor a known "
+                                f"stableId; dropping the target"
+                            )
             else:
                 try:
                     target_id = int(target_id)
@@ -524,9 +563,21 @@ ALWAYS include the "checklist" array in your output (rule 16). It is your cross-
         if wait_ms is not None:
             wait_ms = max(0, min(wait_ms, 30_000))
 
-        # Validate target element existence if targetId is required
+        # Validate target element existence if targetId is required.
+        #
+        # #205: the set must contain BOTH id forms. The model may legitimately
+        # emit the content-invariant `stableId` (that is the whole point - it
+        # survives a re-render, the positional id does not), and a validation
+        # set of positional ids only would reject every stableId and fall back
+        # to a conservative action. That is exactly what happened: a known
+        # stableId resolved correctly two steps earlier, then failed here and
+        # came back as the "Target element #... not found on page" fallback.
         valid_element_ids = {
             el.get("id") for el in interactive_elements if el.get("id") is not None
+        } | {
+            str(el.get("stableId"))
+            for el in interactive_elements
+            if el.get("stableId")
         }
 
         confidence = 0.85
