@@ -11,6 +11,8 @@
  */
 
 import { contentTokens, quotedSpans, normalize } from './goalBackstop';
+// #208: recognise an action goal, and check it against the DOM rather than OCR.
+import { isActionGoal, checkboxSatisfied } from './actionGoal';
 
 export interface VisionConfirmItem {
   id: string;
@@ -24,6 +26,10 @@ export interface VisionConfirmVerdict {
   matched: string[];
   /** Which items did NOT match. */
   missing: string[];
+  /** #208: goals OCR structurally cannot prove (action-phrased). Reported
+   *  separately from `missing` so "cannot verify" is never read as "looked
+   *  and did not find it". Never counted as confirmed. */
+  unverifiable: string[];
   /** One-line human summary. */
   detail: string;
 }
@@ -65,12 +71,35 @@ export function targetInOcr(target: string, ocrText: string): boolean {
  */
 export function visionConfirm(
   ocrText: string,
-  openItems: VisionConfirmItem[]
+  openItems: VisionConfirmItem[],
+  /**
+   * #208: the page's checkbox state, read on device. Lets a goal that names an
+   * ACTION ("tick the terms of service") be proven by the DOM rather than by OCR.
+   * Absent = the DOM path is unavailable, and every action goal falls back to
+   * unverifiable - the same verdict it had before, never "assumed fine".
+   */
+  checkboxState?: Record<string, boolean> | null
 ): VisionConfirmVerdict {
   const matched: string[] = [];
   const missing: string[] = [];
+  // #208: goals OCR structurally cannot prove. Reported separately so the log
+  // says "cannot verify this kind of goal" once instead of repeating
+  // "missing" for something that could never match.
+  const unverifiable: string[] = [];
 
   for (const item of openItems) {
+    // #208: an action goal is a state change, not a string - no OCR can ever
+    // contain it. If the page reports a matching checkbox that is checked, the
+    // goal IS proven. Otherwise it is unverifiable, which is NOT the same as
+    // missing: it must not be reported as a target the OCR failed to find.
+    if (isActionGoal(item.description)) {
+      if (checkboxSatisfied(item.description, checkboxState)) {
+        matched.push(item.id);
+      } else {
+        unverifiable.push(item.id);
+      }
+      continue;
+    }
     const targets = itemTargets(item);
     if (targets.length === 0) {
       // No usable signal for this item - treat as "cannot prove", not "proven".
@@ -82,11 +111,18 @@ export function visionConfirm(
     else missing.push(item.id);
   }
 
-  const allProven = openItems.length > 0 && missing.length === 0;
+  const allProven = openItems.length > 0 && missing.length === 0 && unverifiable.length === 0;
+  // #208: lead with the actionable case. "cannot verify by OCR" is a different
+  // situation from "the OCR looked and did not find it", and reading them as the
+  // same is what made this look like a stuck task.
   const detail = allProven
     ? `OCR confirms all ${matched.length} open goal(s)`
-    : missing.length
-      ? `OCR missing target(s): ${missing.join(', ')}`
-      : 'no open goals to confirm';
-  return { confirmed: allProven, matched, missing, detail };
+    : missing.length && unverifiable.length
+      ? `OCR missing target(s): ${missing.join(', ')}; not verifiable by OCR (action goal(s)): ${unverifiable.join(', ')}`
+      : missing.length
+        ? `OCR missing target(s): ${missing.join(', ')}`
+        : unverifiable.length
+          ? `Not verifiable by OCR (action goal(s)): ${unverifiable.join(', ')} - DOM state did not prove them`
+          : 'no open goals to confirm';
+  return { confirmed: allProven, matched, missing, unverifiable, detail };
 }
