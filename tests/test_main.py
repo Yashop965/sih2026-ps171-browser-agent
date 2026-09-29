@@ -195,6 +195,17 @@ class TestParseLLMOutput:
         assert res.action.targetId == 2
 
     def test_resolves_stableid_targetid(self, planner):
+        """#205: a stableId now RESOLVES BY IDENTITY, not to its positional id.
+
+        The old behaviour mapped `searchInput` back to `2`, which discarded
+        the one property that makes a stableId worth using: the extractor
+        re-issues positional ids on every extract(), so an int substituted
+        here can name a different element by the time the action runs, and
+        neither `isConnected` nor the #118 semantic guard can tell.
+
+        The id now crosses as the string it is, and `actions.ts` `resolve()`
+        already looks a string up in the stableId registry.
+        """
         els = [
             make_element(1),
             {"id": 2, "tag": "input", "role": "textbox", "label": "Search",
@@ -202,7 +213,11 @@ class TestParseLLMOutput:
         ]
         res = planner.parse_llm_output('{"type": "CLICK", "targetId": "searchInput"}', els)
         assert res.success
-        assert res.action.targetId == 2
+        # Not 2 - the stableId itself, so the executor resolves by identity.
+        assert res.action.targetId == "searchInput"
+        assert isinstance(res.action.targetId, str)
+        # And it must not have degraded into the "not found on page" fallback.
+        assert "not found on page" not in (res.reasoning or "")
 
     def test_wait_defaults_waitms(self, planner):
         res = planner.parse_llm_output('{"type": "WAIT"}', [])
